@@ -25,7 +25,7 @@
 #define DEFAULT_FREQUENCY 120
 #define BUFFER_SIZE 1024
 #define LBUFFER_SIZE 8192
-#define MESSAGE_SIZE 5242880
+#define MESSAGE_SIZE 524288
 
 typedef struct _Message {
 	char buffer[MESSAGE_SIZE];
