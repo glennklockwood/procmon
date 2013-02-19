@@ -23,7 +23,7 @@
 #define DEFAULT_FREQUENCY 120
 
 void usage(int exitStatus) {
-	printf("procmon [-d] [-f <secs>] [-p <ppid>] -o <outputfile>\n");
+	printf("procmon [-d] [-f <secs>] [-i <secs>] [-p <ppid>] -o <outputfile>\n");
 	printf("Output format is CSV with following fields:\ntimestamp,timedelta,pid,state,ppid,pgrp,session,tty,ttygid,flags,minorFaults,cminorFaults,majorFaults,cmajorFaults,utimeTicks,stimeTicks,cutimeTicks,cstimeTicks,priority,nice,numThreads,itrealvalue,starttime,vsize,rss,rsslim,vpeak,rsspeak,startcode,endcode,startstack,kesp,keip,signal,blocked,sigignore,sigcatch,wchan,nswap,cnswap,exitSignal,processor,cpusAllowed,rtpriority,policy,guestTimeTicks,cguestTimeTicks,blockIODelayTicks,io_rchar,io_wchar,io_syscr,io_syscw,io_readBytes,io_writeBytes,io_cancelledWriteBytes,ticksPerSec,execName,execPath,cwd\n");
 	exit(exitStatus);
 }
@@ -418,6 +418,7 @@ int main(int argc, char** argv) {
 	int parentProcessID = 1; //monitor all processes by default
 	int retCode = 0;
 	int frequency = DEFAULT_FREQUENCY;
+	int initialWait = 0;
 	long clockTicksPerSec = 0;
 	long pageSize = 0;
 	int daemon = 0;
@@ -437,6 +438,17 @@ int main(int argc, char** argv) {
 			frequency = atoi(argv[++i]);
 			if (frequency <= 0) {
 				fprintf(stderr, "Frequency is invalid\n");
+				usage(3);
+			}
+		}
+		if (strcmp(argv[i], "-i") == 0) {
+			if (i + 1 >= argc) {
+				fprintf(stderr, "Not enough arguments for initial wait\n");
+				usage(3);
+			}
+			initialWait = atoi(argv[++i]);
+			if (frequency < 0) {
+				fprintf(stderr, "initial wait is invalid\n");
 				usage(3);
 			}
 		}
@@ -471,7 +483,9 @@ int main(int argc, char** argv) {
 		daemonize();
 	}
 
-	//sleep(10); // initial sleep
+	if (initialWait > 0) {
+		sleep(initialWait); // initial sleep
+	}
 
 	while (1) {
 		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, outputFilename);
