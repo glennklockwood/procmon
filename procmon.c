@@ -10,17 +10,78 @@
  */
 
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include <time.h>
 #include <sys/time.h>
 
 #include "procfmt.h"
 
 #define DEFAULT_FREQUENCY 120
+#define BUFFER_SIZE 1024
+#define LBUFFER_SIZE 8192
+#define MESSAGE_SIZE 5242880
+
+typedef struct _Message {
+	char buffer[MESSAGE_SIZE];
+	char* messagePtr;
+	char outputFilename[BUFFER_SIZE];
+} Message;
+
+/* global variables - these are global for signal handling */
+int cleanUpFlag;
+Message message;
+
+void sig_handler(int signum) {
+	/* if we receive any trapped signal, just set the cleanUpFlag
+	 * this will break the infinite loop and cause the message
+	 * buffer to get written out
+	 */
+	cleanUpFlag = 1;
+}
+
+void sendMessage(Message* message) {
+	if (message == NULL) {
+		return;
+	}
+	if (message->messagePtr == message->buffer) {
+		return;
+	}
+	FILE* output = fopen(message->outputFilename, "a");
+	if (output == NULL) {
+		return;
+	}
+
+	fwrite(message->buffer, sizeof(char), message->messagePtr - message->buffer, output);
+	fclose(output);
+
+	message->messagePtr = message->buffer;
+}
+	
+
+void writeMessage(Message* message, char* fmt, ...) {
+	va_list args;
+	char lbuffer[LBUFFER_SIZE];
+	int len;
+	va_start(args, fmt);
+	vsnprintf(lbuffer, LBUFFER_SIZE, fmt, args);
+	va_end(args);
+	
+	len = strlen(lbuffer);
+	printf("bytes in buffer: %d\n", message->messagePtr - message->buffer);
+	if ((message->messagePtr - message->buffer) + len > (MESSAGE_SIZE - 1)) {
+		sendMessage(message);
+	}
+	memcpy(message->messagePtr, lbuffer, sizeof(char)*len);
+	message->messagePtr += len;
+}
+
+
 
 void usage(int exitStatus) {
 	printf("procmon [-d] [-f <secs>] [-i <secs>] [-p <ppid>] -o <outputfile>\n");
@@ -190,9 +251,7 @@ int parseProcStatus(char *buffer, int bufferLen, procstat* statData) {
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-#define BUFFER_SIZE 1024
-#define LBUFFER_SIZE 8192
-int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFilename) {
+int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, Message* message) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char timebuffer[BUFFER_SIZE];
@@ -216,12 +275,6 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 	struct tm datetime;
 	double timeDelta;
 	int found;
-	FILE* output = fopen(outputFilename, "a");
-
-	if (output == NULL) {
-		fprintf(stderr, "FAILED to open outputfile %s for appending\n", outputFilename);
-		return -2;
-	}
 
 	if (pids == NULL) {
 		fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", allocPids, sizeof(int)*allocPids);
@@ -360,7 +413,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 		l_procData->rss *= pageSize; // convert from pages to bytes
 
 		/* start writing output */
-		fprintf(output,"%s,%d,%c,%d,%d,%d,%d,%d,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%llu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%u,%u,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%ld,%s", timebuffer,l_procData->pid,l_procData->state,l_procData->ppid,l_procData->pgrp,l_procData->session,l_procData->tty,l_procData->tpgid,l_procData->flags,l_procData->minorFaults,l_procData->cminorFaults,l_procData->majorFaults,l_procData->cmajorFaults,l_procData->utime,l_procData->stime,l_procData->cutime,l_procData->cstime,l_procData->priority,l_procData->nice,l_procData->numThreads,l_procData->itrealvalue,l_procData->starttime,l_procData->vsize,l_procData->rss,l_procData->rsslim,l_procData->vmpeak,l_procData->rsspeak,l_procData->startcode,l_procData->endcode,l_procData->startstack,l_procData->kstkesp,l_procData->kstkeip,l_procData->signal,l_procData->blocked,l_procData->sigignore,l_procData->sigcatch,l_procData->wchan,l_procData->nswap,l_procData->cnswap,l_procData->exitSignal,l_procData->processor,l_procData->cpusAllowed,l_procData->rtPriority,l_procData->policy,l_procData->guestTime,l_procData->cguestTime,l_procData->delayacctBlkIOTicks,l_procData->io_rchar,l_procData->io_wchar,l_procData->io_syscr,l_procData->io_syscw,l_procData->io_readBytes,l_procData->io_writeBytes,l_procData->io_cancelledWriteBytes, clockTicksPerSec, l_procData->execName);
+		writeMessage(message,"%s,%d,%c,%d,%d,%d,%d,%d,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%llu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%u,%u,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%ld,%s", timebuffer,l_procData->pid,l_procData->state,l_procData->ppid,l_procData->pgrp,l_procData->session,l_procData->tty,l_procData->tpgid,l_procData->flags,l_procData->minorFaults,l_procData->cminorFaults,l_procData->majorFaults,l_procData->cmajorFaults,l_procData->utime,l_procData->stime,l_procData->cutime,l_procData->cstime,l_procData->priority,l_procData->nice,l_procData->numThreads,l_procData->itrealvalue,l_procData->starttime,l_procData->vsize,l_procData->rss,l_procData->rsslim,l_procData->vmpeak,l_procData->rsspeak,l_procData->startcode,l_procData->endcode,l_procData->startstack,l_procData->kstkesp,l_procData->kstkeip,l_procData->signal,l_procData->blocked,l_procData->sigignore,l_procData->sigcatch,l_procData->wchan,l_procData->nswap,l_procData->cnswap,l_procData->exitSignal,l_procData->processor,l_procData->cpusAllowed,l_procData->rtPriority,l_procData->policy,l_procData->guestTime,l_procData->cguestTime,l_procData->delayacctBlkIOTicks,l_procData->io_rchar,l_procData->io_wchar,l_procData->io_syscr,l_procData->io_syscw,l_procData->io_readBytes,l_procData->io_writeBytes,l_procData->io_cancelledWriteBytes, clockTicksPerSec, l_procData->execName);
 
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", pids[idx]);
 		if ((rbytes = readlink(buffer, lbuffer, LBUFFER_SIZE)) <= 0) {
@@ -368,20 +421,19 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 		} else {
 			lbuffer[rbytes] = 0;
 		}
-		fprintf(output,",%s",lbuffer);
+		writeMessage(message,",%s",lbuffer);
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/cwd", pids[idx]);
 		if ((rbytes = readlink(buffer, lbuffer, LBUFFER_SIZE)) <= 0) {
 			snprintf(lbuffer, LBUFFER_SIZE, "Unknown");
 		} else {
 			lbuffer[rbytes] = 0;
 		}
-		fprintf(output,",%s\n",lbuffer);
+		writeMessage(message,",%s\n",lbuffer);
 	}
 	free(pids);
 	free(indices);
 	free(procData);
 
-	fclose(output);
 	return ntargets;
 }
 
@@ -423,9 +475,21 @@ int main(int argc, char** argv) {
 	long pageSize = 0;
 	int daemon = 0;
 	int i = 0;
-	char outputFilename[BUFFER_SIZE];
-	outputFilename[0] = 0;
 
+	/* initialize global variables */
+	cleanUpFlag = 0;
+	message.buffer[0] = 0;
+	message.messagePtr = message.buffer;
+	message.outputFilename[0] = 0;
+
+	/* setup signal handlers */
+	signal(SIGINT, sig_handler);
+	signal(SIGTERM, sig_handler);
+	signal(SIGXCPU, sig_handler);
+	signal(SIGUSR1, sig_handler);
+	signal(SIGUSR2, sig_handler);
+
+	/* parse command line arguments */
 	for (i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-d") == 0) {
 			daemon = 1;
@@ -468,10 +532,10 @@ int main(int argc, char** argv) {
 				fprintf(stderr, "Not enough arguments for output file\n");
 				usage(3);
 			}
-			strncpy(outputFilename, argv[++i], BUFFER_SIZE);
+			strncpy(message.outputFilename, argv[++i], BUFFER_SIZE);
 		}
 	}
-	if (strlen(outputFilename) == 0) {
+	if (strlen(message.outputFilename) == 0) {
 		fprintf(stderr, "output filename has 0 length\n");
 		usage(3);
 	}
@@ -487,12 +551,20 @@ int main(int argc, char** argv) {
 		sleep(initialWait); // initial sleep
 	}
 
-	while (1) {
-		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, outputFilename);
+	while (cleanUpFlag == 0) {
+		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, &message);
 		if (retCode <= 0) {
+			if (message.messagePtr != message.buffer) {
+				sendMessage(&message);
+			}
 			exit(-1*retCode);
 		}
-		sleep(frequency);
+		if (cleanUpFlag == 0) {
+			sleep(frequency);
+		}
+	}
+	if (message.messagePtr != message.buffer) {
+		sendMessage(&message);
 	}
 	exit(0);
 }
