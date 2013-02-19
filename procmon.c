@@ -1,8 +1,12 @@
 /*
  * procmon.c
  *
- *  Created on: Feb 16, 2013
- *      Author: dmj
+ * Author: Douglas Jacobsen <dmjacobsen@lbl.gov>, NERSC User Services Group
+ * 2013/02/17
+ * Copyright (C) 2012, The Regents of the University of California
+ *
+ * The purpose of the procmon is to read data from /proc for an entire process tree
+ * and save that data at intervals longitudinally
  */
 
 
