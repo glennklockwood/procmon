@@ -215,26 +215,27 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 	struct timeval after;
 	struct tm datetime;
 	double timeDelta;
+	int found;
 	FILE* output = fopen(outputFilename, "a");
 
 	if (output == NULL) {
 		fprintf(stderr, "FAILED to open outputfile %s for appending\n", outputFilename);
-		return 2;
+		return -2;
 	}
 
 	if (pids == NULL) {
 		fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", allocPids, sizeof(int)*allocPids);
-		return 1;
+		return -1;
 	}
 
 	if (gettimeofday(&before, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
-		return 4;
+		return -4;
 	}
 
 	if ( (procDir=opendir("/proc")) == NULL) {
 		fprintf(stderr, "FAILED to open /proc\n");
-		return 3;
+		return -3;
 	}
 
 	while( (dptr = readdir(procDir)) != NULL) {
@@ -248,7 +249,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 			pids = (int*) realloc(pids, sizeof(int)*talloc);
 			if (pids == NULL) {
 				fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", talloc, sizeof(int)*talloc);
-				return 1;
+				return -1;
 			}
 			allocPids = talloc;
 		}
@@ -260,7 +261,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 	memset(procData, 0, sizeof(procstat)*npids);
 	if (procData == NULL) {
 		fprintf(stderr, "FAILED to allocate memory for proc stat data for %d pids (%lu bytes)\n", npids, sizeof(procstat)*npids);
-		return 1;
+		return -1;
 	}
 	for (idx = 0; idx < npids; idx++) {
 		tgt_pid = pids[idx];	
@@ -283,11 +284,16 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 	 * pids */
 	indices = (int*) malloc(sizeof(int)*allocPids);
 	pids[0] = ppid;
+	found = 0;
 	for (idx = 0; idx < npids; idx++) {
 		if (procData[idx].pid == ppid) {
 			indices[0] = idx;
+			found = 1;
 			break;
 		}
+	}
+	if (found == 0) {
+		return 0;
 	}
 	ntargets = 1;
 	nstart = 0;
@@ -311,7 +317,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 
 	if (gettimeofday(&after, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
-		return 4;
+		return -4;
 	}
 
 	timeDelta = (after.tv_sec - before.tv_sec) + (double)((after.tv_usec - before.tv_usec))*1e-06;
@@ -376,6 +382,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, char* outputFil
 	free(procData);
 
 	fclose(output);
+	return ntargets;
 }
 
 static void daemonize() {
@@ -468,8 +475,8 @@ int main(int argc, char** argv) {
 
 	while (1) {
 		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, outputFilename);
-		if (retCode != 0) {
-			exit(retCode);
+		if (retCode <= 0) {
+			exit(-1*retCode);
 		}
 		sleep(frequency);
 	}
