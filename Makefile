@@ -9,7 +9,7 @@ EXTRA=$(OPT_EXTRA)
 CFLAGS=$(EXTRA)
 
 procmon: procmon.o
-	$(CC) -o $@ $^
+	$(CC) -o $@ $^ -static
 procmon.o: procmon.c
 	$(CC) -c $(CFLAGS) -o $@ -c $^
 

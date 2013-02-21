@@ -35,6 +35,7 @@ typedef struct _procstat {
 	long numThreads;
 	long itrealvalue; /* likely zero in all modern kernels */
 	unsigned long long starttime;
+	double startTimestamp;
 	unsigned long vsize; /* virtual mem in bytes */
 	unsigned long rss;   /* number of pages in physical memory */
 	unsigned long rsslim;/* limit of rss bytes */
