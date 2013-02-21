@@ -58,10 +58,12 @@ typedef struct _procstat {
 	unsigned long guestTime;
 	unsigned long cguestTime;
 
+	/* fields from /proc/[pid]/status */
 	unsigned long vmpeak;  /* kB */
 	unsigned long rsspeak; /* kB */
 	int cpusAllowed;
 
+	/* fields from /proc/[pid]/io */
 	unsigned long long io_rchar;
 	unsigned long long io_wchar;
 	unsigned long long io_syscr;
@@ -69,6 +71,13 @@ typedef struct _procstat {
 	unsigned long long io_readBytes;
 	unsigned long long io_writeBytes;
 	unsigned long long io_cancelledWriteBytes;
+
+	/* fields from /proc/[pid]/statm */
+	unsigned long m_size;
+	unsigned long m_resident;
+	unsigned long m_share;
+	unsigned long m_text;
+	unsigned long m_data;
 } procstat;
 
 
