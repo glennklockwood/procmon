@@ -280,6 +280,11 @@ int parseProcStatus(char *buffer, int bufferLen, procstat* statData) {
 				*ptr = 0;
 				if (ptr != sptr) {
 					/* got a real value here */
+					if (stage == 1 && strcmp(label, "Uid") == 0) {
+						statDat->realUid = strtoul(sptr, &ptr, 10);
+					else if (stage == 2 && strcmp(label, "Uid") == 0) {
+						statData->effUid = strtoul(sptr, &ptr, 10);
+					else if (stage == 1 && strcmp(label, "Gid") == 0) {
 					if (stage == 1 && strcmp(label, "VmPeak") == 0) {
 						statData->vmpeak = strtoul(sptr, &ptr, 10);
 					} else if (stage == 1 && strcmp(label, "VmHWM") == 0) {
