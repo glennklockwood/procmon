@@ -57,6 +57,7 @@ void writeMessage(Message* message, char* fmt, ...) {
 
 void usage(int exitStatus) {
 	printf("procmon [-d] [-f <secs>] [-i <secs>] [-if <secs>] [-p <ppid>] -o <outputfile>\n");
+	printf("  -d: daemonize\n  -f: steady-state polling frequency\n  -i: duration of initial phase\n  -if: initial-phase polling frequency\n  -p: root of process-tracking hierarchy\n  -o: output file (text)\n\n");
 	printf("Output format is CSV with following fields:\ntimestamp,timedelta,pid,state,ppid,pgrp,session,tty,ttygid,flags,minorFaults,cminorFaults,majorFaults,cmajorFaults,utimeTicks,stimeTicks,cutimeTicks,cstimeTicks,priority,nice,numThreads,itrealvalue,starttime,vsize,rss,rsslim,vpeak,rsspeak,startcode,endcode,startstack,kesp,keip,signal,blocked,sigignore,sigcatch,wchan,nswap,cnswap,exitSignal,processor,cpusAllowed,rtpriority,policy,guestTimeTicks,cguestTimeTicks,blockIODelayTicks,io_rchar,io_wchar,io_syscr,io_syscw,io_readBytes,io_writeBytes,io_cancelledWriteBytes,m_size,m_resident,m_share,m_text,m_data,ticksPerSec,execName,execPath,cwd\n");
 	exit(exitStatus);
 }
@@ -281,11 +282,14 @@ int parseProcStatus(char *buffer, int bufferLen, procstat* statData) {
 				if (ptr != sptr) {
 					/* got a real value here */
 					if (stage == 1 && strcmp(label, "Uid") == 0) {
-						statDat->realUid = strtoul(sptr, &ptr, 10);
-					else if (stage == 2 && strcmp(label, "Uid") == 0) {
+						statData->realUid = strtoul(sptr, &ptr, 10);
+					} else if (stage == 2 && strcmp(label, "Uid") == 0) {
 						statData->effUid = strtoul(sptr, &ptr, 10);
-					else if (stage == 1 && strcmp(label, "Gid") == 0) {
-					if (stage == 1 && strcmp(label, "VmPeak") == 0) {
+					} else if (stage == 1 && strcmp(label, "Gid") == 0) {
+						statData->realGid = strtoul(sptr, &ptr, 10);
+					} else if (stage == 2 && strcmp(label, "Gid") == 0) {
+						statData->effGid = strtoul(sptr, &ptr, 10);
+					} else if (stage == 1 && strcmp(label, "VmPeak") == 0) {
 						statData->vmpeak = strtoul(sptr, &ptr, 10);
 					} else if (stage == 1 && strcmp(label, "VmHWM") == 0) {
 						statData->rsspeak = strtoull(sptr, &ptr, 10);
@@ -324,6 +328,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	int nchange = 0;
 	int nNewTargets = ntargets;
 	int nstart = 0;
+	int groupid = 0;
 	procstat* procData;
 	struct timeval before;
 	struct timeval after;
@@ -398,6 +403,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	for (idx = 0; idx < npids; idx++) {
 		if (procData[idx].pid == ppid) {
 			indices[0] = idx;
+			groupid = procData[idx].pgrp;
 			found = 1;
 			break;
 		}
@@ -487,7 +493,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		l_procData->m_data *= pageSize;
 
 		/* start writing output */
-		writeMessage(message,"%s,%d,%c,%d,%d,%d,%d,%d,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%0.3f,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%u,%u,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lu,%lu,%lu,%lu,%lu,%ld,%s", timebuffer,l_procData->pid,l_procData->state,l_procData->ppid,l_procData->pgrp,l_procData->session,l_procData->tty,l_procData->tpgid,l_procData->flags,l_procData->minorFaults,l_procData->cminorFaults,l_procData->majorFaults,l_procData->cmajorFaults,l_procData->utime,l_procData->stime,l_procData->cutime,l_procData->cstime,l_procData->priority,l_procData->nice,l_procData->numThreads,l_procData->itrealvalue,l_procData->startTimestamp,l_procData->vsize,l_procData->rss,l_procData->rsslim,l_procData->vmpeak,l_procData->rsspeak,l_procData->startcode,l_procData->endcode,l_procData->startstack,l_procData->kstkesp,l_procData->kstkeip,l_procData->signal,l_procData->blocked,l_procData->sigignore,l_procData->sigcatch,l_procData->wchan,l_procData->nswap,l_procData->cnswap,l_procData->exitSignal,l_procData->processor,l_procData->cpusAllowed,l_procData->rtPriority,l_procData->policy,l_procData->guestTime,l_procData->cguestTime,l_procData->delayacctBlkIOTicks,l_procData->io_rchar,l_procData->io_wchar,l_procData->io_syscr,l_procData->io_syscw,l_procData->io_readBytes,l_procData->io_writeBytes,l_procData->io_cancelledWriteBytes, l_procData->m_size,l_procData->m_resident,l_procData->m_share,l_procData->m_text,l_procData->m_data, clockTicksPerSec, l_procData->execName);
+		writeMessage(message,"%s,%d,%c,%d,%d,%d,%d,%d,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%0.3f,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%u,%u,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu,%lu,%s", timebuffer,l_procData->pid,l_procData->state,l_procData->ppid,l_procData->pgrp,l_procData->session,l_procData->tty,l_procData->tpgid,l_procData->flags,l_procData->minorFaults,l_procData->cminorFaults,l_procData->majorFaults,l_procData->cmajorFaults,l_procData->utime,l_procData->stime,l_procData->cutime,l_procData->cstime,l_procData->priority,l_procData->nice,l_procData->numThreads,l_procData->itrealvalue,l_procData->startTimestamp,l_procData->vsize,l_procData->rss,l_procData->rsslim,l_procData->vmpeak,l_procData->rsspeak,l_procData->startcode,l_procData->endcode,l_procData->startstack,l_procData->kstkesp,l_procData->kstkeip,l_procData->signal,l_procData->blocked,l_procData->sigignore,l_procData->sigcatch,l_procData->wchan,l_procData->nswap,l_procData->cnswap,l_procData->exitSignal,l_procData->processor,l_procData->cpusAllowed,l_procData->rtPriority,l_procData->policy,l_procData->guestTime,l_procData->cguestTime,l_procData->delayacctBlkIOTicks,l_procData->io_rchar,l_procData->io_wchar,l_procData->io_syscr,l_procData->io_syscw,l_procData->io_readBytes,l_procData->io_writeBytes,l_procData->io_cancelledWriteBytes, l_procData->m_size,l_procData->m_resident,l_procData->m_share,l_procData->m_text,l_procData->m_data, clockTicksPerSec, l_procData->realUid, l_procData->effUid, l_procData->realGid, l_procData->effGid, l_procData->execName);
 
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", pids[idx]);
 		if ((rbytes = readlink(buffer, lbuffer, LBUFFER_SIZE)) <= 0) {

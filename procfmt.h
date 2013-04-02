@@ -21,6 +21,10 @@ typedef struct _procstat {
 	int session;
 	int tty;
 	int tpgid;
+	unsigned long realUid;
+	unsigned long effUid;
+	unsigned long realGid;
+	unsigned long effGid;
 	unsigned int flags;
 	unsigned long minorFaults;
 	unsigned long cminorFaults;
