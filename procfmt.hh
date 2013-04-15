@@ -9,12 +9,37 @@
  * and save that data at intervals longitudinally
  */
 
+#include <stdio.h>
+#include <time.h>
+#include <unistd.h>
+#include <exception>
+#include "hdf5.h"
+
 #ifndef PROCFMT_H_
 #define PROCFMT_H_
 
+#define BUFFER_SIZE 1024
+#define LBUFFER_SIZE 8192
+#define EXEBUFFER_SIZE 256
+
+typedef struct _procdata {
+    char execName[EXEBUFFER_SIZE];
+    short cmdArgBytes;
+    char cmdArgs[BUFFER_SIZE];
+    char exePath[BUFFER_SIZE];
+    char cwdPath[BUFFER_SIZE];
+    time_t recTime;
+    unsigned long recTimeUSec;
+    time_t startTime;
+    unsigned long startTimeUSec;
+    pid_t pid;
+    pid_t ppid;
+} procdata;
+
 typedef struct _procstat {
 	int pid;
-	char execName[258];
+    time_t recTime;
+    unsigned long recTimeUSec;
 	char state;
 	int ppid;
 	int pgrp;
@@ -39,7 +64,6 @@ typedef struct _procstat {
 	long numThreads;
 	long itrealvalue; /* likely zero in all modern kernels */
 	unsigned long long starttime;
-	double startTimestamp;
 	unsigned long vsize; /* virtual mem in bytes */
 	unsigned long rss;   /* number of pages in physical memory */
 	unsigned long rsslim;/* limit of rss bytes */
@@ -85,5 +109,42 @@ typedef struct _procstat {
 	unsigned long m_data;
 } procstat;
 
+//char* parseProcStatRecord(char* buffer, char* endPtr, procstat* procData, recordTime* RecordTime, char* pathBuffer, char* cwdBuffer);
+//int writeProcStatRecord(FILE*, procstat*, long clockTicksPerSec);
+int compareProcData(procdata*, procdata*);
+
+class ProcFile {
+public:
+    ProcFile(const char* filename, const char* hostname, const char* identifier);
+    bool write_procdata(procdata* start_ptr, int count);
+    bool write_procstat(procstat* start_ptr, int count);
+    ~ProcFile();
+private:
+    bool write_dataset(const char* dsName, hid_t type, void* start_pointer, int count, int chunkSize);
+    hid_t file;
+    hid_t hostGroup;
+    hid_t idGroup;
+
+    /* identifiers for string types */
+    hid_t strType_exeBuffer;
+    hid_t strType_buffer;
+
+    /* identifiers for complex types */
+    hid_t type_procdata;
+    hid_t type_procstat;
+};
+
+class ProcFileException : public std::exception {
+public:
+    ProcFileException(const char* t_error) {
+        error = t_error;
+    }
+
+    virtual const char* what() const throw() {
+        return error;
+    }
+private:
+    const char *error;
+};
 
 #endif /* PROCFMT_H_ */

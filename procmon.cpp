@@ -19,22 +19,16 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <math.h>
 
-#include "procfmt.h"
+#include "procfmt.hh"
 
 #define DEFAULT_FREQUENCY 120
 #define DEFAULT_INITFREQ 1
-#define BUFFER_SIZE 1024
-#define LBUFFER_SIZE 8192
-
-typedef struct _Message {
-	char outputFilename[BUFFER_SIZE];
-	FILE* output;
-} Message;
 
 /* global variables - these are global for signal handling */
 int cleanUpFlag;
-Message message;
 
 void sig_handler(int signum) {
 	/* if we receive any trapped signal, just set the cleanUpFlag
@@ -44,21 +38,10 @@ void sig_handler(int signum) {
 	cleanUpFlag = 1;
 }
 
-void writeMessage(Message* message, char* fmt, ...) {
-	va_list args;
-
-	va_start(args, fmt);
-	if (message->output != NULL) {
-		vfprintf(message->output, fmt, args);
-	}
-	va_end(args);
-	
-}
-
 void usage(int exitStatus) {
-	printf("procmon [-d] [-f <secs>] [-i <secs>] [-if <secs>] [-p <ppid>] -o <outputfile>\n");
-	printf("  -d: daemonize\n  -f: steady-state polling frequency\n  -i: duration of initial phase\n  -if: initial-phase polling frequency\n  -p: root of process-tracking hierarchy\n  -o: output file (text)\n\n");
-	printf("Output format is CSV with following fields:\ntimestamp,timedelta,pid,state,ppid,pgrp,session,tty,ttygid,flags,minorFaults,cminorFaults,majorFaults,cmajorFaults,utimeTicks,stimeTicks,cutimeTicks,cstimeTicks,priority,nice,numThreads,itrealvalue,starttime,vsize,rss,rsslim,vpeak,rsspeak,startcode,endcode,startstack,kesp,keip,signal,blocked,sigignore,sigcatch,wchan,nswap,cnswap,exitSignal,processor,cpusAllowed,rtpriority,policy,guestTimeTicks,cguestTimeTicks,blockIODelayTicks,io_rchar,io_wchar,io_syscr,io_syscw,io_readBytes,io_writeBytes,io_cancelledWriteBytes,m_size,m_resident,m_share,m_text,m_data,ticksPerSec,execName,execPath,cwd\n");
+	printf("procmon [-d] [-f <secs>] [-i <secs>] [-if <secs>] [-p <ppid>] [-I <identifier>] -o <outputfile>\n");
+	printf("  -d: daemonize\n  -f: steady-state polling frequency\n  -i: duration of initial phase\n  -if: initial-phase polling frequency\n  -p: root of process-tracking hierarchy\n  -I: identifier used in output file (/<hostname>/<identifier>)\n  -o: output file (hdf5)\n\n");
+	printf("Output format is HD5 containing two sets of records:\n(1) timestamp,timedelta,pid,state,ppid,pgrp,session,tty,ttygid,flags,minorFaults,cminorFaults,majorFaults,cmajorFaults,utimeTicks,stimeTicks,cutimeTicks,cstimeTicks,priority,nice,numThreads,itrealvalue,starttime,vsize,rss,rsslim,vpeak,rsspeak,startcode,endcode,startstack,kesp,keip,signal,blocked,sigignore,sigcatch,wchan,nswap,cnswap,exitSignal,processor,cpusAllowed,rtpriority,policy,guestTimeTicks,cguestTimeTicks,blockIODelayTicks,io_rchar,io_wchar,io_syscr,io_syscw,io_readBytes,io_writeBytes,io_cancelledWriteBytes,m_size,m_resident,m_share,m_text,m_data,ticksPerSec,realUid,effUid,realGid,effGid\n(2) execName, cmdArgBytes, cmdArgs, exePath, cwdPath, recordTime, recordTimeUSec, startTime, startTimeUSec, pid, ppid\n");
 	exit(exitStatus);
 }
 
@@ -73,7 +56,7 @@ int parseProcStat(char *buffer, int bufferLen, procstat* statData) {
 			*ptr = 0;
 			switch (idx) {
 				case 0:		statData->pid = atoi(sptr);  break;
-				case 1:		snprintf(statData->execName, 257, "%s", sptr); break;
+				case 1:		break; // do nothing with execName -- pick it up later from status
 				case 2:		statData->state = *sptr; break;
 				case 3:		statData->ppid = atoi(sptr); break;
 				case 4:		statData->pgrp = atoi(sptr); break;
@@ -124,7 +107,7 @@ int parseProcStat(char *buffer, int bufferLen, procstat* statData) {
 	return 0;
 }
 
-int parseProcIO(char *buffer, int bufferLen, procstat* statData) {
+int parseProcIO(char *buffer, int bufferLen, procdata* procData, procstat* statData) {
 	char *ptr, *sptr, *eptr;
 	char* label;
 	int idx = 0;
@@ -227,8 +210,7 @@ time_t getBootTime() {
 	return timestamp;
 }
 
-
-int parseProcStatM(char* buffer, int bufferLen, procstat* statData) {
+int parseProcStatM(char* buffer, int bufferLen, procdata* procData, procstat* statData) {
 	char *ptr, *sptr, *eptr;
 	int idx = 0;
 
@@ -254,7 +236,7 @@ int parseProcStatM(char* buffer, int bufferLen, procstat* statData) {
 	return 0;
 }
 
-int parseProcStatus(char *buffer, int bufferLen, procstat* statData) {
+int parseProcStatus(char *buffer, int bufferLen, procdata* procData, procstat* statData) {
 	char *ptr, *sptr, *eptr;
 	char* label;
 	int idx = 0;
@@ -281,7 +263,9 @@ int parseProcStatus(char *buffer, int bufferLen, procstat* statData) {
 				*ptr = 0;
 				if (ptr != sptr) {
 					/* got a real value here */
-					if (stage == 1 && strcmp(label, "Uid") == 0) {
+                    if (stage == 1 && strcmp(label, "Name") == 0) {
+                        snprintf(procData->execName, EXEBUFFER_SIZE, "%s", sptr);
+                    } else if (stage == 1 && strcmp(label, "Uid") == 0) {
 						statData->realUid = strtoul(sptr, &ptr, 10);
 					} else if (stage == 2 && strcmp(label, "Uid") == 0) {
 						statData->effUid = strtoul(sptr, &ptr, 10);
@@ -310,7 +294,7 @@ int parseProcStatus(char *buffer, int bufferLen, procstat* statData) {
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime, Message* message) {
+int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime, ProcFile* output) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char timebuffer[BUFFER_SIZE];
@@ -319,8 +303,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	FILE* fp;
 	int tgt_pid;
 	size_t rbytes;
-	int* pids = (int*) malloc(sizeof(int)*8192);
-	int* indices;
+	int *pids = (int*) malloc(sizeof(int)*8192);
 	int allocPids = 8192;
 	int npids = 0;
 	int ntargets = 0;
@@ -345,8 +328,6 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		fprintf(stderr, "FAILED to get time (before)\n");
 		return -4;
 	}
-
-	message->output = fopen(message->outputFilename, "a");
 
 	if ( (procDir=opendir("/proc")) == NULL) {
 		fprintf(stderr, "FAILED to open /proc\n");
@@ -397,7 +378,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	/* explicitly re-using the pids buffer at this point; npids is now only needed
 	 * for knowing the limits of procData; now ntargets will hold the limit for
 	 * pids */
-	indices = (int*) malloc(sizeof(int)*allocPids);
+	int indices[allocPids];
 	pids[0] = ppid;
 	found = 0;
 	for (idx = 0; idx < npids; idx++) {
@@ -441,12 +422,26 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S", &datetime);
 	snprintf(timebuffer, BUFFER_SIZE, "%s.%03u,%f", buffer, before.tv_usec/1000, timeDelta);
 
+    procstat all_procstat[ntargets];
+    procdata all_procdata[ntargets];
+    bzero(all_procdata, sizeof(procdata)*ntargets);
+
 	/* for each pid, capture:
 	 *   io data, peak rss/vmem values, exe, cwd
 	 */
 	for (idx = 0; idx < ntargets; idx++) {
 		ssize_t rbytes = 0;
-		procstat* l_procData = &(procData[indices[idx]]);
+        double temp_time = 0;
+		procstat* statData = &(procData[indices[idx]]);
+        procdata* temp_procData = &(all_procdata[idx]); 
+
+        temp_procData.recTime = before.tv_sec;
+        temp_procData.recTimeUSec = before.tv_usec;
+        temp_procData.pid = statData->pid;
+        temp_procData.ppid = statData->ppid;
+
+        statData->recTime = before.tv_sec;
+        statData->recTimeUSec = before.tv_usec;
 		
 		/* read io */
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/io", pids[idx]);
@@ -454,7 +449,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		if (fp != NULL) {
 			rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
 			if (rbytes > 0) {
-				parseProcIO(lbuffer, rbytes, l_procData);
+				parseProcIO(lbuffer, rbytes, &temp_procData, statData);
 			}
 			fclose(fp);
 		}
@@ -465,7 +460,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		if (fp != NULL) {
 			rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
 			if (rbytes > 0) {
-				parseProcStatus(lbuffer, rbytes, l_procData);
+				parseProcStatus(lbuffer, rbytes, &temp_procData, statData);
 			}
 			fclose(fp);
 		}
@@ -476,48 +471,57 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		if (fp != NULL) {
 			rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
 			if (rbytes > 0) {
-				parseProcStatM(lbuffer, rbytes, l_procData);
+				parseProcStatM(lbuffer, rbytes, &temp_procData, statData);
 			}
 			fclose(fp);
 		}
 
 		/* fix the units of each field */
-		l_procData->startTimestamp = boottime + l_procData->starttime / (double)clockTicksPerSec;
-		l_procData->vmpeak *= 1024; // convert from kb to bytes
-		l_procData->rsspeak *= 1024;
-		l_procData->rss *= pageSize; // convert from pages to bytes
-		l_procData->m_size *= pageSize;
-		l_procData->m_resident *= pageSize;
-		l_procData->m_share *= pageSize;
-		l_procData->m_text *= pageSize;
-		l_procData->m_data *= pageSize;
-
-		/* start writing output */
-		writeMessage(message,"%s,%d,%c,%d,%d,%d,%d,%d,%u,%lu,%lu,%lu,%lu,%lu,%lu,%ld,%ld,%ld,%ld,%ld,%ld,%0.3f,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%u,%u,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lu,%lu,%lu,%lu,%lu,%ld,%lu,%lu,%lu,%lu,%s", timebuffer,l_procData->pid,l_procData->state,l_procData->ppid,l_procData->pgrp,l_procData->session,l_procData->tty,l_procData->tpgid,l_procData->flags,l_procData->minorFaults,l_procData->cminorFaults,l_procData->majorFaults,l_procData->cmajorFaults,l_procData->utime,l_procData->stime,l_procData->cutime,l_procData->cstime,l_procData->priority,l_procData->nice,l_procData->numThreads,l_procData->itrealvalue,l_procData->startTimestamp,l_procData->vsize,l_procData->rss,l_procData->rsslim,l_procData->vmpeak,l_procData->rsspeak,l_procData->startcode,l_procData->endcode,l_procData->startstack,l_procData->kstkesp,l_procData->kstkeip,l_procData->signal,l_procData->blocked,l_procData->sigignore,l_procData->sigcatch,l_procData->wchan,l_procData->nswap,l_procData->cnswap,l_procData->exitSignal,l_procData->processor,l_procData->cpusAllowed,l_procData->rtPriority,l_procData->policy,l_procData->guestTime,l_procData->cguestTime,l_procData->delayacctBlkIOTicks,l_procData->io_rchar,l_procData->io_wchar,l_procData->io_syscr,l_procData->io_syscw,l_procData->io_readBytes,l_procData->io_writeBytes,l_procData->io_cancelledWriteBytes, l_procData->m_size,l_procData->m_resident,l_procData->m_share,l_procData->m_text,l_procData->m_data, clockTicksPerSec, l_procData->realUid, l_procData->effUid, l_procData->realGid, l_procData->effGid, l_procData->execName);
+        temp_time = boottime + statData->starttime / (double)clockTicksPerSec;
+        temp_procData.startTime = (time_t) floor(temp_time);
+        temp_procData.startTimeUSec = (time_t) floor( (temp_time - temp_procData.startTime) * 1e6);
+		statData->vmpeak *= 1024; // convert from kb to bytes
+		statData->rsspeak *= 1024;
+		statData->rss *= pageSize; // convert from pages to bytes
+		statData->m_size *= pageSize;
+		statData->m_resident *= pageSize;
+		statData->m_share *= pageSize;
+		statData->m_text *= pageSize;
+		statData->m_data *= pageSize;
 
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", pids[idx]);
-		if ((rbytes = readlink(buffer, lbuffer, LBUFFER_SIZE)) <= 0) {
-			snprintf(lbuffer, LBUFFER_SIZE, "Unknown");
+		if ((rbytes = readlink(buffer, temp_procData.exePath, BUFFER_SIZE)) <= 0) {
+			snprintf(temp_procData.exePath, BUFFER_SIZE, "Unknown");
 		} else {
-			lbuffer[rbytes] = 0;
+			temp_procData.exePath[rbytes] = 0;
 		}
-		writeMessage(message,",%s",lbuffer);
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/cwd", pids[idx]);
-		if ((rbytes = readlink(buffer, lbuffer, LBUFFER_SIZE)) <= 0) {
-			snprintf(lbuffer, LBUFFER_SIZE, "Unknown");
+		if ((rbytes = readlink(buffer, temp_procData.cwdPath, BUFFER_SIZE)) <= 0) {
+			snprintf(temp_procData.cwdPath, BUFFER_SIZE, "Unknown");
 		} else {
-			lbuffer[rbytes] = 0;
+			temp_procData.cwdPath[rbytes] = 0;
 		}
-		writeMessage(message,",%s\n",lbuffer);
+        snprintf(buffer, BUFFER_SIZE, "/proc/%d/cmdline", pids[idx]);
+        fp = fopen(buffer, "r");
+        if (fp != NULL) {
+            rbytes = fread(temp_procData.cmdArgs, sizeof(char), BUFFER_SIZE, fp);
+            if (rbytes == BUFFER_SIZE) {
+                temp_procData.cmdArgs[rbytes] = 0;
+                temp_procData.cmdArgBytes = rbytes;
+            }
+            fclose(fp);
+        } else {
+            snprintf(temp_procData.cmdArgs, BUFFER_SIZE, "Unknown");
+            temp_procData.cmdArgBytes = 0;
+        }
+        memcpy(&(all_procstat[idx]), statData, sizeof(procstat));
 	}
-	free(pids);
-	free(indices);
-	free(procData);
 
-	if (message->output != NULL) {
-		fclose(message->output);
-		message->output = NULL;
-	}
+    output->write_procstat(all_procstat, ntargets);
+    output->write_procdata(all_procstat, ntargets);
+
+	free(pids);
+	free(procData);
 
 	return ntargets;
 }
@@ -563,11 +567,18 @@ int main(int argc, char** argv) {
 	int i = 0;
 	struct timeval startTime;
 	time_t boottime;
+    char outputFilename[BUFFER_SIZE];
+    char hostname[BUFFER_SIZE];
+    char identifier[BUFFER_SIZE];
+    hid_t file_id, hgroup_id, collection_id;
+    herr_t status;
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
-	message.output = NULL;
-	message.outputFilename[0] = 0;
+
+    if (gethostname(hostname, BUFFER_SIZE) != 0) {
+        snprintf(hostname, BUFFER_SIZE, "Unknown");
+    }
 
 	/* setup signal handlers */
 	signal(SIGINT, sig_handler);
@@ -630,10 +641,17 @@ int main(int argc, char** argv) {
 				fprintf(stderr, "Not enough arguments for output file\n");
 				usage(3);
 			}
-			strncpy(message.outputFilename, argv[++i], BUFFER_SIZE);
+			strncpy(outputFilename, argv[++i], BUFFER_SIZE);
 		}
+        if (strcmp(argv[i], "-I") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Not enought arguments for identifier\n");
+                usage(3);
+            }
+            strncpy(identifier, argv[++i], BUFFER_SIZE);
+        }
 	}
-	if (strlen(message.outputFilename) == 0) {
+	if (strlen(outputFilename) == 0) {
 		fprintf(stderr, "output filename has 0 length\n");
 		usage(3);
 	}
@@ -646,13 +664,15 @@ int main(int argc, char** argv) {
 		daemonize();
 	}
 
+    ProcFile outputFile(outputFilename, hostname, identifier);
+
 	if (gettimeofday(&startTime, NULL) != 0) {
 		fprintf(stderr, "FAILED to get start time\n");
 		return 4;
 	}
 
 	while (cleanUpFlag == 0) {
-		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, boottime, &message);
+		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, boottime, &outputFile);
 		if (retCode <= 0) {
 			exit(-1*retCode);
 		}
@@ -673,6 +693,7 @@ int main(int argc, char** argv) {
 			sleep(sleepInterval);
 		}
 	}
+
 	exit(0);
 }
 
