@@ -578,8 +578,7 @@ int main(int argc, char** argv) {
     char outputFilename[BUFFER_SIZE];
     char hostname[BUFFER_SIZE];
     char identifier[BUFFER_SIZE];
-    hid_t file_id, hgroup_id, collection_id;
-    herr_t status;
+	ProcFileFormat fileFormat = FILE_FORMAT_TEXT;
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
@@ -599,6 +598,17 @@ int main(int argc, char** argv) {
 	for (i = 1; i < argc; i++) {
 		if (strcmp(argv[i], "-d") == 0) {
 			daemon = 1;
+		}
+		if (strcmp(argv[i], "--format") == 0) {
+			if (i + 1 <= argc) {
+				i++;
+				if (strcmp(argv[i], "hdf5") == 0) {
+					fileFormat = FILE_FORMAT_HDF5;
+				} else if (strcmp(argv[i], "text") == 0) {
+					fileFormat = FILE_FORMAT_TEXT;
+				}
+			}
+			printf("format: %s; %d\n", argv[i], fileFormat);
 		}
 		if (strcmp(argv[i], "-f") == 0) {
 			if (i + 1 >= argc) {
@@ -672,7 +682,7 @@ int main(int argc, char** argv) {
 		daemonize();
 	}
 
-    ProcFile outputFile(outputFilename, hostname, identifier, FILE_FORMAT_TEXT, FILE_MODE_WRITE);
+    ProcFile outputFile(outputFilename, hostname, identifier, fileFormat, FILE_MODE_WRITE);
 
 	if (gettimeofday(&startTime, NULL) != 0) {
 		fprintf(stderr, "FAILED to get start time\n");
