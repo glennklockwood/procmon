@@ -22,10 +22,8 @@
 #include <sys/stat.h>
 #include <math.h>
 
-#include "procfmt.hh"
-
-#define DEFAULT_FREQUENCY 120
-#define DEFAULT_INITFREQ 1
+#include "procmon.hh"
+#include "ProcIO.hh"
 
 /* global variables - these are global for signal handling */
 int cleanUpFlag;
@@ -38,27 +36,39 @@ void sig_handler(int signum) {
 	cleanUpFlag = 1;
 }
 
-void usage(int exitStatus) {
-	printf("procmon [-d] [-f <secs>] [-i <secs>] [-if <secs>] [-p <ppid>] [-I <identifier>] -o <outputfile>\n");
-	printf("  -d: daemonize\n  -f: steady-state polling frequency\n  -i: duration of initial phase\n  -if: initial-phase polling frequency\n  -p: root of process-tracking hierarchy\n  -I: identifier used in output file (/<hostname>/<identifier>)\n  -o: output file (hdf5)\n\n");
-	printf("Output format is almost csv (though text fields may include NULL-termination bytes and delimiters) containing: timestamp,timedelta,pid,state,ppid,pgrp,session,tty,ttygid,flags,utimeTicks,stimeTicks,priority,nice,numThreads,vsize,rss,rsslim,vpeak,rsspeak,signal,blocked,sigignore,sigcatch,cpusAllowed,rtpriority,policy,guestTimeTicks,blockIODelayTicks,io_rchar,io_wchar,io_syscr,io_syscw,io_readBytes,io_writeBytes,io_cancelledWriteBytes,m_size,m_resident,m_share,m_text,m_data,ticksPerSec,realUid,effUid,realGid,effGid\n(2) execNameBytes, execName, cmdArgBytes, cmdArgs, exePathBytes, exePath, cwdPathBytes, cwdPath, recordTime, recordTimeUSec, startTime, startTimeUSec, pid, ppid\n");
-	exit(exitStatus);
-}
-
-int parseProcStat(char *buffer, int bufferLen, procstat* statData, time_t boottime, long clockTicksPerSec) {
-	char *ptr, *sptr, *eptr;
+int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
+	char *ptr = NULL;
+    char *sptr = NULL;
+    char *eptr = NULL;
 	ptr = buffer;
 	sptr = buffer;
 	eptr = buffer + bufferLen;
 	int idx = 0;
     unsigned long long starttime;
     double temp_time;
-	for ( ; ptr != eptr; ptr++) {
+    char filename[BUFFER_SIZE];
+    char lbuffer[LBUFFER_SIZE];
+    FILE* fp = NULL;
+
+    snprintf(filename, BUFFER_SIZE, "/proc/%d/stat", pid);
+    fp = fopen(filename, "r");
+    if (fp == NULL) return -1;
+
+    while (true) {
+        if (sptr == NULL || ptr == eptr) {
+            rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+            if (rbytes == 0) break;
+        }
 		if (*ptr == ' ' || *ptr == 0) {
 			*ptr = 0;
 			switch (idx) {
 				case 0:		statData->pid = atoi(sptr);  break;
-				//case 1:		break; // do nothing with execName -- pick it up later from status
+				case 1:		{
+                    int n = ((ptr - 1) - (sptr+1));
+                    n = n > EXEBUFFER_SIZE ? EXEBUFFER_SIZE : n;
+                    memcpy(procData->execName, sptr+1, n);
+                    procData->execName[n] = 0;
+                }
 				case 2:		statData->state = *sptr; break;
 				case 3:		statData->ppid = atoi(sptr); break;
 				case 4:		statData->pgrp = atoi(sptr); break;
@@ -110,27 +120,40 @@ int parseProcStat(char *buffer, int bufferLen, procstat* statData, time_t bootti
 			idx++;
 			sptr = ptr+1;
 		}
+        ptr++;
 	}
+    fclose(fp);
 	return 0;
 }
 
-int parseProcIO(char *buffer, int bufferLen, procdata* procData, procstat* statData) {
-	char *ptr, *sptr, *eptr;
+int parseProcIO(int pid, procdata* procData, procstat* statData) {
+	char *ptr = NULL;
+    char *sptr = NULL;
+    char *eptr = NULL;
 	char* label;
 	int idx = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
+    char filename[BUFFER_SIZE];
+    char lbuffer[LBUFFER_SIZE];
+    FILE* fp = NULL;
 
-	ptr = buffer;
-	sptr = buffer;
-	eptr = buffer + bufferLen;
-	for ( ; ptr != eptr; ptr++) {
+    snprintf(filename, BUFFER_SIZE, "/proc/%d/io", pid);
+    fp = fopen(filename, "r");
+    if (fp == NULL) return -1;
+
+    while (true) {
+        if (sptr == NULL || ptr == eptr) {
+            rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+            if (rbytes == 0) break;
+        }
 		if (stage <= 0) {
 			if (*ptr == ':') {
 				*ptr = 0;
 				label = sptr;
 				sptr = ptr + 1;
 				stage = 1;
-				continue;
+                ptr++;
+                continue;
 			}
 		}
 		if (stage > 0) {
@@ -159,15 +182,18 @@ int parseProcIO(char *buffer, int bufferLen, procdata* procData, procstat* statD
 					stage++;
 				}
 				sptr = ptr + 1;
-				continue;
 			}
 		}
+        ptr++;
 	}
+    fclose(fp);
 	return 0;
 }
 
 time_t getBootTime() {
-	char *ptr, *sptr, *eptr;
+	char *ptr = NULL;
+    char *sptr = NULL;
+    char *eptr = NULL;
 	char* label;
 	int idx = 0;
 	int rbytes = 0;
@@ -217,14 +243,24 @@ time_t getBootTime() {
 	return timestamp;
 }
 
-int parseProcStatM(char* buffer, int bufferLen, procdata* procData, procstat* statData) {
-	char *ptr, *sptr, *eptr;
+int parseProcStatM(int pid, procdata* procData, procstat* statData) {
+	char *ptr = NULL;
+    char *sptr = NULL;
+    char *eptr = NULL;
 	int idx = 0;
+    char filename[BUFFER_SIZE];
+    char lbuffer[LBUFFER_SIZE];
+    FILE* fp = NULL;
 
-	ptr = buffer;
-	sptr = buffer;
-	eptr = buffer + bufferLen;
-	for ( ; ptr != eptr; ptr++) {
+    snprintf(filename, BUFFER_SIZE, "/proc/%d/statm", pid);
+    fp = fopen(filename, "r");
+    if (fp == NULL) return -1;
+
+    while (true) {
+        if (sptr == NULL || ptr == eptr) {
+            rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+            if (rbytes == 0) break;
+        }
 		if (*ptr == ' ' || *ptr == '\n' || *ptr == 0) {
 			*ptr = 0;
 			switch (idx) {
@@ -239,26 +275,76 @@ int parseProcStatM(char* buffer, int bufferLen, procdata* procData, procstat* st
 			idx++;
 			sptr = ptr + 1;
 		}
+        ptr++;
 	}
+    fclose(fp);
 	return 0;
 }
 
-int parseProcStatus(char *buffer, int bufferLen, procdata* procData, procstat* statData) {
-	char *ptr, *sptr, *eptr;
+int fileFillBuffer(FILE* fp, char* buffer, int buffSize, char** sptr, char** ptr, char** eptr) {
+    if (fp == NULL) return 0;
+    if (*sptr != NULL) {
+        bcopy(buffer, *sptr, sizeof(char)*(*ptr - *sptr));
+        *ptr = buffer + (*ptr - *sptr);
+        *sptr = buffer;
+    } else {
+        *sptr = buffer;
+        *ptr = buffer;
+    }
+    int readBytes = fread(*ptr, sizeof(char), buffSize - (*ptr - *sptr), fp);
+    *eptr = *ptr + readBytes;
+    return readBytes;
+}
+
+
+/*    parseProcStatus
+---------------------------
+Purpose: Parses the relevant portions of /proc/<pid>/status into a procstat
+structure; optionally return list of member gids for GridEngine integration
+
+Arguments:
+         pid: pid in /proc to examine
+      tgtGid: if a gid for monitoring is known, then that gid should be specified
+    statData: procstat datastruct to begin populating
+     gidList: if monitoring-gid is unknown, array to populate for further analysis
+gidListLimit: integral limit of ints in gidList
+
+Effects: populates some fields in statData; if tgtGid < 0 AND gidList!=NULL 
+AND gidListLimit > 0 then gidList will be populated with the process gids up 
+to gidListLimit entries
+
+Returns: number of Groups matching tgtGid criteria (all groups match if 
+tgtGid < 0); -1 for file error error
+
+*/
+int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int gidListLimit) {
+	char *ptr = NULL;
+    char *sptr = NULL;
+    char *eptr = NULL;
+    char filename[BUFFER_SIZE];
+    char lbuffer[LBUFFER_SIZE];
 	char* label;
 	int idx = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
+    int retVal = 0;
+	FILE* fp = NULL;
+    int rbytes = 0;
+    snprintf(filename, BUFFER_SIZE, "/proc/%d/status", pid);
+    fp = fopen(filename, "r");
+    if (fp == NULL) return -1;
 
-	ptr = buffer;
-	sptr = buffer;
-	eptr = buffer + bufferLen;
-	for ( ; ptr != eptr; ptr++) {
+    while (true) {
+        if (sptr == NULL || ptr == eptr) {
+            rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+            if (rbytes == 0) break;
+        }
 		if (stage <= 0) {
 			if (*ptr == ':') {
 				*ptr = 0;
 				label = sptr;
 				sptr = ptr + 1;
 				stage = 1;
+                ptr++;
 				continue;
 			}
 		}
@@ -270,8 +356,13 @@ int parseProcStatus(char *buffer, int bufferLen, procdata* procData, procstat* s
 				*ptr = 0;
 				if (ptr != sptr) {
 					/* got a real value here */
-                    if (stage == 1 && strcmp(label, "Name") == 0) {
+                    /*if (stage == 1 && strcmp(label, "Name") == 0) {
                         snprintf(procData->execName, EXEBUFFER_SIZE, "%s", sptr);
+                    } else */
+                    if (stage == 1 && strcmp(label, "Pid") == 0) {
+						statData->pid = (unsigned int) strtoul(sptr, &ptr, 10);
+                    } else if (stage == 1 && strcmp(label, "PPid") == 0) {
+						statData->ppid = (unsigned int) strtoul(sptr, &ptr, 10);
                     } else if (stage == 1 && strcmp(label, "Uid") == 0) {
 						statData->realUid = strtoul(sptr, &ptr, 10);
 					} else if (stage == 2 && strcmp(label, "Uid") == 0) {
@@ -286,22 +377,30 @@ int parseProcStatus(char *buffer, int bufferLen, procdata* procData, procstat* s
 						statData->rsspeak = strtoull(sptr, &ptr, 10);
 					} else if (strcmp(label, "Cpus_allowed") == 0) {
 						statData->cpusAllowed = atoi(sptr);
-					}
+					} else if (stage > 0 && strcmp(label, "Groups") == 0) {
+                        int gid = atoi(sptr);
+                        if (tgtGid > 0 && tgtGid == gid) {
+                            retVal++;
+                        } else if (tgtGid < 0 && gidList != NULL && stage != gidListLimit) {
+                            gidList[retVal++] = gid;
+                        }
+                    }
 					stage++;
 				}
 				sptr = ptr + 1;
-				continue;
 			}
 		}
+        ptr++;
 	}
-	return 0;
+    fclose(fp);
+	return retVal;
 }
 
 /* on first pass:
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime, ProcFile* output) {
+int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime, std::vector<ProcIO*>* output) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char timebuffer[BUFFER_SIZE];
@@ -318,7 +417,6 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	int nchange = 0;
 	int nNewTargets = ntargets;
 	int nstart = 0;
-	int groupid = 0;
 	procstat* procData;
 	struct timeval before;
 	struct timeval after;
@@ -368,18 +466,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	}
 	for (idx = 0; idx < npids; idx++) {
 		tgt_pid = pids[idx];	
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/stat", tgt_pid);
-		fp = fopen(buffer, "r");
-		if (fp == NULL) {
-			continue;
-		}
-		rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
-		if (rbytes == 0) {
-			continue;
-		}
-
-		parseProcStat(lbuffer, rbytes, &(procData[idx]), boottime, clockTicksPerSec);
-		fclose(fp);
+		procData[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procData[idx]), NULL, 0);
 	}
 
 	/* explicitly re-using the pids buffer at this point; npids is now only needed
@@ -388,18 +475,15 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	int indices[allocPids];
 	pids[0] = ppid;
 	found = 0;
+    ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
-		if (procData[idx].pid == ppid) {
-			indices[0] = idx;
-			groupid = procData[idx].pgrp;
-			found = 1;
-			break;
+		if (procData[idx].pid == ppid || procData[idx].state > 0) {
+			indices[ntargets++] = idx;
 		}
 	}
-	if (found == 0) {
+	if (ntargets == 0) {
 		return 0;
 	}
-	ntargets = 1;
 	nstart = 0;
 	do {
 		int innerIdx = 0;
@@ -442,6 +526,10 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		procstat* statData = &(procData[indices[idx]]);
         procdata* temp_procData = &(all_procdata[idx]); 
 
+		/* read stat */
+		parseProcStat(pids[idx], statData, temp_procData, boottime, clockTicksPerSec);
+
+        /* populate time records */
         temp_procData->recTime = before.tv_sec;
         temp_procData->recTimeUSec = before.tv_usec;
         statData->recTime = before.tv_sec;
@@ -455,37 +543,10 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
         statData->recTimeUSec = before.tv_usec;
 		
 		/* read io */
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/io", pids[idx]);
-		fp = fopen(buffer, "r");
-		if (fp != NULL) {
-			rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
-			if (rbytes > 0) {
-				parseProcIO(lbuffer, rbytes, temp_procData, statData);
-			}
-			fclose(fp);
-		}
-
-		/* read status */
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/status", pids[idx]);
-		fp = fopen(buffer, "r");
-		if (fp != NULL) {
-			rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
-			if (rbytes > 0) {
-				parseProcStatus(lbuffer, rbytes, temp_procData, statData);
-			}
-			fclose(fp);
-		}
+		parseProcIO(pids[idx], temp_procData, statData);
 
 		/* read statm */
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/statm", pids[idx]);
-		fp = fopen(buffer, "r");
-		if (fp != NULL) {
-			rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
-			if (rbytes > 0) {
-				parseProcStatM(lbuffer, rbytes, temp_procData, statData);
-			}
-			fclose(fp);
-		}
+		parseProcStatM(pids[idx], temp_procData, statData);
 
 		/* fix the units of each field */
 		statData->vmpeak *= 1024; // convert from kb to bytes
@@ -525,8 +586,10 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
         memcpy(&(all_procstat[idx]), statData, sizeof(procstat));
 	}
 
-    output->write_procstat(all_procstat, ntargets);
-    output->write_procdata(all_procdata, ntargets);
+    for (std::vector<ProcIO*>::iterator iter = output->begin(), end = output->end(); iter != end; iter++) {
+        (*iter)->write_procstat(all_procstat, ntargets);
+        (*iter)->write_procdata(all_procdata, ntargets);
+    }
 
 	free(pids);
 	free(procData);
@@ -564,29 +627,13 @@ static void daemonize() {
 }
 
 int main(int argc, char** argv) {
-	int parentProcessID = 1; //monitor all processes by default
+    ProcmonConfig config(argc, argv);
 	int retCode = 0;
-	int frequency = DEFAULT_FREQUENCY;
-	int initialFrequency = DEFAULT_INITFREQ;
-	int initialWait = 0;
-	long clockTicksPerSec = 0;
-	long pageSize = 0;
-	int daemon = 0;
 	int i = 0;
 	struct timeval startTime;
-	time_t boottime;
-    char outputFilename[BUFFER_SIZE];
-    char hostname[BUFFER_SIZE];
-    char identifier[BUFFER_SIZE];
-    hid_t file_id, hgroup_id, collection_id;
-    herr_t status;
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
-
-    if (gethostname(hostname, BUFFER_SIZE) != 0) {
-        snprintf(hostname, BUFFER_SIZE, "Unknown");
-    }
 
 	/* setup signal handlers */
 	signal(SIGINT, sig_handler);
@@ -595,84 +642,26 @@ int main(int argc, char** argv) {
 	signal(SIGUSR1, sig_handler);
 	signal(SIGUSR2, sig_handler);
 
-	/* parse command line arguments */
-	for (i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "-d") == 0) {
-			daemon = 1;
-		}
-		if (strcmp(argv[i], "-f") == 0) {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "Not enough arguments for frequency\n");
-				usage(3);
-			}
-			frequency = atoi(argv[++i]);
-			if (frequency <= 0) {
-				fprintf(stderr, "Frequency is invalid\n");
-				usage(3);
-			}
-		}
-		if (strcmp(argv[i], "-i") == 0) {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "Not enough arguments for initial freq period\n");
-				usage(3);
-			}
-			initialWait = atoi(argv[++i]);
-			if (frequency < 0) {
-				fprintf(stderr, "initial freq period is invalid\n");
-				usage(3);
-			}
-		}
-		if (strcmp(argv[i], "-if") == 0) {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "Not enough arguments for initial frequency\n");
-				usage(3);
-			}
-			initialFrequency = atoi(argv[++i]);
-			if (frequency <= 0) {
-				fprintf(stderr, "initial frequency is invalid\n");
-				usage(3);
-			}
-		}
-		if (strcmp(argv[i], "-p") == 0) {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "Not enough arguments for parent process id\n");
-				usage(3);
-			}
-			parentProcessID = atoi(argv[++i]);
-			if (parentProcessID <= 0) {
-				fprintf(stderr, "Invalid parent process id\n");
-				usage(3);
-			}
-		}
-		if (strcmp(argv[i], "-o") == 0) {
-			if (i + 1 >= argc) {
-				fprintf(stderr, "Not enough arguments for output file\n");
-				usage(3);
-			}
-			strncpy(outputFilename, argv[++i], BUFFER_SIZE);
-		}
-        if (strcmp(argv[i], "-I") == 0) {
-            if (i + 1 >= argc) {
-                fprintf(stderr, "Not enought arguments for identifier\n");
-                usage(3);
-            }
-            strncpy(identifier, argv[++i], BUFFER_SIZE);
-        }
-	}
-	if (strlen(outputFilename) == 0) {
-		fprintf(stderr, "output filename has 0 length\n");
-		usage(3);
-	}
-			
-	clockTicksPerSec = sysconf(_SC_CLK_TCK);
-	pageSize = sysconf(_SC_PAGESIZE);
-	boottime = getBootTime();
-	
-	if (daemon) {
+	if (config.daemonize) {
 		daemonize();
 	}
 
-    ProcFile outputFile(outputFilename, hostname, identifier, FILE_FORMAT_TEXT, FILE_MODE_WRITE);
+    std::vector<ProcIO*> outputMethods;
+    if (config.outputFlags & OUTPUT_TYPE_TEXT) {
+        ProcIO* out = new ProcTextIO(config.outputTextFilename, FILE_MODE_WRITE);
+        out->setContext(config.hostname, config.identifier, config.subidentifier);
+        outputMethods.push_back(out);
+    }
+    if (config.outputFlags & OUTPUT_TYPE_HDF5) {
+        ProcIO* out = new ProcHDF5IO(config.outputTextFilename, FILE_MODE_WRITE);
+        out->setContext(config.hostname, config.identifier, config.subidentifier);
+        outputMethods.push_back(out);
+    }
+    if (config.outputFlags & OUTPUT_TYPE_AMQP) {
+        ProcIO* out = new ProcAMQPIO(config.outputTextFilename, FILE_MODE_WRITE);
+        out->setContext(config.hostname, config.identifier, config.subidentifier);
+        outputMethods.push_back(out);
+    }
 
 	if (gettimeofday(&startTime, NULL) != 0) {
 		fprintf(stderr, "FAILED to get start time\n");
@@ -680,29 +669,30 @@ int main(int argc, char** argv) {
 	}
 
 	while (cleanUpFlag == 0) {
-		retCode = searchProcFs(parentProcessID, clockTicksPerSec, pageSize, boottime, &outputFile);
+		retCode = searchProcFs(config.targetPPid, config.clockTicksPerSec, config.pageSize, config.boottime, &outputMethods);
 		if (retCode <= 0) {
-			exit(-1*retCode);
+            retCode *= -1;
+            break;
 		}
 		if (cleanUpFlag == 0) {
-			int sleepInterval = frequency;
-			if (initialWait > 0) {
+			int sleepInterval = config.frequency;
+			if (config.initialPhase > 0) {
 				struct timeval currTime;
 				double timeDelta;
 				if (gettimeofday(&currTime, NULL) == 0) {
 					timeDelta = (currTime.tv_sec - startTime.tv_sec) + (double)((currTime.tv_usec - startTime.tv_usec))*1e-06;
-					if (timeDelta > initialWait) {
-						initialWait = 0;
+					if (timeDelta > config.initialPhase) {
+						config.initialPhase = 0;
 					} else {
-						sleepInterval = initialFrequency;
+						sleepInterval = config.initialFrequency;
 					}
 				}
 			}
 			sleep(sleepInterval);
 		}
 	}
-
-	exit(0);
+    for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {
+        delete *ptr;
+    }
+	exit(retCode);
 }
-
-
