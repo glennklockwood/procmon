@@ -4,6 +4,63 @@
 #include <string.h>
 #include <iostream>
 
+ProcAMQPIO::ProcAMQPIO(std::string& mqHost, int port, std::string& mqHVost, std::string& exchangeName, int frameSize, ProcFileMode mode) {
+}
+
+ProcAMQPIO::~ProcAMQPIO() {
+}
+
+int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
+    int nBytes = 0;
+    char* ptr = buffer;
+    ptr += snprintf(ptr, AMQP_BUFFER_SIZE, "nRecords=%d\n", count);
+    for (int i = 0; i < count; i++) {
+        procdata* procdata = &(start_ptr[i]);
+        if (header) {
+            ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "procdata,%s,%s,%s,", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
+        }
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%d,%lu,%lu,%lu,%lu",procData->pid,procData->ppid,procData->recTime,procData->recTimeUSec,procData->startTime,procData->startTimeUSec);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->execName), procData->execName);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", procData->cmdArgBytes, procData->cmdArgs);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->exePath), procData->exePath);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s\n", strlen(procData->cwdPath), procData->cwdPath);
+    }
+    nBytes = ptr - buffer;
+    if (nBytes == AMQP_BUFFER_SIZE) {
+        fprintf(stderr, "WARNING: sending full buffer -- data will be truncated\n");
+    }
+    return nBytes;
+}
+
+int ProcAMQPIO::write_procstat(procstat* start_ptr, int count, bool header) {
+    int nBytes = 0;
+    char* ptr = buffer;
+    for (int i = 0; i < count; i++) {
+        procstat* procStat = &(start_ptr[i]);
+        if (header) {
+            ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "procstat,%s,%s,%s,", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
+        }
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%lu,%lu,%lu,%lu",procStat->pid,procStat->recTime,procStat->recTimeUSec,procStat->startTime,procStat->startTimeUSec);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%c,%d,%d,%d",procStat->state,procStat->ppid,procStat->pgrp,procStat->session);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%d,%d,%u,%lu,%lu",procStat->tty,procStat->tpgid,procStat->flags,procStat->utime,procStat->stime);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%ld,%ld,%ld,%lu,%lu",procStat->priority,procStat->nice,procStat->numThreads,procStat->vsize,procStat->rss);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%lu,%lu,%lu,%lu",procStat->rsslim,procStat->vmpeak,procStat->rsspeak,procStat->signal,procStat->blocked);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%lu,%d,%u,%u",procStat->sigignore,procStat->sigcatch,procStat->cpusAllowed,procStat->rtPriority,procStat->policy);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%llu,%llu,%llu,%llu",procStat->guestTime,procStat->delayacctBlkIOTicks,procStat->io_rchar,procStat->io_wchar,procStat->io_syscr);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%llu,%llu,%llu,%llu,%lu",procStat->io_syscw,procStat->io_readBytes,procStat->io_writeBytes,procStat->io_cancelledWriteBytes, procStat->m_size);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%lu,%lu,%lu,%lu",procStat->m_resident,procStat->m_share,procStat->m_text,procStat->m_data, procStat->realUid); 
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%lu,%lu\n",procStat->effUid, procStat->realGid, procStat->effGid);
+    }
+    nBytes = ptr - buffer;
+    if (nBytes == AMQP_BUFFER_SIZE) {
+        fprintf(stderr, "WARNING: sending full buffer -- data will be truncated\n");
+    }
+    return nBytes;
+}
+
+int ProcAMQPIO::set_context(std::string& hostname, std::string& identifier, std::string& subidentifier) {
+}
+
 ProcFile::ProcFile(const char* t_filename, const char* t_hostname, const char* t_identifier, ProcFileFormat t_format, ProcFileMode t_mode) {
     filename = t_filename;
     hostname = t_hostname;
@@ -471,28 +528,36 @@ bool ProcTextIO::text_read_procdata(procdata* procData) {
     return procData->pid != 0;
 }
 
-int ProcTextIO::write_procdata(procdata* procData) {
+int ProcTextIO::write_procdata(procdata* start_ptr, int cnt) {
     int nBytes = 0;
-    nBytes += fprintf(filePtr, "procdata,%d,%d,%lu,%lu,%lu,%lu",procData->pid,procData->ppid,procData->recTime,procData->recTimeUSec,procData->startTime,procData->startTimeUSec);
-    nBytes += fprintf(filePtr, ",%lu,%s", strlen(procData->execName), procData->execName);
-    nBytes += fprintf(filePtr, ",%lu,%s", procData->cmdArgBytes, procData->cmdArgs);
-    nBytes += fprintf(filePtr, ",%lu,%s", strlen(procData->exePath), procData->exePath);
-    nBytes += fprintf(filePtr, ",%lu,%s\n", strlen(procData->cwdPath), procData->cwdPath);
+    for (int i = 0; i < cnt; i++) {
+        procdata* procData = &(start_ptr[i]);
+        nBytes += fprintf(filePtr, "procdata,%s,%s,%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
+        nBytes += fprintf(filePtr, ",%d,%d,%lu,%lu,%lu,%lu",procData->pid,procData->ppid,procData->recTime,procData->recTimeUSec,procData->startTime,procData->startTimeUSec);
+        nBytes += fprintf(filePtr, ",%lu,%s", strlen(procData->execName), procData->execName);
+        nBytes += fprintf(filePtr, ",%lu,%s", procData->cmdArgBytes, procData->cmdArgs);
+        nBytes += fprintf(filePtr, ",%lu,%s", strlen(procData->exePath), procData->exePath);
+        nBytes += fprintf(filePtr, ",%lu,%s\n", strlen(procData->cwdPath), procData->cwdPath);
+    }
     return nBytes;
 }
 
-int ProcTextIO::write_procstat(procstat* procStat) {
+int ProcTextIO::write_procstat(procstat* start_ptr, int cnt) {
     int nBytes = 0;
-    nBytes += fprintf(filePtr, "procstat,%d,%lu,%lu,%lu,%lu",procStat->pid,procStat->recTime,procStat->recTimeUSec,procStat->startTime,procStat->startTimeUSec);
-    nBytes += fprintf(filePtr, ",%c,%d,%d,%d",procStat->state,procStat->ppid,procStat->pgrp,procStat->session);
-    nBytes += fprintf(filePtr, ",%d,%d,%u,%lu,%lu",procStat->tty,procStat->tpgid,procStat->flags,procStat->utime,procStat->stime);
-    nBytes += fprintf(filePtr, ",%ld,%ld,%ld,%lu,%lu",procStat->priority,procStat->nice,procStat->numThreads,procStat->vsize,procStat->rss);
-    nBytes += fprintf(filePtr, ",%lu,%lu,%lu,%lu,%lu",procStat->rsslim,procStat->vmpeak,procStat->rsspeak,procStat->signal,procStat->blocked);
-    nBytes += fprintf(filePtr, ",%lu,%lu,%d,%u,%u",procStat->sigignore,procStat->sigcatch,procStat->cpusAllowed,procStat->rtPriority,procStat->policy);
-    nBytes += fprintf(filePtr, ",%lu,%llu,%llu,%llu,%llu",procStat->guestTime,procStat->delayacctBlkIOTicks,procStat->io_rchar,procStat->io_wchar,procStat->io_syscr);
-    nBytes += fprintf(filePtr, ",%llu,%llu,%llu,%llu,%lu",procStat->io_syscw,procStat->io_readBytes,procStat->io_writeBytes,procStat->io_cancelledWriteBytes, procStat->m_size);
-    nBytes += fprintf(filePtr, ",%lu,%lu,%lu,%lu,%lu",procStat->m_resident,procStat->m_share,procStat->m_text,procStat->m_data, procStat->realUid); 
-    nBytes += fprintf(filePtr, ",%lu,%lu,%lu\n",procStat->effUid, procStat->realGid, procStat->effGid);
+    for (int i = 0; i < cnt; i++) {
+        procdata* procData = &(start_ptr[i]);
+        nBytes += fprintf(filePtr, "procstat,%s,%s,%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
+        nBytes += fprintf(filePtr, ",%d,%lu,%lu,%lu,%lu",procStat->pid,procStat->recTime,procStat->recTimeUSec,procStat->startTime,procStat->startTimeUSec);
+        nBytes += fprintf(filePtr, ",%c,%d,%d,%d",procStat->state,procStat->ppid,procStat->pgrp,procStat->session);
+        nBytes += fprintf(filePtr, ",%d,%d,%u,%lu,%lu",procStat->tty,procStat->tpgid,procStat->flags,procStat->utime,procStat->stime);
+        nBytes += fprintf(filePtr, ",%ld,%ld,%ld,%lu,%lu",procStat->priority,procStat->nice,procStat->numThreads,procStat->vsize,procStat->rss);
+        nBytes += fprintf(filePtr, ",%lu,%lu,%lu,%lu,%lu",procStat->rsslim,procStat->vmpeak,procStat->rsspeak,procStat->signal,procStat->blocked);
+        nBytes += fprintf(filePtr, ",%lu,%lu,%d,%u,%u",procStat->sigignore,procStat->sigcatch,procStat->cpusAllowed,procStat->rtPriority,procStat->policy);
+        nBytes += fprintf(filePtr, ",%lu,%llu,%llu,%llu,%llu",procStat->guestTime,procStat->delayacctBlkIOTicks,procStat->io_rchar,procStat->io_wchar,procStat->io_syscr);
+        nBytes += fprintf(filePtr, ",%llu,%llu,%llu,%llu,%lu",procStat->io_syscw,procStat->io_readBytes,procStat->io_writeBytes,procStat->io_cancelledWriteBytes, procStat->m_size);
+        nBytes += fprintf(filePtr, ",%lu,%lu,%lu,%lu,%lu",procStat->m_resident,procStat->m_share,procStat->m_text,procStat->m_data, procStat->realUid); 
+        nBytes += fprintf(filePtr, ",%lu,%lu,%lu\n",procStat->effUid, procStat->realGid, procStat->effGid);
+    }
     return nBytes;
 }
 

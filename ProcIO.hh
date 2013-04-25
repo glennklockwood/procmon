@@ -40,13 +40,10 @@ typedef enum _ProcFileRecordType {
 
 class ProcIO {
 public:
-    virtual bool set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
-    virtual bool write_procdata(procdata* start_ptr, int count);
-    virtual bool write_procstat(procstat* start_ptr, int count);
+    virtual int set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
+    virtual int write_procdata(procdata* start_ptr, int count);
+    virtual int write_procstat(procstat* start_ptr, int count);
 protected:
-    bool format_data(char* buffer, int bufferLen, procdata* start_ptr, int count, int headerLevel);
-    bool format_data(char* buffer, int bufferLen, procstat* start_ptr, int count, int headerLevel);
-
     std::string identifier;
     std::string subidentifier;
     std::string hostname;
@@ -56,9 +53,9 @@ class ProcTextIO : protected ProcIO {
 public:
     ProcTextIO(std::string& filename, ProcFileMode mode);
     ~ProcTestIO();
-    virtual bool set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
-    virtual bool write_procdata(procdata* start_ptr, int count);
-    virtual bool write_procstat(procstat* start_ptr, int count);
+    virtual int set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
+    virtual int write_procdata(procdata* start_ptr, int count);
+    virtual int write_procstat(procstat* start_ptr, int count);
     ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat);
 private:
     std::string filename;
@@ -69,9 +66,9 @@ class ProcHDF5IO : protected ProcIO {
 public:
     ProcHDF5IO(std::string& filename, ProcFileMode mode);
     ~ProcHDF5IO();
-    virtual bool set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
-    virtual bool write_procdata(procdata* start_ptr, int count);
-    virtual bool write_procstat(procstat* start_ptr, int count);
+    virtual int set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
+    virtual int write_procdata(procdata* start_ptr, int count);
+    virtual int write_procstat(procstat* start_ptr, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
     unsigned int read_procdata(procdata* start_ptr, unsigned int start_id, unsigned int count);
@@ -102,9 +99,9 @@ class ProcAMQPIO : protected ProcIO {
 public:
     ProcAMQPIO(std::string& mqHost, int port, std::string& mqHVost, std::string& exchangeName, int frameSize, ProcFileMode mode);
     ~ProcAMQPIO();
-    virtual bool set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
-    virtual bool write_procdata(procdata* start_ptr, int count);
-    virtual bool write_procstat(procstat* start_ptr, int count);
+    virtual int set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
+    virtual int write_procdata(procdata* start_ptr, int count);
+    virtual int write_procstat(procstat* start_ptr, int count);
     ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec);
 private:
     std::string mqServer;
