@@ -631,6 +631,11 @@ int main(int argc, char** argv) {
 	int retCode = 0;
 	int i = 0;
 	struct timeval startTime;
+	time_t boottime;
+    char outputFilename[BUFFER_SIZE];
+    char hostname[BUFFER_SIZE];
+    char identifier[BUFFER_SIZE];
+	ProcFileFormat fileFormat = FILE_FORMAT_TEXT;
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
