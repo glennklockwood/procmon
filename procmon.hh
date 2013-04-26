@@ -227,7 +227,7 @@ public:
 
 class ProcmonException : public std::exception {
 public:
-    ProcFileException(const char* t_error) {
+    ProcmonException(const char* t_error) {
         error = t_error;
     }
 
