@@ -4,20 +4,20 @@
 # 
 
 OPT_EXTRA=-ggdb #-Wall
-EXTRA=$(OPT_EXTRA)
+EXTRA=-std=c++11 $(OPT_EXTRA)
 
-CFLAGS=$(EXTRA) -I$(HDF5_DIR)/include
+CFLAGS=$(EXTRA) -I$(HDF5_DIR)/include -I$(RABBITMQ_C_DIR)/include
 
 all: driver procmon
-driver: driver.o procfmt.o
+driver: driver.o ProcIO.o
 	$(CXX) -o $@ $^ -lhdf5 -L$(HDF5_DIR)/lib #-static
-procmon: procmon.o procfmt.o
+procmon: procmon.o ProcIO.o
 	$(CXX) -o $@ $^ -lhdf5 -L$(HDF5_DIR)/lib #-static
 procmon.o: procmon.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 driver.o: driver.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
-procfmt.o: procfmt.cpp
+ProcIO.o: ProcIO.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 
 clean:

@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <math.h>
 
+#include "ProcData.hh"
 #include "procmon.hh"
 #include "ProcIO.hh"
 

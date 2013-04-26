@@ -1,8 +1,10 @@
 #include "ProcIO.hh"
+#include "ProcData.hh"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <iostream>
+
 
 ProcAMQPIO::ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, 
 	const std::string& _username, const std::string& _password, const std::string& _exchangeName, 
@@ -17,7 +19,7 @@ ProcAMQPIO::ProcAMQPIO(const std::string& _mqServer, int _port, const std::strin
 	_amqp_open();
 }
 
-bool ProcAMQPIO::_amqp_open() throws(ProcIOException) {
+bool ProcAMQPIO::_amqp_open() {
 	int istatus = 0;
 	conn = amqp_new_connection();
 	socket = amqp_tcp_socket_new();
@@ -46,7 +48,7 @@ bool ProcAMQPIO::_amqp_open() throws(ProcIOException) {
 	return connected;
 }
 
-bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) throws() {
+bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
 	amqpError = false;
 	switch (status.reply_type) {
 		case AMQP_RESPONSE_NORMAL:

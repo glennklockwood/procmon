@@ -22,6 +22,8 @@
 #include <amqp_tcp_socket.h>
 #include <amqp_framing.h>
 
+#include "ProcData.hh"
+
 #define AMQP_BUFFER_SIZE 3145728 /* 3 MB */
 #define TEXT_BUFFER_SIZE 8192    /* 8 kB */
 
@@ -59,12 +61,12 @@ protected:
 
 class ProcTextIO : protected ProcIO {
 public:
-    ProcTextIO(std::string& filename, ProcIOFileMode mode);
-    ~ProcTestIO();
+    ProcTextIO(const std::string& filename, ProcIOFileMode mode);
+    ~ProcTextIO();
     virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
     virtual int write_procdata(procdata* start_ptr, int count);
     virtual int write_procstat(procstat* start_ptr, int count);
-    ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat);
+    ProcRecordType read_stream_record(procdata* procData, procstat* procStat);
 private:
 	int fill_buffer();
 	bool read_procstat(procstat*);
@@ -79,7 +81,7 @@ private:
 
 class ProcHDF5IO : protected ProcIO {
 public:
-    ProcHDF5IO(std::string& filename, ProcIOFileMode mode);
+    ProcHDF5IO(const std::string& filename, ProcIOFileMode mode);
     ~ProcHDF5IO();
     virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
     virtual int write_procdata(procdata* start_ptr, int count);
@@ -111,15 +113,15 @@ private:
 
 class ProcAMQPIO : protected ProcIO {
 public:
-    ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, const std::string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);
+    ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, const std::string& _username, const std::string& _password, const std::string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);
     ~ProcAMQPIO();
     virtual bool set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
     virtual int write_procdata(procdata* start_ptr, int count);
     virtual int write_procstat(procstat* start_ptr, int count);
     //ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec);
 private:
-	bool amqp_open();
-	bool amqp_eval_status(amqp_rpc_reply_t _status);
+	bool _amqp_open();
+	bool _amqp_eval_status(amqp_rpc_reply_t _status);
 
     std::string mqServer;
     int port;
@@ -143,7 +145,7 @@ private:
 
 class ProcIOException : public std::exception {
 public:
-	ProcIOException(std::string& err): error(err) {
+	ProcIOException(const std::string& err): error(err) {
 	}
 
 	virtual const char* what() const throw() {
@@ -152,7 +154,7 @@ public:
 
 	~ProcIOException() throw() { }
 private:
-	string error;
+    std::string error;
 };
 
 #endif /* PROCFMT_H_ */
