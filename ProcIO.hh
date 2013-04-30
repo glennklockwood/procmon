@@ -127,9 +127,10 @@ public:
     virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
-    //ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec);
+    ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec);
 private:
 	bool _amqp_open();
+    bool _amqp_bind_context();
 	bool _amqp_eval_status(amqp_rpc_reply_t _status);
 
     std::string mqServer;

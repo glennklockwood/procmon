@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
             int pid = recordType == TYPE_PROCDATA ? (*procdataPtr)[i].pid : recordType == TYPE_PROCSTAT ? (*procstatPtr)[i].pid : -1;
             if (pid <= 0) {
                 std::cerr <,
-            std::string key = hostname + "/" + identifier + "." subidentifier + ":" + std::to_string( recordType == TYPE_PROCDATA ? 
+            std::string key = hostname + "." + identifier + "." subidentifier + ":" + std::to_string( recordType == TYPE_PROCDATA ? 
         
         
         /* got some records! Now, to look up the latest of these

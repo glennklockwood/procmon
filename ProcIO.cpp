@@ -120,6 +120,62 @@ ProcAMQPIO::~ProcAMQPIO() {
 	}
 }
 
+ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec) {
+    for ( ; ; ) {
+        amqp_frame_t frame;
+        int result;
+        size_t body_received;
+        size_t body_target;
+        amqp_maybe_release_buffers(conn);
+        result = amqp_simple_wait_frame(conn, &frame);
+        if (result < 0) { break; }
+
+        if (frame.frame_type != AMQP_FRAME_METHOD) {
+            continue;
+        }
+        if (frame.payload.method.id != AMQP_BASIC_DELIVER_METHOD) {
+            continue;
+        }
+        amqp_basic_deliver_t* d = (amqp_basic_deliver_t *) frame.payload.method.decoded;
+        std::string routingKey((char*)d->routing_key.bytes, 0, (int) d->routing_key.len);
+        result = amqp_simple_wait_frame(conn, &frame);
+        if (result < 0) {
+            continue;
+        }
+
+        if (frame.frame_type != AMQP_FRAME_HEADER) {
+            continue;
+        }
+        //amqp_basic_properties_t* p = (amqp_basic_properties_t *) frame.payload.properties.decoded;
+
+        body_target = frame.payload.properties.body_size;
+        char message_buffer[body_target+1];
+        char* ptr = message_buffer;
+        body_received = 0;
+
+        while (body_received < body_target) {
+            result = amqp_simple_wait_frame(conn, &frame);
+            if (result < 0) {
+                break;
+            }
+            if (frame.frame_type != AMQP_FRAME_BODY) {
+                break;
+            }
+            body_received += frame.payload.body_fragment.len;
+            memcpy(ptr, frame.payload.body_fragment.bytes, frame.payload.body_fragment.len);
+            ptr += frame.payload.body_fragment.len;
+            *ptr = 0;
+        }
+
+        if (body_received == body_target) {
+            // got full message successfully!
+            std::cout << "Routing Key: " << routingKey << std::endl;
+            std::cout << "Message    : " << message_buffer << std::endl;
+        }
+        break;
+    }
+}
+
 unsigned int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
     unsigned int nBytes = 0;
     char* ptr = buffer;
@@ -200,6 +256,8 @@ bool ProcAMQPIO::set_context(const std::string& _hostname, const std::string& _i
 	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
 	subidentifier.assign(_identifier, 0, endPos);
 
+    messageType = "*";
+
 	if (mode == FILE_MODE_WRITE) {
 		try {
 			_amqp_bind_context();
@@ -212,9 +270,30 @@ bool ProcAMQPIO::set_context(const std::string& _hostname, const std::string& _i
 	return true;
 }
 
-void ProcAMQPIO::_amqp_bind_context() {
+bool ProcAMQPIO::_amqp_bind_context() {
 	amqp_declare_queue_ok_t* queue_reply = amqp_queue_declare(conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
+	_amqp_eval_status(amqp_get_rpc_reply(conn));
+	if (amqpError) {
+		throw ProcIOException("Failed AMQP queue declare on " + mqServer + ":" + std::to_string(port) + ", exchange " + mqExchangeName + "; Error: " + amqpErrorMessage);
+	}
+    queue = amqp_bytes_malloc_dup(r->queue);
+    if (queue.bytes == NULL) {
+        throw ProcIOException("Failed AMQP queue declare: out of memory!");
+    }
 
+    std::string bindKey = hostname + "." + identifier + "." + subidentifier + "." + messageType;
+    amqp_queue_bind(conn, 1, queue, amqp_cstring_bytes(mqExchangeName.c_str()), amqp_cstring_bytes(bindKey.c_str()), amqp_empty_table);
+    _amqp_eval_status(amqp_get_rpc_reply(conn));
+    if (amqpError) {
+        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + std::to_string(port) + ", exchange " + mqExchangeName + "; Error: " + amqpErrorMessage);
+    }
+    amqp_basic_consume(conn, 1, queue, amqp_empty_bytes, 0, 1, 0, amqp_empty_table);
+    _amqp_eval_status(amqp_get_rpc_reply(conn));
+    if (amqpError) {
+        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + std::to_string(port) + ", exchange " + mqExchangeName + "; Error: " + amqpErrorMessage);
+    }
+    return true;
+}
 
 #ifdef __USE_HDF5
 ProcHDF5IO::ProcHDF5IO(const std::string& _filename, ProcIOFileMode _mode): filename(_filename),mode(_mode) {
