@@ -21,10 +21,11 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <math.h>
+#include <iostream>
 
 #include "ProcData.hh"
-#include "procmon.hh"
 #include "ProcIO.hh"
+#include "procmon.hh"
 
 /* global variables - these are global for signal handling */
 int cleanUpFlag;
@@ -41,10 +42,8 @@ int parseProcStat(int pid, procstat* statData, procdata* procData, time_t bootti
 	char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	ptr = buffer;
-	sptr = buffer;
-	eptr = buffer + bufferLen;
 	int idx = 0;
+	int rbytes;
     unsigned long long starttime;
     double temp_time;
     char filename[BUFFER_SIZE];
@@ -131,8 +130,9 @@ int parseProcIO(int pid, procdata* procData, procstat* statData) {
 	char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	char* label;
+	char* label = NULL;
 	int idx = 0;
+	int rbytes = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE];
@@ -249,6 +249,7 @@ int parseProcStatM(int pid, procdata* procData, procstat* statData) {
     char *sptr = NULL;
     char *eptr = NULL;
 	int idx = 0;
+	int rbytes = 0;
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE];
     FILE* fp = NULL;
@@ -327,6 +328,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
 	char* label;
 	int idx = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
+	int nextStage = 0;
     int retVal = 0;
 	FILE* fp = NULL;
     int rbytes = 0;
@@ -345,14 +347,16 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
 				label = sptr;
 				sptr = ptr + 1;
 				stage = 1;
-                ptr++;
+				ptr++;
 				continue;
 			}
 		}
 		if (stage > 0) {
 			if (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == 0) {
 				if (*ptr == '\n' || *ptr == 0) {
-					stage = -1;
+					nextStage = -1;
+				} else {
+					nextStage = stage;
 				}
 				*ptr = 0;
 				if (ptr != sptr) {
@@ -386,9 +390,10 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
                             gidList[retVal++] = gid;
                         }
                     }
-					stage++;
+					nextStage++;
 				}
 				sptr = ptr + 1;
+				stage = nextStage;
 			}
 		}
         ptr++;
@@ -401,7 +406,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime, std::vector<ProcIO*>* output) {
+int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, time_t boottime, std::vector<ProcIO*>* output) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char timebuffer[BUFFER_SIZE];
@@ -418,7 +423,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	int nchange = 0;
 	int nNewTargets = ntargets;
 	int nstart = 0;
-	procstat* procData;
+	procstat* procStats;
 	struct timeval before;
 	struct timeval after;
 	struct tm datetime;
@@ -459,26 +464,26 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 	}
 	closedir(procDir);
 
-	procData = (procstat*) malloc(sizeof(procstat) * npids);
-	memset(procData, 0, sizeof(procstat)*npids);
-	if (procData == NULL) {
+	procStats = (procstat*) malloc(sizeof(procstat) * npids);
+	memset(procStats, 0, sizeof(procstat)*npids);
+	if (procStats == NULL) {
 		fprintf(stderr, "FAILED to allocate memory for proc stat data for %d pids (%lu bytes)\n", npids, sizeof(procstat)*npids);
 		return -1;
 	}
 	for (idx = 0; idx < npids; idx++) {
 		tgt_pid = pids[idx];	
-		procData[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procData[idx]), NULL, 0);
+		procStats[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procStats[idx]), NULL, 0);
 	}
 
 	/* explicitly re-using the pids buffer at this point; npids is now only needed
-	 * for knowing the limits of procData; now ntargets will hold the limit for
+	 * for knowing the limits of procStats; now ntargets will hold the limit for
 	 * pids */
 	int indices[allocPids];
 	pids[0] = ppid;
 	found = 0;
     ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
-		if (procData[idx].pid == ppid || procData[idx].state > 0) {
+		if (procStats[idx].pid == ppid || procStats[idx].state > 0) {
 			indices[ntargets++] = idx;
 		}
 	}
@@ -492,8 +497,8 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
 		nNewTargets = ntargets;
 		for (idx = 0; idx < npids; idx++) {
 			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
-				if (procData[idx].ppid == pids[innerIdx]) {
-					pids[nNewTargets] = procData[idx].pid;
+				if (procStats[idx].ppid == pids[innerIdx]) {
+					pids[nNewTargets] = procStats[idx].pid;
 					indices[nNewTargets] = idx;
 					nNewTargets++;
 					nchange++;
@@ -519,12 +524,12 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
     bzero(all_procdata, sizeof(procdata)*ntargets);
 
 	/* for each pid, capture:
-	 *   io data, peak rss/vmem values, exe, cwd
+	 *   io data, stat values, exe, cwd
 	 */
 	for (idx = 0; idx < ntargets; idx++) {
 		ssize_t rbytes = 0;
         double temp_time = 0;
-		procstat* statData = &(procData[indices[idx]]);
+		procstat* statData = &(procStats[indices[idx]]);
         procdata* temp_procData = &(all_procdata[idx]); 
 
 		/* read stat */
@@ -593,7 +598,7 @@ int searchProcFs(int ppid, long clockTicksPerSec, long pageSize, time_t boottime
     }
 
 	free(pids);
-	free(procData);
+	free(procStats);
 
 	return ntargets;
 }
@@ -636,7 +641,6 @@ int main(int argc, char** argv) {
     char outputFilename[BUFFER_SIZE];
     char hostname[BUFFER_SIZE];
     char identifier[BUFFER_SIZE];
-	ProcFileFormat fileFormat = FILE_FORMAT_TEXT;
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
@@ -655,27 +659,39 @@ int main(int argc, char** argv) {
     std::vector<ProcIO*> outputMethods;
     if (config.outputFlags & OUTPUT_TYPE_TEXT) {
         ProcIO* out = new ProcTextIO(config.outputTextFilename, FILE_MODE_WRITE);
-        out->setContext(config.hostname, config.identifier, config.subidentifier);
+        out->set_context(config.hostname, config.identifier, config.subidentifier);
         outputMethods.push_back(out);
     }
+#ifdef __USE_HDF5
     if (config.outputFlags & OUTPUT_TYPE_HDF5) {
         ProcIO* out = new ProcHDF5IO(config.outputTextFilename, FILE_MODE_WRITE);
-        out->setContext(config.hostname, config.identifier, config.subidentifier);
+        out->set_context(config.hostname, config.identifier, config.subidentifier);
         outputMethods.push_back(out);
     }
+#endif
+#ifdef __USE_AMQP
     if (config.outputFlags & OUTPUT_TYPE_AMQP) {
-        ProcIO* out = new ProcAMQPIO(config.outputTextFilename, FILE_MODE_WRITE);
-        out->setContext(config.hostname, config.identifier, config.subidentifier);
+        ProcIO* out = new ProcAMQPIO(config.mqServer, config.mqPort, config.mqVHost, config.mqUser, config.mqPassword, config.mqExchangeName, config.mqFrameSize, FILE_MODE_WRITE);
+        out->set_context(config.hostname, config.identifier, config.subidentifier);
         outputMethods.push_back(out);
     }
+#endif
 
 	if (gettimeofday(&startTime, NULL) != 0) {
 		fprintf(stderr, "FAILED to get start time\n");
 		return 4;
 	}
 
+	std::cout << "targetPPid      : " << config.targetPPid << std::endl;
+	std::cout << "tgtGid          : " << config.tgtGid << std::endl;
+	std::cout << "clockTicksPerSec: " << config.clockTicksPerSec << std::endl;
+	std::cout << "boottime        : " << config.boottime << std::endl;
+
 	while (cleanUpFlag == 0) {
-		retCode = searchProcFs(config.targetPPid, config.clockTicksPerSec, config.pageSize, config.boottime, &outputMethods);
+		struct timeval cycleTime;
+		gettimeofday(&cycleTime, NULL);
+
+		retCode = searchProcFs(config.targetPPid, config.tgtGid, config.clockTicksPerSec, config.pageSize, config.boottime, &outputMethods);
 		if (retCode <= 0) {
             retCode *= -1;
             break;
@@ -692,9 +708,15 @@ int main(int argc, char** argv) {
 					} else {
 						sleepInterval = config.initialFrequency;
 					}
+					timeDelta = (currTime.tv_sec - cycleTime.tv_sec) + (double)((currTime.tv_usec - cycleTime.tv_usec))*1e-06;
+					sleepInterval -= floor(timeDelta);
 				}
 			}
 			sleep(sleepInterval);
+		}
+		if (config.debug > 0) {
+			if (config.debug == 1) break;
+			config.debug--;
 		}
 	}
     for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {

@@ -5,6 +5,26 @@
 #include <string.h>
 #include <iostream>
 
+ProcIO::ProcIO() {
+	contextSet = false;
+}
+
+ProcIO::~ProcIO() {
+}
+bool ProcIO::set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier) {
+	std::cout << "set_context: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << std::endl;
+	return false;
+}
+
+unsigned int ProcIO::write_procdata(procdata* start_ptr, int count) {
+	std::cout << "write_procdata: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << std::endl;
+	return 0;
+}
+
+unsigned int ProcIO::write_procstat(procstat* start_ptr, int count) {
+	std::cout << "write_procstat: ProcIO BaseClass called -- THIS iS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << std::endl;
+	return 0;
+}
 
 ProcAMQPIO::ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, 
 	const std::string& _username, const std::string& _password, const std::string& _exchangeName, 
@@ -27,11 +47,13 @@ bool ProcAMQPIO::_amqp_open() {
 	if (istatus != 0) {
 		throw ProcIOException("Failed AMQP connection to " + mqServer + ":" + std::to_string(port));
 	}
+	std::cout << "Opened connection to " << mqServer << ":" << port << std::endl; //DMJ
 	amqp_set_socket(conn, socket);
-	_amqp_eval_status(amqp_login(conn, mqVHost.c_str(), 0, frameSize, 0, AMQP_SASL_METHOD_PLAIN, username, password));
+	_amqp_eval_status(amqp_login(conn, mqVHost.c_str(), 0, frameSize, 0, AMQP_SASL_METHOD_PLAIN, username.c_str(), password.c_str()));
 	if (amqpError) {
 		throw ProcIOException("Failed AMQP login to " + mqServer + ":" + std::to_string(port) + " as " + username + "; Error: " + amqpErrorMessage);
 	}
+	std::cout << "Successfully logged in to " << mqServer << ":" << port << mqVHost << "; user: " << username << std::endl; //DMJ
 
 	amqp_channel_open(conn, 1);
 	_amqp_eval_status(amqp_get_rpc_reply(conn));
@@ -44,6 +66,7 @@ bool ProcAMQPIO::_amqp_open() {
 	if (amqpError) {
 		throw ProcIOException("Failed to declare exchange: " + exchangeName + "; Error: " + amqpErrorMessage);
 	}
+	std::cout << "Declared topic exchange: " << exchangeName << std::endl; //DMJ
 	connected = true;
 	return connected;
 }
@@ -58,12 +81,12 @@ bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
 			amqpErrorMessage = "missing RPC reply type (ReplyVal:" + std::to_string( (unsigned int) status.reply_type) + ")";
 			break;
 		case AMQP_RESPONSE_LIBRARY_EXCEPTION:
-			amqpErrorMessage = amqp_error_string(status.library_error) + " (ReplyVal:" + std::to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + std::to_string( (unsigned int) status.library_error) + ")";
+			amqpErrorMessage = std::string(amqp_error_string(status.library_error)) + " (ReplyVal:" + std::to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + std::to_string( (unsigned int) status.library_error) + ")";
 			break;
 		case AMQP_RESPONSE_SERVER_EXCEPTION: {
 			switch (status.reply.id) {
 				case AMQP_CONNECTION_CLOSE_METHOD: {
-					amqp_connection_close_t *m = (amqp_connection_close_t *) x.reply.decoded;
+					amqp_connection_close_t *m = (amqp_connection_close_t *) status.reply.decoded;
 					amqpErrorMessage = "server connection error " + std::to_string((int) m->reply_code) + ", message: " +  std::string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
 					break;
 				}
@@ -77,6 +100,7 @@ bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
 					break;
 			}
 			break;
+		}
 	}
 	amqpError = true;
 	return amqpError;
@@ -96,24 +120,25 @@ ProcAMQPIO::~ProcAMQPIO() {
 	}
 }
 
-int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
-    int nBytes = 0;
+unsigned int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
+    unsigned int nBytes = 0;
     char* ptr = buffer;
     ptr += snprintf(ptr, AMQP_BUFFER_SIZE, "nRecords=%d\n", count);
     for (int i = 0; i < count; i++) {
-        procdata* procdata = &(start_ptr[i]);
+        procdata* procData = &(start_ptr[i]);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%d,%lu,%lu,%lu,%lu",procData->pid,procData->ppid,procData->recTime,procData->recTimeUSec,procData->startTime,procData->startTimeUSec);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->execName), procData->execName);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", procData->cmdArgBytes, procData->cmdArgs);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->exePath), procData->exePath);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s\n", strlen(procData->cwdPath), procData->cwdPath);
     }
+	*ptr = 0;
     nBytes = ptr - buffer;
     if (nBytes == AMQP_BUFFER_SIZE) {
         fprintf(stderr, "WARNING: sending full buffer -- data will be truncated\n");
     }
 
-	amqp_message_t message;
+	amqp_bytes_t message;
 	message.bytes = buffer;
 	message.len = nBytes;
 
@@ -126,9 +151,10 @@ int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
     return nBytes;
 }
 
-int ProcAMQPIO::write_procstat(procstat* start_ptr, int count, bool header) {
-    int nBytes = 0;
+unsigned int ProcAMQPIO::write_procstat(procstat* start_ptr, int count) {
+    unsigned int nBytes = 0;
     char* ptr = buffer;
+    ptr += snprintf(ptr, AMQP_BUFFER_SIZE, "nRecords=%d\n", count);
     for (int i = 0; i < count; i++) {
         procstat* procStat = &(start_ptr[i]);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%lu,%lu,%lu,%lu",procStat->pid,procStat->recTime,procStat->recTimeUSec,procStat->startTime,procStat->startTimeUSec);
@@ -142,12 +168,13 @@ int ProcAMQPIO::write_procstat(procstat* start_ptr, int count, bool header) {
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%lu,%lu,%lu,%lu",procStat->m_resident,procStat->m_share,procStat->m_text,procStat->m_data, procStat->realUid); 
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%lu,%lu\n",procStat->effUid, procStat->realGid, procStat->effGid);
     }
+	*ptr = 0;
     nBytes = ptr - buffer;
     if (nBytes == AMQP_BUFFER_SIZE) {
         fprintf(stderr, "WARNING: sending full buffer -- data will be truncated\n");
     }
 
-	amqp_message_t message;
+	amqp_bytes_t message;
 	message.bytes = buffer;
 	message.len = nBytes;
 
@@ -161,12 +188,35 @@ int ProcAMQPIO::write_procstat(procstat* start_ptr, int count, bool header) {
 }
 
 bool ProcAMQPIO::set_context(const std::string& _hostname, const std::string& _identifier, const std::string& _subidentifier) {
-	hostname = _hostname;
-	identifier = _identifier;
-	subidentifier = _subidentifier;
+	size_t endPos = _hostname.find('.');
+	endPos = endPos == std::string::npos ? _hostname.size() : endPos;
+	hostname.assign(_hostname, 0, endPos);
+
+	endPos = _identifier.find('.');
+	endPos = endPos == std::string::npos ? _identifier.size() : endPos;
+	identifier.assign(_identifier, 0, endPos);
+
+	endPos = _subidentifier.find('.');
+	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
+	subidentifier.assign(_identifier, 0, endPos);
+
+	if (mode == FILE_MODE_WRITE) {
+		try {
+			_amqp_bind_context();
+		} catch (ProcIOException& e) {
+			ProcIOException e2("FAILED to set_context in ProcAMQPIO (declare and bind queue): " + e.what());
+			throw e2;
+		}
+	}
+	contextSet = true;
 	return true;
 }
 
+void ProcAMQPIO::_amqp_bind_context() {
+	amqp_declare_queue_ok_t* queue_reply = amqp_queue_declare(conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
+
+
+#ifdef __USE_HDF5
 ProcHDF5IO::ProcHDF5IO(const std::string& _filename, ProcIOFileMode _mode): filename(_filename),mode(_mode) {
 	file = -1;
 	hostGroup = -1;
@@ -206,10 +256,22 @@ unsigned int ProcHDF5IO::read_procstat(procstat* procStat, unsigned int id) {
     return read_procstat(procStat, id, 1);
 }
 
-bool ProcHDF5IO::set_context(const std::string _hostname, const std::string _identifier, const std::string _subidentifier) {
+bool ProcHDF5IO::set_context(const std::string& _hostname, const std::string& _identifier, const std::string& _subidentifier) {
     herr_t status;
-	std::string _combinedId = _identifier + "." + _subidentifier;
-	bool hostSame = hostname == _hostname;
+	size_t endPos = _hostname.find('.');
+	endPos = endPos == std::string::npos ? _hostname.size() : endPos;
+	std::string t_hostname(_hostname, 0, endPos);
+
+	endPos = _identifier.find('.');
+	endPos = endPos == std::string::npos ? _identifier.size() : endPos;
+	std::string t_identifier(_identifier, 0, endPos);
+
+	endPos = _subidentifier.find('.');
+	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
+	std::string t_subidentifier(_identifier, 0, endPos);
+
+	std::string _combinedId = t_identifier + "." + t_subidentifier;
+	bool hostSame = hostname == t_hostname;
 	bool idSame = combinedId == _combinedId;
 
 	if ((!hostSame || !idSame) && idGroup != 0) {
@@ -244,10 +306,10 @@ bool ProcHDF5IO::set_context(const std::string _hostname, const std::string _ide
         throw ProcIOException("Failed to access identifier group: " + _combinedId);
     }
 
-	hostname = _hostname;
-	identifier = _identifier;
-	subidentifier = _subidentifier;
-	combinedId = _combinedId;
+	hostname = t_hostname;
+	identifier = t_identifier;
+	subidentifier = t_subidentifier;
+	combinedId = t_combinedId;
 	contextSet = true;
 	return true;
 }
@@ -337,11 +399,11 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_procstat, "m_data", HOFFSET(procstat, m_data), H5T_NATIVE_ULONG);
 }
 
-unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int count) {
+unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, int count) {
     return write_dataset("procstat", type_procstat, (void*) start_pointer, count, 128);
 }
 
-unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int count) {
+unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, int count) {
     return write_dataset("procdata", type_procdata, (void*) start_pointer, count, 4);
 }
 
@@ -431,9 +493,9 @@ unsigned int ProcHDF5IO::write_dataset(const char* dsName, hid_t type, void* sta
     H5Dclose(dataset);
     return (int) newRecords;
 }
+#endif
 
 int ProcTextIO::fill_buffer() {
-    if (format != FILE_FORMAT_TEXT) return -1;
     if (sPtr != NULL) {
         bcopy(buffer, sPtr, sizeof(char)*(ptr-sPtr));
         ptr = buffer + (ptr - sPtr);
@@ -581,8 +643,8 @@ bool ProcTextIO::read_procdata(procdata* procData) {
     return procData->pid != 0;
 }
 
-int ProcTextIO::write_procdata(procdata* start_ptr, int cnt) {
-    int nBytes = 0;
+unsigned int ProcTextIO::write_procdata(procdata* start_ptr, int cnt) {
+    unsigned int nBytes = 0;
     for (int i = 0; i < cnt; i++) {
         procdata* procData = &(start_ptr[i]);
         nBytes += fprintf(filePtr, "procdata,%s,%s,%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
@@ -595,10 +657,10 @@ int ProcTextIO::write_procdata(procdata* start_ptr, int cnt) {
     return nBytes;
 }
 
-int ProcTextIO::write_procstat(procstat* start_ptr, int cnt) {
-    int nBytes = 0;
+unsigned int ProcTextIO::write_procstat(procstat* start_ptr, int cnt) {
+    unsigned int nBytes = 0;
     for (int i = 0; i < cnt; i++) {
-        procdata* procData = &(start_ptr[i]);
+        procstat* procStat = &(start_ptr[i]);
         nBytes += fprintf(filePtr, "procstat,%s,%s,%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
         nBytes += fprintf(filePtr, ",%d,%lu,%lu,%lu,%lu",procStat->pid,procStat->recTime,procStat->recTimeUSec,procStat->startTime,procStat->startTimeUSec);
         nBytes += fprintf(filePtr, ",%c,%d,%d,%d",procStat->state,procStat->ppid,procStat->pgrp,procStat->session);
@@ -614,7 +676,25 @@ int ProcTextIO::write_procstat(procstat* start_ptr, int cnt) {
     return nBytes;
 }
 
-ProcTextIO::ProcTextIO(const std::string& _filename, ProcIOFileMode _mode): filename(_filename),mode(_mode) {
+bool ProcTextIO::set_context(const std::string& _hostname, const std::string& _identifier, const std::string& _subidentifier) {
+	size_t endPos = _hostname.find('.');
+	endPos = endPos == std::string::npos ? _hostname.size() : endPos;
+	hostname.assign(_hostname, 0, endPos);
+
+	endPos = _identifier.find('.');
+	endPos = endPos == std::string::npos ? _identifier.size() : endPos;
+	identifier.assign(_identifier, 0, endPos);
+
+	endPos = _subidentifier.find('.');
+	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
+	subidentifier.assign(_identifier, 0, endPos);
+	return true;
+}
+
+ProcTextIO::ProcTextIO(const std::string& _filename, ProcIOFileMode _mode) {
+	filename = _filename;
+	mode = _mode;
+
 	filePtr = NULL;
 
 	if (mode == FILE_MODE_WRITE) {

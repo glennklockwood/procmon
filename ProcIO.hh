@@ -17,10 +17,15 @@
 #include <unistd.h>
 #include <exception>
 #include <string>
-#include "hdf5.h"
 
+#ifdef __USE_HDF5
+#include "hdf5.h"
+#endif /* __USE_HDF5 */
+
+#ifdef __USE_AMQP
 #include <amqp_tcp_socket.h>
 #include <amqp_framing.h>
+#endif
 
 #include "ProcData.hh"
 
@@ -48,10 +53,11 @@ typedef enum _ProcRecordType {
 
 class ProcIO {
 public:
-	ProcIO() { contextSet = false; }
+	ProcIO();
+	~ProcIO();
     virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
-    virtual int write_procdata(procdata* start_ptr, int count);
-    virtual int write_procstat(procstat* start_ptr, int count);
+    virtual unsigned int write_procdata(procdata* start_ptr, int count);
+    virtual unsigned int write_procstat(procstat* start_ptr, int count);
 protected:
 	bool contextSet;
     std::string identifier;
@@ -59,13 +65,13 @@ protected:
     std::string hostname;
 };
 
-class ProcTextIO : protected ProcIO {
+class ProcTextIO : public ProcIO {
 public:
-    ProcTextIO(const std::string& filename, ProcIOFileMode mode);
+    ProcTextIO(const std::string& _filename, ProcIOFileMode _mode);
     ~ProcTextIO();
-    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
-    virtual int write_procdata(procdata* start_ptr, int count);
-    virtual int write_procstat(procstat* start_ptr, int count);
+    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier) override;
+    virtual unsigned int write_procdata(procdata* start_ptr, int count) override;
+    virtual unsigned int write_procstat(procstat* start_ptr, int count) override;
     ProcRecordType read_stream_record(procdata* procData, procstat* procStat);
 private:
 	int fill_buffer();
@@ -79,13 +85,14 @@ private:
 	char buffer[TEXT_BUFFER_SIZE];
 };
 
-class ProcHDF5IO : protected ProcIO {
+#ifdef __USE_HDF5
+class ProcHDF5IO : public ProcIO {
 public:
     ProcHDF5IO(const std::string& filename, ProcIOFileMode mode);
     ~ProcHDF5IO();
     virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
-    virtual int write_procdata(procdata* start_ptr, int count);
-    virtual int write_procstat(procstat* start_ptr, int count);
+    virtual unsigned int write_procdata(procdata* start_ptr, int count);
+    virtual unsigned int write_procstat(procstat* start_ptr, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
     unsigned int read_procdata(procdata* start_ptr, unsigned int start_id, unsigned int count);
@@ -110,14 +117,16 @@ private:
     hid_t type_procdata;
     hid_t type_procstat;
 };
+#endif
 
-class ProcAMQPIO : protected ProcIO {
+#ifdef __USE_AMQP
+class ProcAMQPIO : public ProcIO {
 public:
     ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, const std::string& _username, const std::string& _password, const std::string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);
     ~ProcAMQPIO();
-    virtual bool set_context(std::string& hostname, std::string& identifier, std::string& subidentifier);
-    virtual int write_procdata(procdata* start_ptr, int count);
-    virtual int write_procstat(procstat* start_ptr, int count);
+    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
+    virtual unsigned int write_procdata(procdata* start_ptr, int count);
+    virtual unsigned int write_procstat(procstat* start_ptr, int count);
     //ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec);
 private:
 	bool _amqp_open();
@@ -136,12 +145,15 @@ private:
 	amqp_connection_state_t conn;
 	amqp_socket_t* socket;
 	amqp_rpc_reply_t status;
+	bool queueConnected;
+	amqp_bytes_t queue;
 
 	bool amqpError;
 	std::string amqpErrorMessage;
 
-	char sendBuffer[AMQP_BUFFER_SIZE];
+	char buffer[AMQP_BUFFER_SIZE];
 };
+#endif
 
 class ProcIOException : public std::exception {
 public:
@@ -158,3 +170,4 @@ private:
 };
 
 #endif /* PROCFMT_H_ */
+

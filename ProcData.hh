@@ -3,7 +3,7 @@
 
 #define OUTPUT_TYPE_TEXT 0x1
 #define OUTPUT_TYPE_HDF5 0x2
-#define OUTPUT_TYPE_MQ   0x4
+#define OUTPUT_TYPE_AMQP 0x4
 
 #define BUFFER_SIZE 1024
 #define LBUFFER_SIZE 8192
@@ -82,6 +82,17 @@ typedef struct _procstat {
     unsigned long m_text;
     unsigned long m_data;
 } procstat;
+
+typedef struct _procfd {
+	unsigned int pid;
+	unsigned int ppid;
+    unsigned long recTime;
+    unsigned long recTimeUSec;
+    char path[BUFFER_SIZE];
+	int fd;
+	int fds;
+} procfd;
+
 
 
 #endif
