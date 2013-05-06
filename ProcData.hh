@@ -8,8 +8,11 @@
 #define BUFFER_SIZE 1024
 #define LBUFFER_SIZE 8192
 #define EXEBUFFER_SIZE 256
+#define IDENTIFIER_SIZE 24
 
 typedef struct _procdata {
+	char identifier[IDENTIFIER_SIZE];
+	char subidentifier[IDENTIFIER_SIZE];
     char execName[EXEBUFFER_SIZE];
     unsigned long cmdArgBytes;
     char cmdArgs[BUFFER_SIZE];
@@ -21,14 +24,12 @@ typedef struct _procdata {
     unsigned long startTimeUSec;
     unsigned int pid;
     unsigned int ppid;
-    unsigned int nextRec;
-    unsigned int prevRec;
 } procdata;
 
 typedef struct _procstat {
+	char identifier[IDENTIFIER_SIZE];
+	char subidentifier[IDENTIFIER_SIZE];
     unsigned int pid;
-    unsigned int nextRec;
-    unsigned int prevRec;
     unsigned long recTime;
     unsigned long recTimeUSec;
     unsigned long startTime;
@@ -84,6 +85,8 @@ typedef struct _procstat {
 } procstat;
 
 typedef struct _procfd {
+	char id[IDENTIFIER_SIZE];
+	char subid[IDENTIFIER_SIZE];
 	unsigned int pid;
 	unsigned int ppid;
     unsigned long recTime;
@@ -91,6 +94,7 @@ typedef struct _procfd {
     char path[BUFFER_SIZE];
 	int fd;
 	int fds;
+	unsigned int mode;
 } procfd;
 
 
