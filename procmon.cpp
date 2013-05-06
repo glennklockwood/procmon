@@ -484,6 +484,8 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
     ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
 		if (procStats[idx].pid == ppid || procStats[idx].state > 0) {
+			procStats[idx].state = 1;
+			pids[ntargets] = procStats[idx].pid;
 			indices[ntargets++] = idx;
 		}
 	}
@@ -497,7 +499,7 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 		nNewTargets = ntargets;
 		for (idx = 0; idx < npids; idx++) {
 			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
-				if (procStats[idx].ppid == pids[innerIdx]) {
+				if (procStats[idx].ppid == pids[innerIdx] && procStats[idx].state == 0) {
 					pids[nNewTargets] = procStats[idx].pid;
 					indices[nNewTargets] = idx;
 					nNewTargets++;
@@ -655,6 +657,7 @@ int main(int argc, char** argv) {
 	if (config.daemonize) {
 		daemonize();
 	}
+	std::cout << "hostname: " << config.hostname << "; identifier: " << config.identifier << "; subidentifier: " << config.subidentifier << std::endl;
 
     std::vector<ProcIO*> outputMethods;
     if (config.outputFlags & OUTPUT_TYPE_TEXT) {
