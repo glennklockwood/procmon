@@ -21,6 +21,7 @@ LDFLAGS=-static
 ifdef GENEPOOL
 	USE_AMQP=1
 	USE_BOOST=1
+	USE_HDF5=1
 	CONFIG="cp config_genepool.h config.h"
 	CFLAGS += "-DUSE_CONFIG_H=1"
 endif
@@ -40,16 +41,20 @@ ifdef USE_BOOST
 	LDFLAGS += $(BOOST_LDFLAGS)
 endif
 
-all: config.h driver procmon
+all: config.h driver procmon ProcReducer
 config.h:
 	/bin/sh -c $(CONFIG)
 driver: driver.o ProcIO.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
 procmon: procmon.o ProcIO.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
+ProcReducer: ProcReducer.o ProcIO.o
+	$(CXX) -o $@ $^ $(LDFLAGS)
 procmon.o: procmon.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 driver.o: driver.cpp
+	$(CXX) -c $(CFLAGS) -o $@ -c $^
+ProcReducer.o: ProcReducer.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 ProcIO.o: ProcIO.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
