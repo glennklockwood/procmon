@@ -123,7 +123,7 @@ public:
             ("daemonize,d", "Daemonize the procmon process")
             ("frequency,f", po::value<int>(&(this->frequency))->default_value(DEFAULT_FREQUENCY), "Time elapsed between measurements during normal data collection (in seconds)")
             ("initialphase,i", po::value<int>(&(this->initialPhase))->default_value(DEFAULT_INITIAL_PHASE), "Length of the initial phase (in seconds)")
-            ("initialfrequency,if", po::value<int>(&(this->initialFrequency))->default_value(DEFAULT_INITIAL_PHASE_FREQUENCY), "Time elapsed between measurements during initial phase (in seconds)")
+            ("initialfrequency,F", po::value<int>(&(this->initialFrequency))->default_value(DEFAULT_INITIAL_PHASE_FREQUENCY), "Time elapsed between measurements during initial phase (in seconds)")
             ("ppid,p",po::value<int>(&(this->targetPPid))->default_value(1), "parent process id of monitoring hierarchy")
             ("group,g",po::value<std::vector<int> >(&gidRange)->multitoken(), "min and max group ids to search for secondary group process identification (GridEngine integration)")
             ("identifier,I",po::value<std::string>(&(this->identifier))->default_value(DEFAULT_IDENTIFIER), "identifier for tagging data")
