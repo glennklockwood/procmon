@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <exception>
 #include <string>
+#include <map>
 
 #ifdef __USE_HDF5
 #include "hdf5.h"
@@ -51,25 +52,27 @@ typedef enum _ProcRecordType {
     TYPE_INVALID = 2,
 } ProcRecordType;
 
+using namespace std;
+
 class ProcIO {
 public:
 	ProcIO();
 	~ProcIO();
-    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
+    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
 protected:
 	bool contextSet;
-    std::string identifier;
-    std::string subidentifier;
-    std::string hostname;
+    string identifier;
+    string subidentifier;
+    string hostname;
 };
 
 class ProcTextIO : public ProcIO {
 public:
-    ProcTextIO(const std::string& _filename, ProcIOFileMode _mode);
+    ProcTextIO(const string& _filename, ProcIOFileMode _mode);
     ~ProcTextIO();
-    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier) override;
+    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier) override;
     virtual unsigned int write_procdata(procdata* start_ptr, int count) override;
     virtual unsigned int write_procstat(procstat* start_ptr, int count) override;
     ProcRecordType read_stream_record(procdata* procData, procstat* procStat);
@@ -78,7 +81,7 @@ private:
 	bool read_procstat(procstat*);
 	bool read_procdata(procdata*);
 
-    std::string filename;
+    string filename;
     ProcIOFileMode mode;
 	FILE *filePtr;
 	char *sPtr, *ePtr, *ptr;
@@ -86,32 +89,55 @@ private:
 };
 
 #ifdef __USE_HDF5
+class hdf5Ref {
+	friend class ProcHDF5IO;
+
+public:
+	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const std::string& hostname, ProcIOFileMode mode);
+	~hdf5Ref();
+
+private:
+	unsigned int open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute);
+	hid_t group;
+	hid_t procstatDS;
+	hid_t procdataDS;
+	hid_t procstatSizeID;
+	hid_t procdataSizeID;
+	unsigned int procstatSize;
+	unsigned int procdataSize;
+	time_t lastUpdate;
+};
+
 class ProcHDF5IO : public ProcIO {
 public:
-    ProcHDF5IO(const std::string& filename, ProcIOFileMode mode);
+    ProcHDF5IO(const string& filename, ProcIOFileMode mode);
     ~ProcHDF5IO();
-    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
-    virtual unsigned int write_procdata(procdata* start_ptr, int count);
-    virtual unsigned int write_procstat(procstat* start_ptr, int count);
+    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
+    virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
+    virtual unsigned int write_procstat(procstat* start_ptr, unsigned int start_id, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
     unsigned int read_procdata(procdata* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procstat(procstat* start_ptr, unsigned int start_id, unsigned int count);
+	unsigned int get_nprocdata();
+	unsigned int get_nprocstat();
+	void flush();
+	void trim_segments(time_t cutoff);
 private:
-    unsigned int read_dataset(const char* dsName, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count);
-    unsigned int write_dataset(const char* dsName, hid_t type, void* start_pointer, int count, int chunkSize);
+    unsigned int read_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count);
+    unsigned int write_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, int count, int chunkSize);
     void initialize_types();
 
-    std::string filename;
-	std::string combinedId;
+    string filename;
     ProcIOFileMode mode;
     hid_t file;
-    hid_t hostGroup;
-    hid_t idGroup;
+	map<string,hdf5Ref*> openRefs;
+	hdf5Ref* hdf5Segment;
 
     /* identifiers for string types */
     hid_t strType_exeBuffer;
     hid_t strType_buffer;
+	hid_t strType_idBuffer;
 
     /* identifiers for complex types */
     hid_t type_procdata;
@@ -122,23 +148,31 @@ private:
 #ifdef __USE_AMQP
 class ProcAMQPIO : public ProcIO {
 public:
-    ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, const std::string& _username, const std::string& _password, const std::string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);
+    ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, const string& _username, const string& _password, const string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);
     ~ProcAMQPIO();
-    virtual bool set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier);
+    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
-    ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec);
+    ProcRecordType read_stream_record(void **data, int *nRec);
+	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
 	bool _amqp_open();
     bool _amqp_bind_context();
 	bool _amqp_eval_status(amqp_rpc_reply_t _status);
 
-    std::string mqServer;
+	bool _read_procstat(procstat *startPtr, int nRecords, const char* buffer, int nBytes);
+	bool _read_procdata(procdata *startPtr, int nRecords, const char* buffer, int nBytes);
+	bool _set_frame_context(const string& routingKey);
+
+	bool _read_procstat(procstat*, int, char*, int);
+	bool _read_procdata(procdata*, int, char*, int);
+
+    string mqServer;
     int port;
-    std::string mqVHost;
-	std::string username;
-	std::string password;
-    std::string exchangeName;
+    string mqVHost;
+	string username;
+	string password;
+    string exchangeName;
     int frameSize;
     ProcIOFileMode mode;
 
@@ -149,16 +183,21 @@ private:
 	bool queueConnected;
 	amqp_bytes_t queue;
 
+	string frameHostname;
+	string frameIdentifier;
+	string frameSubidentifier;
+	string frameMessageType;
+
 	bool amqpError;
-	std::string amqpErrorMessage;
+	string amqpErrorMessage;
 
 	char buffer[AMQP_BUFFER_SIZE];
 };
 #endif
 
-class ProcIOException : public std::exception {
+class ProcIOException : public exception {
 public:
-	ProcIOException(const std::string& err): error(err) {
+	ProcIOException(const string& err): error(err) {
 	}
 
 	virtual const char* what() const throw() {
@@ -167,7 +206,7 @@ public:
 
 	~ProcIOException() throw() { }
 private:
-    std::string error;
+    string error;
 };
 
 #endif /* PROCFMT_H_ */

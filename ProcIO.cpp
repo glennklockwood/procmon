@@ -3,7 +3,10 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <iostream>
+
+using namespace std;
 
 ProcIO::ProcIO() {
 	contextSet = false;
@@ -11,23 +14,24 @@ ProcIO::ProcIO() {
 
 ProcIO::~ProcIO() {
 }
-bool ProcIO::set_context(const std::string& hostname, const std::string& identifier, const std::string& subidentifier) {
-	std::cout << "set_context: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << std::endl;
+bool ProcIO::set_context(const string& hostname, const string& identifier, const string& subidentifier) {
+	cout << "set_context: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << endl;
 	return false;
 }
 
 unsigned int ProcIO::write_procdata(procdata* start_ptr, int count) {
-	std::cout << "write_procdata: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << std::endl;
+	cout << "write_procdata: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << endl;
 	return 0;
 }
 
 unsigned int ProcIO::write_procstat(procstat* start_ptr, int count) {
-	std::cout << "write_procstat: ProcIO BaseClass called -- THIS iS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << std::endl;
+	cout << "write_procstat: ProcIO BaseClass called -- THIS iS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << endl;
 	return 0;
 }
 
-ProcAMQPIO::ProcAMQPIO(const std::string& _mqServer, int _port, const std::string& _mqVHost, 
-	const std::string& _username, const std::string& _password, const std::string& _exchangeName, 
+#ifdef __USE_AMQP
+ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, 
+	const string& _username, const string& _password, const string& _exchangeName, 
 	const int _frameSize, const ProcIOFileMode _mode):
 
 	mqServer(_mqServer),port(_port),mqVHost(_mqVHost),username(_username),password(_password),
@@ -45,20 +49,18 @@ bool ProcAMQPIO::_amqp_open() {
 	socket = amqp_tcp_socket_new();
 	istatus = amqp_socket_open(socket, mqServer.c_str(), port);
 	if (istatus != 0) {
-		throw ProcIOException("Failed AMQP connection to " + mqServer + ":" + std::to_string(port));
+		throw ProcIOException("Failed AMQP connection to " + mqServer + ":" + to_string(port));
 	}
-	std::cout << "Opened connection to " << mqServer << ":" << port << std::endl; //DMJ
 	amqp_set_socket(conn, socket);
 	_amqp_eval_status(amqp_login(conn, mqVHost.c_str(), 0, frameSize, 0, AMQP_SASL_METHOD_PLAIN, username.c_str(), password.c_str()));
 	if (amqpError) {
-		throw ProcIOException("Failed AMQP login to " + mqServer + ":" + std::to_string(port) + " as " + username + "; Error: " + amqpErrorMessage);
+		throw ProcIOException("Failed AMQP login to " + mqServer + ":" + to_string(port) + " as " + username + "; Error: " + amqpErrorMessage);
 	}
-	std::cout << "Successfully logged in to " << mqServer << ":" << port << mqVHost << "; user: " << username << std::endl; //DMJ
 
 	amqp_channel_open(conn, 1);
 	_amqp_eval_status(amqp_get_rpc_reply(conn));
 	if (amqpError) {
-		throw ProcIOException("Failed AMQP open channel on " + mqServer + ":" + std::to_string(port) + "; Error: " + amqpErrorMessage);
+		throw ProcIOException("Failed AMQP open channel on " + mqServer + ":" + to_string(port) + "; Error: " + amqpErrorMessage);
 	}
 
 	amqp_exchange_declare(conn, 1, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes("topic"), 0, 0, amqp_empty_table);
@@ -66,7 +68,6 @@ bool ProcAMQPIO::_amqp_open() {
 	if (amqpError) {
 		throw ProcIOException("Failed to declare exchange: " + exchangeName + "; Error: " + amqpErrorMessage);
 	}
-	std::cout << "Declared topic exchange: " << exchangeName << std::endl; //DMJ
 	connected = true;
 	return connected;
 }
@@ -78,25 +79,25 @@ bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
 			return false;
 			break;
 		case AMQP_RESPONSE_NONE:
-			amqpErrorMessage = "missing RPC reply type (ReplyVal:" + std::to_string( (unsigned int) status.reply_type) + ")";
+			amqpErrorMessage = "missing RPC reply type (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ")";
 			break;
 		case AMQP_RESPONSE_LIBRARY_EXCEPTION:
-			amqpErrorMessage = std::string(amqp_error_string(status.library_error)) + " (ReplyVal:" + std::to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + std::to_string( (unsigned int) status.library_error) + ")";
+			amqpErrorMessage = string(amqp_error_string(status.library_error)) + " (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + to_string( (unsigned int) status.library_error) + ")";
 			break;
 		case AMQP_RESPONSE_SERVER_EXCEPTION: {
 			switch (status.reply.id) {
 				case AMQP_CONNECTION_CLOSE_METHOD: {
 					amqp_connection_close_t *m = (amqp_connection_close_t *) status.reply.decoded;
-					amqpErrorMessage = "server connection error " + std::to_string((int) m->reply_code) + ", message: " +  std::string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
+					amqpErrorMessage = "server connection error " + to_string((int) m->reply_code) + ", message: " +  string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
 					break;
 				}
 				case AMQP_CHANNEL_CLOSE_METHOD: {
 					amqp_channel_close_t *m = (amqp_channel_close_t *) status.reply.decoded;
-					amqpErrorMessage = "server channel error " + std::to_string((int) m->reply_code) + ", message: " +  std::string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
+					amqpErrorMessage = "server channel error " + to_string((int) m->reply_code) + ", message: " +  string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
 					break;
 				}
 				default:
-					amqpErrorMessage = "unknown server error, method id " + std::to_string((int)status.reply.id);
+					amqpErrorMessage = "unknown server error, method id " + to_string((int)status.reply.id);
 					break;
 			}
 			break;
@@ -120,7 +121,8 @@ ProcAMQPIO::~ProcAMQPIO() {
 	}
 }
 
-ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, int& nRec) {
+ProcRecordType ProcAMQPIO::read_stream_record(void **data, int *nRec) {
+	ProcRecordType recType = TYPE_INVALID;
     for ( ; ; ) {
         amqp_frame_t frame;
         int result;
@@ -137,7 +139,7 @@ ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, in
             continue;
         }
         amqp_basic_deliver_t* d = (amqp_basic_deliver_t *) frame.payload.method.decoded;
-        std::string routingKey((char*)d->routing_key.bytes, 0, (int) d->routing_key.len);
+        string routingKey((char*)d->routing_key.bytes, 0, (int) d->routing_key.len);
         result = amqp_simple_wait_frame(conn, &frame);
         if (result < 0) {
             continue;
@@ -169,11 +171,187 @@ ProcFileRecordType read_stream_record(procdata* procData, procstat* procStat, in
 
         if (body_received == body_target) {
             // got full message successfully!
-            std::cout << "Routing Key: " << routingKey << std::endl;
-            std::cout << "Message    : " << message_buffer << std::endl;
+			_set_frame_context(routingKey);
+			char *ptr = message_buffer;
+			char *sPtr = message_buffer;
+			int nRecords = 0;
+			while (ptr - message_buffer < body_target) {
+				if (*ptr == '=') {
+					if (strncmp(sPtr, "nRecords", ptr-sPtr) != 0) {
+						break;
+					}
+					sPtr = ptr+1;
+				} else if (*ptr == '\n') {
+					nRecords = atoi(sPtr);
+					sPtr = ptr + 1;
+					break;
+				}
+				ptr++;
+			}
+			if (nRecords > 0) {
+				if (frameMessageType == "procstat") {
+					*data = malloc(sizeof(procstat) * nRecords);
+					recType = TYPE_PROCSTAT;
+				} else if (frameMessageType == "procdata") {
+					*data = malloc(sizeof(procdata) * nRecords);
+					recType = TYPE_PROCDATA;
+				}
+				if (*data == NULL) {
+					throw ProcIOException("failed to allocate memory for " + to_string(nRecords) + " " + frameMessageType + " records");
+				}
+				if (recType == TYPE_PROCSTAT) {
+					_read_procstat((procstat*) *data, nRecords, sPtr, body_received - (sPtr - message_buffer));
+					*nRec = nRecords;
+				} else if (recType == TYPE_PROCDATA) {
+					_read_procdata((procdata*) *data, nRecords, sPtr, body_received - (sPtr - message_buffer));
+					*nRec = nRecords;
+				}
+			}
         }
         break;
     }
+	return recType;
+}
+
+bool ProcAMQPIO::_read_procstat(procstat *startPtr, int nRecords, char* buffer, int nBytes) {
+	char* ptr = buffer;
+	char* ePtr = buffer + nBytes;
+	char* sPtr = ptr;
+
+
+    int pos = 0;
+	int idx = 0;
+	bool done = false;
+	procstat* procStat = startPtr;
+    while (idx < nRecords && ptr < ePtr) {
+        if (*ptr == ',' || *ptr == '\n') {
+			if (done) {
+				procStat = &(startPtr[++idx]);
+				pos = 0;
+				done = false;
+			}
+            if (*ptr == '\n') {
+				done = true;
+			}
+            *ptr = 0;
+            switch (pos) {
+                case 0: procStat->pid = atoi(sPtr); break;
+                case 1: procStat->recTime = strtoul(sPtr, &ptr, 10); break;
+                case 2: procStat->recTimeUSec = strtoul(sPtr, &ptr, 10); break;
+                case 3: procStat->startTime = strtoul(sPtr, &ptr, 10); break;
+                case 4: procStat->startTimeUSec = strtoul(sPtr, &ptr, 10); break;
+                case 5: procStat->state = *sPtr; break;
+                case 6: procStat->ppid = atoi(sPtr); break;
+                case 7: procStat->pgrp = atoi(sPtr); break;
+                case 8: procStat->session = atoi(sPtr); break;
+                case 9: procStat->tty = atoi(sPtr); break;
+                case 10: procStat->tpgid = atoi(sPtr); break;
+                case 11: procStat->flags = (unsigned int) strtoul(sPtr, &ptr, 10); break;
+                case 12: procStat->utime = strtoul(sPtr, &ptr, 10); break;
+                case 13: procStat->stime = strtoul(sPtr, &ptr, 10); break;
+                case 14: procStat->priority = strtol(sPtr, &ptr, 10); break;
+                case 15: procStat->nice = strtol(sPtr, &ptr, 10); break;
+                case 16: procStat->numThreads = strtol(sPtr, &ptr, 10); break;
+                case 17: procStat->vsize = strtoul(sPtr, &ptr, 10); break;
+                case 18: procStat->rss = strtoul(sPtr, &ptr, 10); break;
+                case 19: procStat->rsslim = strtoul(sPtr, &ptr, 10); break;
+                case 20: procStat->vmpeak = strtoul(sPtr, &ptr, 10); break;
+                case 21: procStat->rsspeak = strtoul(sPtr, &ptr, 10); break;
+                case 22: procStat->signal = strtoul(sPtr, &ptr, 10); break;
+                case 23: procStat->blocked = strtoul(sPtr, &ptr, 10); break;
+                case 24: procStat->sigignore = strtoul(sPtr, &ptr, 10); break;
+                case 25: procStat->sigcatch = strtoul(sPtr, &ptr, 10); break;
+                case 26: procStat->cpusAllowed = atoi(sPtr); break;
+                case 27: procStat->rtPriority = (unsigned int) strtoul(sPtr, &ptr, 10); break;
+                case 28: procStat->policy = (unsigned int) strtoul(sPtr, &ptr, 10); break;
+                case 29: procStat->guestTime = strtoul(sPtr, &ptr, 10); break;
+                case 30: procStat->delayacctBlkIOTicks = strtoull(sPtr, &ptr, 10); break;
+                case 31: procStat->io_rchar = strtoull(sPtr, &ptr, 10); break;
+                case 32: procStat->io_wchar = strtoull(sPtr, &ptr, 10); break;
+                case 33: procStat->io_syscr = strtoull(sPtr, &ptr, 10); break;
+                case 34: procStat->io_syscw = strtoull(sPtr, &ptr, 10); break;
+                case 35: procStat->io_readBytes = strtoull(sPtr, &ptr, 10); break;
+                case 36: procStat->io_writeBytes = strtoull(sPtr, &ptr, 10); break;
+                case 37: procStat->io_cancelledWriteBytes = strtoull(sPtr, &ptr, 10); break;
+                case 38: procStat->m_size = strtoul(sPtr, &ptr, 10); break;
+                case 39: procStat->m_resident = strtoul(sPtr, &ptr, 10); break;
+                case 40: procStat->m_share = strtoul(sPtr, &ptr, 10); break;
+                case 41: procStat->m_text = strtoul(sPtr, &ptr, 10); break;
+                case 42: procStat->m_data = strtoul(sPtr, &ptr, 10); break;
+                case 43: procStat->realUid = strtoul(sPtr, &ptr, 10); break;
+                case 44: procStat->effUid = strtoul(sPtr, &ptr, 10); break;
+                case 45: procStat->realGid = strtoul(sPtr, &ptr, 10); break;
+                case 46: procStat->effGid = strtoul(sPtr, &ptr, 10); break;
+            }
+            pos++;
+            sPtr = ptr + 1;
+        }
+        ptr++;
+    }
+    return idx == nRecords;
+}
+
+bool ProcAMQPIO::_read_procdata(procdata *startPtr, int nRecords, char* buffer, int nBytes) {
+	char* ptr = buffer;
+	char* ePtr = buffer + nBytes;
+	char* sPtr = ptr;
+
+    int pos = 0;
+	int idx = 0;
+	int readBytes = -1;
+	bool done = false;
+	procdata* procData = startPtr;
+    while (idx < nRecords && ptr < ePtr) {
+        if ((*ptr == ',' || *ptr == '\n') && (readBytes < 0 || readBytes == (ptr-sPtr))) {
+			if (done) {
+				procData = &(startPtr[++idx]);
+				pos = 0;
+				readBytes = -1;
+				done = false;
+			}
+            if (*ptr == '\n') {
+				done = true;
+			}
+            *ptr = 0;
+            switch (pos) {
+                case 0: procData->pid = atoi(sPtr); break;
+                case 1: procData->ppid = atoi(sPtr); break;
+                case 2: procData->recTime = strtoul(sPtr, &ptr, 10); break;
+                case 3: procData->recTimeUSec = strtoul(sPtr, &ptr, 10); break;
+                case 4: procData->startTime = strtoul(sPtr, &ptr, 10); break;
+                case 5: procData->startTimeUSec = strtoul(sPtr, &ptr, 10); break;
+                case 6: readBytes = atoi(sPtr); break;
+                case 7:
+					memcpy(procData->execName, sPtr, sizeof(char)*readBytes);
+					procData->execName[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					readBytes = -1;
+					break;
+                case 8: readBytes = atoi(sPtr); break;
+                case 9:
+					memcpy(procData->cmdArgs, sPtr, sizeof(char)*readBytes);
+					procData->cmdArgs[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					procData->cmdArgBytes = readBytes;
+					readBytes = -1;
+					break;
+                case 10: readBytes = atoi(sPtr); break;
+                case 11:
+					memcpy(procData->exePath, sPtr, sizeof(char)*readBytes);
+					procData->exePath[readBytes < EXEBUFFER_SIZE ? readBytes : EXEBUFFER_SIZE] = 0;
+					readBytes = -1;
+					break;
+                case 12: readBytes = atoi(sPtr); break;
+                case 13:
+					memcpy(procData->cwdPath, sPtr, sizeof(char)*readBytes);
+					procData->cwdPath[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					readBytes = -1;
+					break;
+            }
+            pos++;
+            sPtr = ptr + 1;
+        }
+        ptr++;
+    }
+    return idx != nRecords;
 }
 
 unsigned int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
@@ -182,9 +360,10 @@ unsigned int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
     ptr += snprintf(ptr, AMQP_BUFFER_SIZE, "nRecords=%d\n", count);
     for (int i = 0; i < count; i++) {
         procdata* procData = &(start_ptr[i]);
-        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%d,%lu,%lu,%lu,%lu",procData->pid,procData->ppid,procData->recTime,procData->recTimeUSec,procData->startTime,procData->startTimeUSec);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%d,%lu,%lu,%lu,%lu", procData->pid,procData->ppid,procData->recTime,procData->recTimeUSec,procData->startTime,procData->startTimeUSec);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->execName), procData->execName);
-        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", procData->cmdArgBytes, procData->cmdArgs);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,", procData->cmdArgBytes);
+		bcopy(procData->cmdArgs, ptr, procData->cmdArgBytes); ptr += procData->cmdArgBytes;
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->exePath), procData->exePath);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s\n", strlen(procData->cwdPath), procData->cwdPath);
     }
@@ -243,26 +422,24 @@ unsigned int ProcAMQPIO::write_procstat(procstat* start_ptr, int count) {
     return nBytes;
 }
 
-bool ProcAMQPIO::set_context(const std::string& _hostname, const std::string& _identifier, const std::string& _subidentifier) {
+bool ProcAMQPIO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
 	size_t endPos = _hostname.find('.');
-	endPos = endPos == std::string::npos ? _hostname.size() : endPos;
+	endPos = endPos == string::npos ? _hostname.size() : endPos;
 	hostname.assign(_hostname, 0, endPos);
 
 	endPos = _identifier.find('.');
-	endPos = endPos == std::string::npos ? _identifier.size() : endPos;
+	endPos = endPos == string::npos ? _identifier.size() : endPos;
 	identifier.assign(_identifier, 0, endPos);
 
 	endPos = _subidentifier.find('.');
-	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
-	subidentifier.assign(_identifier, 0, endPos);
+	endPos = endPos == string::npos ? _subidentifier.size() : endPos;
+	subidentifier.assign(_subidentifier, 0, endPos);
 
-    messageType = "*";
-
-	if (mode == FILE_MODE_WRITE) {
+	if (mode == FILE_MODE_READ) {
 		try {
 			_amqp_bind_context();
 		} catch (ProcIOException& e) {
-			ProcIOException e2("FAILED to set_context in ProcAMQPIO (declare and bind queue): " + e.what());
+			ProcIOException e2(string("FAILED to set_context in ProcAMQPIO (declare and bind queue): ") + e.what());
 			throw e2;
 		}
 	}
@@ -270,38 +447,143 @@ bool ProcAMQPIO::set_context(const std::string& _hostname, const std::string& _i
 	return true;
 }
 
+bool ProcAMQPIO::get_frame_context(string& _hostname, string& _identifier, string& _subidentifier) {
+	_hostname = frameHostname;
+	_identifier = frameIdentifier;
+	_subidentifier = frameSubidentifier;
+	return true;
+}
+
+bool ProcAMQPIO::_set_frame_context(const string& routingKey) {
+	size_t pos = 0;
+	size_t lpos = 0;
+	int idx = 0;
+	while ((pos = routingKey.find('.', lpos)) != string::npos) {
+		switch(idx++) {
+			case 0:
+				frameHostname.assign(routingKey, lpos, pos - lpos);
+				break;
+			case 1:
+				frameIdentifier.assign(routingKey, lpos, pos - lpos);
+				break;
+			case 2:
+				frameSubidentifier.assign(routingKey, lpos, pos - lpos);
+				break;
+		}
+		lpos = pos+1;
+	}
+	if (idx == 3) {
+		frameMessageType.assign(routingKey, lpos, routingKey.size() - lpos);
+	}
+	cout << "routingkey: " << routingKey << "; hostname: " << frameHostname << "; identifier: " << frameIdentifier << "; subidentifier: " << frameSubidentifier << "; messageType: " << frameMessageType << std::endl;
+	return idx == 3;
+}
+
 bool ProcAMQPIO::_amqp_bind_context() {
-	amqp_declare_queue_ok_t* queue_reply = amqp_queue_declare(conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
+	amqp_queue_declare_ok_t* queue_reply = amqp_queue_declare(conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
 	_amqp_eval_status(amqp_get_rpc_reply(conn));
 	if (amqpError) {
-		throw ProcIOException("Failed AMQP queue declare on " + mqServer + ":" + std::to_string(port) + ", exchange " + mqExchangeName + "; Error: " + amqpErrorMessage);
+		throw ProcIOException("Failed AMQP queue declare on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
 	}
-    queue = amqp_bytes_malloc_dup(r->queue);
+    queue = amqp_bytes_malloc_dup(queue_reply->queue);
     if (queue.bytes == NULL) {
         throw ProcIOException("Failed AMQP queue declare: out of memory!");
     }
 
-    std::string bindKey = hostname + "." + identifier + "." + subidentifier + "." + messageType;
-    amqp_queue_bind(conn, 1, queue, amqp_cstring_bytes(mqExchangeName.c_str()), amqp_cstring_bytes(bindKey.c_str()), amqp_empty_table);
+    string bindKey = hostname + "." + identifier + "." + subidentifier + ".*";
+    amqp_queue_bind(conn, 1, queue, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes(bindKey.c_str()), amqp_empty_table);
     _amqp_eval_status(amqp_get_rpc_reply(conn));
     if (amqpError) {
-        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + std::to_string(port) + ", exchange " + mqExchangeName + "; Error: " + amqpErrorMessage);
+        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
     }
     amqp_basic_consume(conn, 1, queue, amqp_empty_bytes, 0, 1, 0, amqp_empty_table);
     _amqp_eval_status(amqp_get_rpc_reply(conn));
     if (amqpError) {
-        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + std::to_string(port) + ", exchange " + mqExchangeName + "; Error: " + amqpErrorMessage);
+        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
     }
     return true;
 }
+#endif
 
 #ifdef __USE_HDF5
-ProcHDF5IO::ProcHDF5IO(const std::string& _filename, ProcIOFileMode _mode): filename(_filename),mode(_mode) {
+hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const string& hostname, ProcIOFileMode mode) {
+	group = -1;
+	procstatDS = -1;
+	procdataDS = -1;
+	procstatSizeID = -1;
+	procdataSizeID = -1;
+	procstatSize = 0;
+	procdataSize = 0;
+
+    if (H5Lexists(file, hostname.c_str(), H5P_DEFAULT) == 1) {
+        group = H5Gopen2(file, hostname.c_str(), H5P_DEFAULT);
+	} else if (mode == FILE_MODE_WRITE) {
+        group = H5Gcreate(file, hostname.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    }
+    if (group < 0) {
+       	throw ProcIOException("Failed to access hostname group: " + hostname);
+    }
+
+	procstatSize = open_dataset("procstat", type_procstat, 128, &procstatDS, &procstatSizeID);
+	procdataSize = open_dataset("procdata", type_procdata, 4, &procdataDS, &procdataSizeID);
+}
+
+unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute) {
+	unsigned int size = 0;
+
+	if (group < 0) {
+		throw ProcIOException("Called openDataset before group was opened!");
+	}
+
+    if (H5Lexists(group, dsName, H5P_DEFAULT) == 1) {
+        *dataset = H5Dopen2(group, dsName, H5P_DEFAULT);
+		*attribute = H5Aopen(*dataset, "nRecords", H5P_DEFAULT);
+		H5Aread(*attribute, H5T_NATIVE_UINT, &size);
+    } else {
+        hid_t param;
+		hid_t a_id;
+		hsize_t rank = 1;
+        hsize_t initial_dims = chunkSize;
+        hsize_t maximal_dims = H5S_UNLIMITED;
+        hid_t dataspace = H5Screate_simple(rank, &initial_dims, &maximal_dims);
+    	hsize_t chunk_dims = chunkSize;
+
+        param = H5Pcreate(H5P_DATASET_CREATE);
+        H5Pset_chunk(param, rank, &chunk_dims);
+        *dataset = H5Dcreate(group, dsName, type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
+        H5Pclose(param);
+        H5Sclose(dataspace);
+
+		a_id = H5Screate(H5S_SCALAR);
+		*attribute = H5Acreate2(*dataset, "nRecords", H5T_NATIVE_UINT, a_id, H5P_DEFAULT, H5P_DEFAULT);
+		H5Awrite(*attribute, H5T_NATIVE_UINT, &size);
+    }
+	return size;
+}
+
+hdf5Ref::~hdf5Ref() {
+	if (procstatSizeID >= 0) {
+		H5Aclose(procstatSizeID);
+	}
+	if (procdataSizeID >= 0) {
+		H5Aclose(procdataSizeID);
+	}
+	if (procstatDS >= 0) {
+		H5Dclose(procstatDS);
+	}
+	if (procdataDS >= 0) {
+		H5Dclose(procdataDS);
+	}
+	if (group >= 0) {
+		H5Gclose(group);
+	}
+}
+
+ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode): filename(_filename),mode(_mode) {
 	file = -1;
-	hostGroup = -1;
-	idGroup = -1;
 	strType_exeBuffer = -1;
 	strType_buffer = -1;
+	strType_idBuffer = -1;
 	type_procdata = -1;
 	type_procstat = -1;
 
@@ -318,12 +600,13 @@ ProcHDF5IO::ProcHDF5IO(const std::string& _filename, ProcIOFileMode _mode): file
 	
 ProcHDF5IO::~ProcHDF5IO() {
     herr_t status;
+	for (auto iter = openRefs.begin(), end = openRefs.end(); iter != end; ++iter) {
+		delete (*iter).second;
+	}
     if (type_procdata > 0) status = H5Tclose(type_procdata);
     if (type_procstat > 0) status = H5Tclose(type_procstat);
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
-    if (idGroup > 0) status = H5Gclose(idGroup);
-    if (hostGroup > 0) status = H5Gclose(hostGroup);
     if (file > 0) status = H5Fclose(file);
 }
 
@@ -335,61 +618,39 @@ unsigned int ProcHDF5IO::read_procstat(procstat* procStat, unsigned int id) {
     return read_procstat(procStat, id, 1);
 }
 
-bool ProcHDF5IO::set_context(const std::string& _hostname, const std::string& _identifier, const std::string& _subidentifier) {
+bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
     herr_t status;
 	size_t endPos = _hostname.find('.');
-	endPos = endPos == std::string::npos ? _hostname.size() : endPos;
-	std::string t_hostname(_hostname, 0, endPos);
+	endPos = endPos == string::npos ? _hostname.size() : endPos;
+	string t_hostname(_hostname, 0, endPos);
 
 	endPos = _identifier.find('.');
-	endPos = endPos == std::string::npos ? _identifier.size() : endPos;
-	std::string t_identifier(_identifier, 0, endPos);
+	endPos = endPos == string::npos ? _identifier.size() : endPos;
+	string t_identifier(_identifier, 0, endPos);
 
 	endPos = _subidentifier.find('.');
-	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
-	std::string t_subidentifier(_identifier, 0, endPos);
+	endPos = endPos == string::npos ? _subidentifier.size() : endPos;
+	string t_subidentifier(_subidentifier, 0, endPos);
 
-	std::string _combinedId = t_identifier + "." + t_subidentifier;
-	bool hostSame = hostname == t_hostname;
-	bool idSame = combinedId == _combinedId;
-
-	if ((!hostSame || !idSame) && idGroup != 0) {
-		status = H5Gclose(idGroup);
-		idGroup = -1;
+	string key = t_hostname;
+	
+	auto refIter = openRefs.find(key);
+	if (refIter == openRefs.end()) {
+		/* need to create new hdf5Ref */
+		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, t_hostname, mode);
+		auto added = openRefs.insert({key,ref});
+		if (added.second) refIter = added.first;
 	}
-
-	if (!hostSame && hostGroup != 0) {
-		status = H5Gclose(hostGroup);
-		hostGroup = -1;
+	if (refIter != openRefs.end()) {
+		hdf5Segment = (*refIter).second;
+	} else {
+		hdf5Segment = nullptr;
 	}
-
-	if (hostGroup < 0) {
-    	if (H5Lexists(file, _hostname.c_str(), H5P_DEFAULT) == 1) {
-        	hostGroup = H5Gopen2(file, _hostname.c_str(), H5P_DEFAULT);
-    	} else if (mode == FILE_MODE_WRITE) {
-        	hostGroup = H5Gcreate(file, _hostname.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-		}
-    }
-    if (hostGroup < 0) {
-        throw ProcIOException("Failed to access hostname group: " + _hostname);
-    }
-
-	if (idGroup < 0) {
-    	if (H5Lexists(hostGroup, _combinedId.c_str(), H5P_DEFAULT) == 1) {
-        	idGroup = H5Gopen2(hostGroup, _combinedId.c_str(), H5P_DEFAULT);
-    	} else if (mode == FILE_MODE_WRITE) {
-        	idGroup = H5Gcreate(hostGroup, _combinedId.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-		}
-    }
-    if (idGroup < 0) {
-        throw ProcIOException("Failed to access identifier group: " + _combinedId);
-    }
 
 	hostname = t_hostname;
 	identifier = t_identifier;
 	subidentifier = t_subidentifier;
-	combinedId = t_combinedId;
-	contextSet = true;
+	contextSet = hdf5Segment != nullptr;
 	return true;
 }
 
@@ -409,8 +670,16 @@ void ProcHDF5IO::initialize_types() {
         throw ProcIOException("Failed to set strType_buffer size");
     }
 
+	strType_idBuffer = H5Tcopy(H5T_C_S1);
+	status = H5Tset_size(strType_idBuffer, IDENTIFIER_SIZE);
+	if (status < 0) {
+		throw ProcIOException("Failed to set strType_idBuffer size");
+	}
+
     type_procdata = H5Tcreate(H5T_COMPOUND, sizeof(procdata));
     if (type_procdata < 0) throw ProcIOException("Failed to create type_procdata");
+	H5Tinsert(type_procdata, "identifier", HOFFSET(procdata, identifier), strType_idBuffer);
+	H5Tinsert(type_procdata, "subidentifier", HOFFSET(procdata, subidentifier), strType_idBuffer);
     H5Tinsert(type_procdata, "execName", HOFFSET(procdata, execName), strType_exeBuffer);
     H5Tinsert(type_procdata, "cmdArgBytes", HOFFSET(procdata, cmdArgBytes), H5T_NATIVE_ULONG);
     H5Tinsert(type_procdata, "cmdArgs", HOFFSET(procdata, cmdArgs), strType_buffer);
@@ -422,14 +691,12 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_procdata, "startTimeUSec", HOFFSET(procdata, startTimeUSec), H5T_NATIVE_ULONG);
     H5Tinsert(type_procdata, "pid", HOFFSET(procdata, pid), H5T_NATIVE_UINT);
     H5Tinsert(type_procdata, "ppid", HOFFSET(procdata, ppid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procdata, "nextRec", HOFFSET(procdata, nextRec), H5T_NATIVE_UINT);
-    H5Tinsert(type_procdata, "prevRec", HOFFSET(procdata, prevRec), H5T_NATIVE_UINT);
 
     type_procstat = H5Tcreate(H5T_COMPOUND, sizeof(procstat));
     if (type_procstat < 0) throw ProcIOException("Failed to create type_procstat");
+	H5Tinsert(type_procstat, "identifier", HOFFSET(procstat, identifier), strType_idBuffer);
+	H5Tinsert(type_procstat, "subidentifier", HOFFSET(procstat, subidentifier), strType_idBuffer);
     H5Tinsert(type_procstat, "pid", HOFFSET(procstat, pid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procstat, "nextRec", HOFFSET(procstat, nextRec), H5T_NATIVE_UINT);
-    H5Tinsert(type_procstat, "prevRec", HOFFSET(procstat, prevRec), H5T_NATIVE_UINT);
     H5Tinsert(type_procstat, "recTime", HOFFSET(procstat, recTime), H5T_NATIVE_ULONG);
     H5Tinsert(type_procstat, "recTimeUSec", HOFFSET(procstat, recTimeUSec), H5T_NATIVE_ULONG);
     H5Tinsert(type_procstat, "startTime", HOFFSET(procstat, startTime), H5T_NATIVE_ULONG);
@@ -478,37 +745,45 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_procstat, "m_data", HOFFSET(procstat, m_data), H5T_NATIVE_ULONG);
 }
 
-unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, int count) {
-    return write_dataset("procstat", type_procstat, (void*) start_pointer, count, 128);
+unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int start_id, int count) {
+	for (int i = 0; i < count; i++) {
+		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	}
+    return write_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count, 128);
 }
 
-unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, int count) {
-    return write_dataset("procdata", type_procdata, (void*) start_pointer, count, 4);
+unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int start_id, int count) {
+	for (int i = 0; i < count; i++) {
+		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	}
+    return write_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count, 4);
 }
 
 unsigned int ProcHDF5IO::read_procstat(procstat* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset("procstat", type_procstat, (void*) start_pointer, start_id, count);
+    return read_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count);
 }
 
 unsigned int ProcHDF5IO::read_procdata(procdata* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset("procdata", type_procdata, (void*) start_pointer, start_id, count);
+    return read_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count);
 }
 
-unsigned int ProcHDF5IO::read_dataset(const char* dsName, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count) {
-    if (H5Lexists(idGroup, dsName, H5P_DEFAULT) == 0) {
+unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count) {
+    if (hdf5Segment == nullptr) {
         return 0;
     }
+	hdf5Segment->lastUpdate = time(NULL);
 
     hsize_t targetRecords = 0;
     hsize_t localRecords = count;
-    hsize_t remoteStart = start_id;
+    hsize_t remoteStart = start_id > 0 ? start_id - 1 : 0;
     hsize_t localStart = 0;
     hsize_t nRecords = 0;
 
-    hid_t dataset = H5Dopen2(idGroup, dsName, H5P_DEFAULT);
-    hid_t dataspace = H5Dget_space(dataset);
+	hid_t ds = recordType == TYPE_PROCSTAT ? hdf5Segment->procstatDS : recordType == TYPE_PROCDATA ? hdf5Segment->procdataDS : -1;
+    hid_t dataspace = H5Dget_space(ds);
     hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
-
     herr_t status = 0;
 
     int rank = H5Sget_simple_extent_ndims(dataspace);
@@ -518,60 +793,95 @@ unsigned int ProcHDF5IO::read_dataset(const char* dsName, hid_t type, void* star
 
         status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, &remoteStart, H5P_DEFAULT, &targetRecords, H5P_DEFAULT);
         status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, &localStart, H5P_DEFAULT, &localRecords, H5P_DEFAULT);
-        status = H5Dread(dataset, type, H5S_ALL, dataspace, H5P_DEFAULT, start_pointer);
+        status = H5Dread(ds, type, H5S_ALL, dataspace, H5P_DEFAULT, start_pointer);
     }
 
     H5Sclose(dataspace);
     H5Sclose(memspace);
-    H5Dclose(dataset);
 
     return (int) targetRecords;
 }
 
-unsigned int ProcHDF5IO::write_dataset(const char* dsName, hid_t type, void* start_pointer, int count, int chunkSize) {
+unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, int count, int chunkSize) {
     hsize_t chunk_dims = chunkSize;
     hsize_t rank = 1;
-    hsize_t nRecords = 0;
+	hsize_t sizeRecords = 1;
+    hsize_t maxRecords = 0;
+	hsize_t startRecord = 0;
     hsize_t targetRecords = 0;
     hsize_t newRecords = count;
+	unsigned int old_nRecords = 0;
 
-    hid_t dataset;
+	bool append = start_id == 0;
+	startRecord = start_id > 0 ? start_id - 1 : 0;
+
+	hid_t ds = recordType == TYPE_PROCSTAT ? hdf5Segment->procstatDS : recordType == TYPE_PROCDATA ? hdf5Segment->procdataDS : -1;
+	hid_t size_attribute = recordType == TYPE_PROCSTAT ? hdf5Segment->procstatSizeID : recordType == TYPE_PROCDATA ? hdf5Segment->procdataSizeID : -1;
+	unsigned int *nRecords = recordType == TYPE_PROCSTAT ? &(hdf5Segment->procstatSize) : recordType == TYPE_PROCDATA ? &(hdf5Segment->procdataSize) : NULL;
     hid_t filespace;
-    hid_t dataspace;
     herr_t status;
 
-    if (H5Lexists(idGroup, dsName, H5P_DEFAULT) == 1) {
-        dataset = H5Dopen2(idGroup, dsName, H5P_DEFAULT);
-        dataspace = H5Dget_space(dataset);
-        H5Sget_simple_extent_dims(dataspace, &nRecords, NULL);
-        status = H5Sclose(dataspace);
+	if (nRecords == NULL) {
+		throw ProcIOException("Couldn't identify dataset size records (recordType " + to_string((int)recordType) + ") invalid");
+	}
 
-    } else {
-        hid_t param;
-        hsize_t initial_dims = count;
-        hsize_t maximal_dims = H5S_UNLIMITED;
-        dataspace = H5Screate_simple(rank, &initial_dims, &maximal_dims);
+	if (hdf5Segment == nullptr) return 0;
+	hdf5Segment->lastUpdate = time(NULL);
+    hid_t dataspace = H5Dget_space(ds);
 
-        param = H5Pcreate(H5P_DATASET_CREATE);
-        H5Pset_chunk(param, rank, &chunk_dims);
-        dataset = H5Dcreate(idGroup, dsName, type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
-        H5Pclose(param);
-        H5Sclose(dataspace);
-    }
-    targetRecords = nRecords + count;
-    status = H5Dset_extent(dataset, &targetRecords);
-    filespace = H5Dget_space(dataset);
+    status = H5Sget_simple_extent_dims(dataspace, &maxRecords, NULL);
 
-    status = H5Sselect_hyperslab(filespace, H5S_SELECT_SET, &nRecords, NULL, &newRecords, NULL);
+	if (append) startRecord = *nRecords;
+    targetRecords = startRecord + count > maxRecords ? startRecord + count : maxRecords;
+
+    status = H5Dset_extent(ds, &targetRecords);
+    filespace = H5Dget_space(ds);
+
+    status = H5Sselect_hyperslab(filespace, H5S_SELECT_SET, &startRecord, NULL, &newRecords, NULL);
     dataspace = H5Screate_simple(rank, &newRecords, NULL);
 
-    H5Dwrite(dataset, type, dataspace, filespace, H5P_DEFAULT, start_pointer);
+    H5Dwrite(ds, type, dataspace, filespace, H5P_DEFAULT, start_pointer);
+
+	old_nRecords = *nRecords;
+	*nRecords = startRecord + count > *nRecords ? startRecord + count : *nRecords;
+	cout << endl << "HDF5 writing " << count << "records; start: " << startRecord << "; nRecord: " << old_nRecords << "|" << *nRecords << "; maxRecords: " << maxRecords << "; targetRecords: " << targetRecords << "; start_id: " << start_id << "; Return recID: " << (startRecord+1) << "; append: " << append << endl;
+
+	H5Awrite(size_attribute, H5T_NATIVE_UINT, nRecords);
+
+	start_id = startRecord+1;
 
     H5Sclose(filespace);
     H5Sclose(dataspace);
-    H5Dclose(dataset);
-    return (int) newRecords;
+    return start_id;
 }
+
+void ProcHDF5IO::flush() {
+	H5Fflush(file, H5F_SCOPE_GLOBAL);
+}
+
+void ProcHDF5IO::trim_segments(time_t cutoff) {
+	for (auto iter = openRefs.begin(), end = openRefs.end(); iter != end; ) {
+		hdf5Ref* ref = iter->second;
+		if (ref->lastUpdate < cutoff) {
+			delete ref;
+			openRefs.erase(iter++);
+		} else {
+			++iter;
+		}
+	}
+}
+	
+
+unsigned int ProcHDF5IO::get_nprocstat() {
+	if (hdf5Segment == nullptr) return 0;
+	return hdf5Segment->procstatSize;
+}
+
+unsigned int ProcHDF5IO::get_nprocdata() {
+	if (hdf5Segment == nullptr) return 0;
+	return hdf5Segment->procdataSize;
+}
+
 #endif
 
 int ProcTextIO::fill_buffer() {
@@ -755,22 +1065,22 @@ unsigned int ProcTextIO::write_procstat(procstat* start_ptr, int cnt) {
     return nBytes;
 }
 
-bool ProcTextIO::set_context(const std::string& _hostname, const std::string& _identifier, const std::string& _subidentifier) {
+bool ProcTextIO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
 	size_t endPos = _hostname.find('.');
-	endPos = endPos == std::string::npos ? _hostname.size() : endPos;
+	endPos = endPos == string::npos ? _hostname.size() : endPos;
 	hostname.assign(_hostname, 0, endPos);
 
 	endPos = _identifier.find('.');
-	endPos = endPos == std::string::npos ? _identifier.size() : endPos;
+	endPos = endPos == string::npos ? _identifier.size() : endPos;
 	identifier.assign(_identifier, 0, endPos);
 
 	endPos = _subidentifier.find('.');
-	endPos = endPos == std::string::npos ? _subidentifier.size() : endPos;
+	endPos = endPos == string::npos ? _subidentifier.size() : endPos;
 	subidentifier.assign(_identifier, 0, endPos);
 	return true;
 }
 
-ProcTextIO::ProcTextIO(const std::string& _filename, ProcIOFileMode _mode) {
+ProcTextIO::ProcTextIO(const string& _filename, ProcIOFileMode _mode) {
 	filename = _filename;
 	mode = _mode;
 
