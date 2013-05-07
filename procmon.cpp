@@ -475,9 +475,13 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 		procStats[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procStats[idx]), NULL, 0);
 	}
 
-	/* explicitly re-using the pids buffer at this point; npids is now only needed
-	 * for knowing the limits of procStats; now ntargets will hold the limit for
-	 * pids */
+
+	/* === Discover processes of interest === 
+	 * Phase 1:  find target parent process, and all the processes with the target
+	 * gid (if applicable).  Mark each process that is found by overloading the
+	 * state field.
+	 * store interesting pids in the pids array, and their procstat indices in the
+	 * indices array */
 	int indices[allocPids];
 	pids[0] = ppid;
 	found = 0;
@@ -492,6 +496,11 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 	if (ntargets == 0) {
 		return 0;
 	}
+	/* === Discover processes of interest ===
+	 * Phase 2: loop through all processes looking to find previously 
+	 * undiscovered (state == 0) pids which inherit from any of the already-
+	 * found processes (indices/pids up to ntargets); interate until covergence
+	 */
 	nstart = 0;
 	do {
 		int innerIdx = 0;
@@ -501,6 +510,7 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
 				if (procStats[idx].ppid == pids[innerIdx] && procStats[idx].state == 0) {
 					pids[nNewTargets] = procStats[idx].pid;
+					procStats[idx].state = 1;
 					indices[nNewTargets] = idx;
 					nNewTargets++;
 					nchange++;
@@ -511,6 +521,7 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 		ntargets = nNewTargets;
 	} while (nchange > 0);
 
+	/* fill in missing data for all processes of interest */
 	if (gettimeofday(&after, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
 		return -4;
