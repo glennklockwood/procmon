@@ -19,6 +19,8 @@
 #include <string>
 #include <map>
 
+#include "config.h"
+
 #ifdef __USE_HDF5
 #include "hdf5.h"
 #endif /* __USE_HDF5 */
@@ -93,7 +95,7 @@ class hdf5Ref {
 	friend class ProcHDF5IO;
 
 public:
-	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const std::string& hostname, ProcIOFileMode mode);
+	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize);
 	~hdf5Ref();
 
 private:
@@ -110,7 +112,7 @@ private:
 
 class ProcHDF5IO : public ProcIO {
 public:
-    ProcHDF5IO(const string& filename, ProcIOFileMode mode);
+    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE);
     ~ProcHDF5IO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
@@ -142,6 +144,9 @@ private:
     /* identifiers for complex types */
     hid_t type_procdata;
     hid_t type_procstat;
+
+	unsigned int dataBlockSize;
+	unsigned int statBlockSize;
 };
 #endif
 

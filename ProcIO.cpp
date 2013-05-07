@@ -475,7 +475,6 @@ bool ProcAMQPIO::_set_frame_context(const string& routingKey) {
 	if (idx == 3) {
 		frameMessageType.assign(routingKey, lpos, routingKey.size() - lpos);
 	}
-	cout << "routingkey: " << routingKey << "; hostname: " << frameHostname << "; identifier: " << frameIdentifier << "; subidentifier: " << frameSubidentifier << "; messageType: " << frameMessageType << std::endl;
 	return idx == 3;
 }
 
@@ -506,7 +505,7 @@ bool ProcAMQPIO::_amqp_bind_context() {
 #endif
 
 #ifdef __USE_HDF5
-hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const string& hostname, ProcIOFileMode mode) {
+hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize) {
 	group = -1;
 	procstatDS = -1;
 	procdataDS = -1;
@@ -524,8 +523,8 @@ hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const str
        	throw ProcIOException("Failed to access hostname group: " + hostname);
     }
 
-	procstatSize = open_dataset("procstat", type_procstat, 128, &procstatDS, &procstatSizeID);
-	procdataSize = open_dataset("procdata", type_procdata, 4, &procdataDS, &procdataSizeID);
+	procstatSize = open_dataset("procstat", type_procstat, statBlockSize, &procstatDS, &procstatSizeID);
+	procdataSize = open_dataset("procdata", type_procdata, dataBlockSize, &procdataDS, &procdataSizeID);
 }
 
 unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute) {
@@ -579,7 +578,12 @@ hdf5Ref::~hdf5Ref() {
 	}
 }
 
-ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode): filename(_filename),mode(_mode) {
+ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode, 
+	unsigned int _statBlockSize, unsigned int _dataBlockSize): 
+	
+	filename(_filename),mode(_mode),statBlockSize(_statBlockSize),
+	dataBlockSize(_dataBlockSize)
+{
 	file = -1;
 	strType_exeBuffer = -1;
 	strType_buffer = -1;
@@ -637,7 +641,7 @@ bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier,
 	auto refIter = openRefs.find(key);
 	if (refIter == openRefs.end()) {
 		/* need to create new hdf5Ref */
-		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, t_hostname, mode);
+		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, t_hostname, mode, statBlockSize, dataBlockSize);
 		auto added = openRefs.insert({key,ref});
 		if (added.second) refIter = added.first;
 	}
@@ -750,7 +754,7 @@ unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int st
 		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
 		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
 	}
-    return write_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count, 128);
+    return write_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count, statBlockSize);
 }
 
 unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int start_id, int count) {
@@ -758,7 +762,7 @@ unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int st
 		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
 		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
 	}
-    return write_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count, 4);
+    return write_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count, dataBlockSize);
 }
 
 unsigned int ProcHDF5IO::read_procstat(procstat* start_pointer, unsigned int start_id, unsigned int count) {
@@ -844,7 +848,6 @@ unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, vo
 
 	old_nRecords = *nRecords;
 	*nRecords = startRecord + count > *nRecords ? startRecord + count : *nRecords;
-	cout << endl << "HDF5 writing " << count << "records; start: " << startRecord << "; nRecord: " << old_nRecords << "|" << *nRecords << "; maxRecords: " << maxRecords << "; targetRecords: " << targetRecords << "; start_id: " << start_id << "; Return recID: " << (startRecord+1) << "; append: " << append << endl;
 
 	H5Awrite(size_attribute, H5T_NATIVE_UINT, nRecords);
 
