@@ -41,7 +41,7 @@ ifdef USE_BOOST
 	LDFLAGS += $(BOOST_LDFLAGS)
 endif
 
-all: config.h driver ProcReducer
+all: config.h ProcReducer driver
 config.h:
 	/bin/sh -c $(CONFIG)
 driver: driver.o ProcIO.o

@@ -21,7 +21,9 @@ int main(int argc, char** argv) {
 		cout << "procdata: " << nData << endl;
 
 		procdata all[nData];
+		procstat allStat[nStat];
 		reader.read_procdata(all, 0, nData);
+		reader.read_procstat(allStat, 0, nStat);
 
 		for (int i = 0; i < nData; i++) {
 			cout << "[" << all[i].pid << "] " << all[i].execName << endl;
@@ -32,7 +34,11 @@ int main(int argc, char** argv) {
 			}
 			all[i].cmdArgs[all[i].cmdArgBytes] = 0;
 			cout << "    " << all[i].cmdArgs << endl;
+			cout << "    " << all[i].identifier << "." << all[i].subidentifier << endl;
 		}
+
+//		for (int i = 0 ; i < nStat; i++) {
+//			cout << "[" << allStat[i].pid << "] " << all[i].
 
     } catch (ProcIOException& e) {
         std::cout << e.what() << std::endl;
