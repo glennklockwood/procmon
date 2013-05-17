@@ -56,6 +56,8 @@ driver.o: driver.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 ProcReducer.o: ProcReducer.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
+ProcReducerData.o: ProcReducerData.cc
+	$(CXX) -c $(CFLAGS) -o $@ -c $^
 ProcIO.o: ProcIO.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 
