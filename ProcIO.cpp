@@ -484,7 +484,7 @@ bool ProcAMQPIO::_amqp_bind_context() {
 	if (amqpError) {
 		throw ProcIOException("Failed AMQP queue declare on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
 	}
-    queue = amqp_bytes_malloc_dup(queue_reply->queue);
+	amqp_bytes_t queue = amqp_bytes_malloc_dup(queue_reply->queue);
     if (queue.bytes == NULL) {
         throw ProcIOException("Failed AMQP queue declare: out of memory!");
     }
@@ -500,6 +500,7 @@ bool ProcAMQPIO::_amqp_bind_context() {
     if (amqpError) {
         throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
     }
+	amqp_bytes_free(queue);
     return true;
 }
 #endif

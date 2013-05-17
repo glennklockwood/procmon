@@ -4,7 +4,7 @@
 #include <signal.h>
 #include <string.h>
 #include <iostream>
-#include <map>
+#include <vector>
 
 #include <boost/program_options.hpp>
 namespace po = boost::program_options;
@@ -192,9 +192,10 @@ int main(int argc, char **argv) {
 	int saveCnt = 0;
 	int nRecords = 0;
 	string outputFilename;
+	int count = 0;
 
 	char buffer[1024];
-	map<string,proc_t*> pidMap;
+	map<string,proc_t*> pidMap = new map<string,proc_t*>();
 
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
@@ -216,11 +217,12 @@ int main(int argc, char **argv) {
             }
 
 			/* dump the hash table - we need a fresh start for a fresh file */
-			for (auto iter = pidMap.begin(), end = pidMap.end(); iter != end; ) {
+			for (auto iter = pidMap->begin(), end = pidMap->end(); iter != end; ) {
 				proc_t* record = iter->second;
 				delete record;
-				pidMap.erase(iter++);
 			}
+			delete pidMap;
+			pidMap = new map<string,proc_t*>();
 
 			/* use the current date and time as the suffix for this file */
 			strftime(buffer, 1024, "%Y%m%d%H%M%S", &currTm);
@@ -257,9 +259,9 @@ int main(int argc, char **argv) {
 			}
 			snprintf(buffer, 1024, "%s.%s.%s.%d", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), pid);
 			const char* key = buffer;
-			map<string,proc_t*>::iterator pidRec_iter = pidMap.find(key);
+			map<string,proc_t*>::iterator pidRec_iter = pidMap->find(key);
 
-			if (pidRec_iter == pidMap.end()) {
+			if (pidRec_iter == pidMap->end()) {
 				/* new pid! */
 				record = new proc_t;
 				bzero(record, sizeof(proc_t));
@@ -271,11 +273,15 @@ int main(int argc, char **argv) {
 					record->statSet = true;
 				}
 				saveNewRec = true;
-				auto insertVal = pidMap.insert({string(key), record});
+				cout << "new pid: " << key << endl;
+				auto insertVal = pidMap->insert({string(key), record});
 				if (insertVal.second) {
 					pidRec_iter = insertVal.first;
 				} else {
-					cout << "here --- possible memory leak" << endl;
+					/* this is bad, couldn't insert! */
+					cout << "couldn't insert new process record" << endl;
+					delete record;
+					record = NULL;
 				}
 			} else {
 				record = pidRec_iter->second;
@@ -312,32 +318,55 @@ int main(int argc, char **argv) {
 		}
 		time_t currTime = time(NULL);
 		if (currTime - lastClean > config.cleanFreq || cleanUpExitFlag != 0 || resetOutputFileFlag == 1) {
-			cout << "Presently tracking " << pidMap.size() << " processes" << std::endl;
+			cout << "Begin Clean: Presently tracking " << pidMap->size() << " processes" << std::endl;
 			cout << "Flushing data to disk..." << endl;
 			outputFile->flush();
+			outputFile->trim_segments(currTime - config.maxProcessAge);
 			cout << "Complete" << endl;
-			cout << "Starting hash cleanup" << endl;
+			cout << "Hash cleanup:" << endl;
 			/* first trim out local hash */
-			for (auto iter = pidMap.begin(), end = pidMap.end(); iter != end; ) {
+			map<string,proc_t*> *t_pidMap = new map<string,proc_t*>();
+			for (auto iter = pidMap->begin(), end = pidMap->end(); iter != end; ) {
 				proc_t* record = iter->second;
 				time_t maxTime = record->data.recTime > record->stat.recTime ? record->data.recTime : record->stat.recTime;
 				if (currTime - maxTime > config.maxProcessAge) {
 					delete record;
-					pidMap.erase(iter++);
+					pidMap->erase(iter++);
 				} else {
+					string key = iter->first;
+					proc_t *record = iter->second;
+					auto insertVal = t_pidMap->insert({key, record});
 					++iter;
 				}
 			}
-			outputFile->trim_segments(currTime - config.maxProcessAge);
+			delete pidMap;
+			pidMap = t_pidMap;
 			time_t nowTime = time(NULL);
 			time_t deltaTime = nowTime - currTime;
 			cout << "Cleaning finished in " << deltaTime << " seconds" << endl;
-			cout << "Presently tracking " << pidMap.size() << " processes" << std::endl;
+			cout << "End Clean: Presently tracking " << pidMap->size() << " processes" << std::endl;
 			lastClean = currTime;
 			if (resetOutputFileFlag == 1) {
 				resetOutputFileFlag++;
 			}
 		}
     }
+
+	/* clean up all the records */
+	for (auto iter = pidMap->begin(), end = pidMap->end(); iter != end; ) {
+		proc_t *record = iter->second;
+		delete record;
+		pidMap->erase(iter++);
+	}
+	delete pidMap;
+	if (outputFile != NULL) {
+		outputFile->flush();
+		delete outputFile;
+		outputFile = NULL;
+	}
+	if (conn != NULL) {
+		delete conn;
+		conn = NULL;
+	}
     return 0;
 }

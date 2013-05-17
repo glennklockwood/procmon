@@ -186,7 +186,6 @@ private:
 	amqp_socket_t* socket;
 	amqp_rpc_reply_t status;
 	bool queueConnected;
-	amqp_bytes_t queue;
 
 	string frameHostname;
 	string frameIdentifier;
