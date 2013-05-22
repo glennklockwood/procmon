@@ -428,7 +428,7 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 	struct timeval after;
 	struct tm datetime;
 	double timeDelta;
-	int found;
+	int foundParent;
 
 	if (pids == NULL) {
 		fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", allocPids, sizeof(int)*allocPids);
@@ -484,7 +484,7 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 	 * indices array */
 	int indices[allocPids];
 	pids[0] = ppid;
-	found = 0;
+	foundParent = 0;
     ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
 		if (procStats[idx].pid == ppid || procStats[idx].state > 0) {
@@ -492,8 +492,11 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 			pids[ntargets] = procStats[idx].pid;
 			indices[ntargets++] = idx;
 		}
+		if (procStats[idx].pid == ppid) {
+			foundParent = 1;
+		}
 	}
-	if (ntargets == 0) {
+	if (ntargets == 0 || foundParent == 0) {
 		return 0;
 	}
 	/* === Discover processes of interest ===
@@ -594,9 +597,13 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
         if (fp != NULL) {
             rbytes = fread(temp_procData->cmdArgs, sizeof(char), BUFFER_SIZE, fp);
             temp_procData->cmdArgBytes = rbytes;
-            if (rbytes == BUFFER_SIZE) {
-                temp_procData->cmdArgs[rbytes] = 0;
-            }
+			for (int i = 0; i < rbytes; i++) {
+				if (temp_procData->cmdArgs[i] == 0) {
+					temp_procData->cmdArgs[i] = '|';
+				}
+			}
+			/* can set cmdArgs[rbytes-1]=0 since rbytes includes what was the 0 termination before */
+            temp_procData->cmdArgs[rbytes-1] = 0;
             fclose(fp);
         } else {
             snprintf(temp_procData->cmdArgs, BUFFER_SIZE, "Unknown");
