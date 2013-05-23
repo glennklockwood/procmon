@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 #include <math.h>
 #include <iostream>
+#include <string>
 
 #include "ProcData.hh"
 #include "ProcIO.hh"
@@ -197,29 +198,38 @@ time_t getBootTime() {
     char *eptr = NULL;
 	char* label;
 	int idx = 0;
-	int rbytes = 0;
+	size_t rbytes = 0;
 	char lbuffer[LBUFFER_SIZE];
 	time_t timestamp;
 	int stage = 0;
 	FILE* fp = fopen("/proc/stat", "r");
-	if (fp != NULL) {
-		rbytes = fread(lbuffer, sizeof(char), LBUFFER_SIZE, fp);
-		fclose(fp);
-	} else {
+	if (fp == NULL) {
 		return 0;
 	}
 
-	ptr = lbuffer;
-	sptr = lbuffer;
-	eptr = lbuffer + rbytes;
+	for ( ; ; ptr++) {
+		if (sptr == NULL || ptr == eptr) {
+			/* populate the buffer, if the last line was larger than LBUFFER_SIZE,
+			 * then it can't be parsed by this scheme, and will be abandoned
+			 * thus, the buffer is reset (sptr == ptr == lbuffer)
+			 */
+            int bytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+			if (bytes == 0) {
+				break;
+			}
+		}
 
-	for ( ; ptr != eptr; ptr++) {
 		if (stage <= 0) {
 			if (*ptr == ' ' || *ptr == '\t') {
 				*ptr = 0;
 				label = sptr;
 				sptr = ptr + 1;
 				stage = 1;
+				continue;
+			}
+			if (*ptr == '\n') {
+				sptr = ptr + 1;
+				stage = -1;
 				continue;
 			}
 		}
@@ -241,6 +251,7 @@ time_t getBootTime() {
 			}
 		}
 	}
+	fclose(fp);
 	return timestamp;
 }
 
@@ -336,7 +347,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
     fp = fopen(filename, "r");
     if (fp == NULL) return -1;
 
-    while (true) {
+    for ( ; ; ptr++) {
         if (sptr == NULL || ptr == eptr) {
             rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
             if (rbytes == 0) break;
@@ -347,7 +358,6 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
 				label = sptr;
 				sptr = ptr + 1;
 				stage = 1;
-				ptr++;
 				continue;
 			}
 		}
@@ -396,7 +406,6 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
 				stage = nextStage;
 			}
 		}
-        ptr++;
 	}
     fclose(fp);
 	return retVal;
