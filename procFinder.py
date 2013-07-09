@@ -6,8 +6,12 @@
 ##
 ## Copyright (C) 2013 - The Regents of the University of California
 
+## discovered that numexpr was starting as many threads as there are cores;
+## this, in combination with MPI was causing far too many running processes at
+## the same time.  Also, the code ran ~2x faster without these excess threads
 import numexpr
 numexpr.set_num_threads(1)
+
 import numpy
 import h5py
 import sys
@@ -575,15 +579,9 @@ def main(args):
                 continue
             for key in all_summaries[l_rank]:
                 if key not in summ_list:
-                    summ_list[key] = {'series':[],'data':[]}
+                    summ_list[key] = []
                 l_summary = all_summaries[l_rank][key]
-                if type(l_summary) is pandas.core.series.Series:
-                    summ_list[key]['series'].append(l_summary)
-                elif type(l_summary) is pandas.core.frame.DataFrame:
-                    summ_list[key]['data'].append(l_summary)
-                else:
-                    sys.stderr.write('unknown type (%s) for %s summary from rank %d\n' % (type(l_summary), key, l_rank))
-                    write_summary_debug = True
+                summ_list[key].append(l_summary)
 
         if write_summary_debug:
             cPickle.dump(all_summaries, open('%s.summ_list.debug.pk' % save_prefix,'wb'))
@@ -593,15 +591,8 @@ def main(args):
         summary_save_file = '%s.summary.h5' % save_prefix
         for key in summ_list:
             summary = None
-            if len(summ_list[key]['series']) > 0:
-                try:
-                    l_df = pandas.DataFrame(summ_list[key]['series'])
-                    summ_list[key]['data'].append(l_df.set_index(summ_index[key]))
-                except:
-                    write_summary_debug = True
-                    pass
-            if len(summ_list[key]['data']) > 0:
-                summary = pandas.concat(summ_list[key]['data'], axis=0)
+            if len(summ_list[key]) > 0:
+                summary = pandas.concat(summ_list[key], axis=0)
 
             if summary is not None:
                 nLevel=0
@@ -614,10 +605,12 @@ def main(args):
             cPickle.dump(summ_list, open('%s.summ_list.debug2.pk' % save_prefix, 'wb'))
     
     all_processes = None
-    processes = processes.to_records()
     print "[%d] about to send %s processes" % (rank, processes.shape)
-    all_processes = comm.gather(processes, root=0)
-    if rank == 0:
+    try:
+        all_processes = comm.gather(processes, root=0)
+    except:
+        pass
+    if rank == 0 and all_processes is not None:
         processes = pandas.concat(all_processes, axis=0)
         processes.to_hdf('%s.processes.h5' % save_prefix, 'processes')
 

@@ -48,7 +48,7 @@ driver: driver.o ProcIO.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
 procmon: procmon.o ProcIO.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
-ProcReducer: ProcReducer.o ProcIO.o
+ProcReducer: ProcReducer.o ProcIO.o ProcReducerData.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
 procmon.o: procmon.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^

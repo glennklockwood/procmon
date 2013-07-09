@@ -5,6 +5,7 @@
 #include <string.h>
 #include <iostream>
 #include <unordered_map>
+#include "ProcReducerData.hh"
 
 #include <boost/program_options.hpp>
 namespace po = boost::program_options;
@@ -46,45 +47,6 @@ public:
 	int nData;
 	int nStat;
 };
-
-int procdatacmp(const procdata& a, const procdata& b) {
-	if (a.pid != b.pid) return 1;
-	if (a.ppid != b.ppid) return 2;
-	if (a.startTime != b.startTime) return 3;
-	if (a.startTimeUSec != b.startTimeUSec) return 4;
-	if (a.cmdArgBytes != b.cmdArgBytes) return 5;
-	if (memcmp(a.cmdArgs, b.cmdArgs, a.cmdArgBytes) != 0) return 6;
-	if (strcmp(a.exePath, b.exePath) != 0) return 7;
-	if (strcmp(a.cwdPath, b.cwdPath) != 0) return 8;
-	return 0;
-}
-
-int procstatcmp(const procstat& a, const procstat& b) {
-	if (a.pid != b.pid) return 1;
-	if (a.ppid != b.ppid) return 2;
-	if (a.state != b.state) return 3;
-	if (a.realUid != b.realUid) return 4;
-	if (a.effUid != b.effUid) return 5;
-	if (a.realGid != b.realGid) return 6;
-	if (a.effGid != b.effGid) return 7;
-	if (a.utime != b.utime) return 8;
-	if (a.stime != b.stime) return 9;
-	if (a.priority != b.priority) return 10;
-	if (a.vsize != b.vsize) return 11;
-	if (a.rss != b.rss) return 12;
-	if (a.rsslim != b.rsslim) return 13;
-	if (a.delayacctBlkIOTicks != b.delayacctBlkIOTicks) return 14;
-	if (a.vmpeak != b.vmpeak) return 15;
-	if (a.rsspeak != b.rsspeak) return 16;
-	if (a.guestTime != b.guestTime) return 17;
-	if (a.io_rchar != b.io_rchar) return 18;
-	if (a.io_wchar != b.io_wchar) return 19;
-	if (a.io_syscr != b.io_syscr) return 20;
-	if (a.io_syscw != b.io_syscw) return 21;
-	if (a.io_readBytes != b.io_readBytes) return 22;
-	if (a.io_writeBytes != b.io_writeBytes) return 23;
-	return 0;
-}
 
 class ProcReducerConfig {
 public:
@@ -195,8 +157,8 @@ int main(int argc, char **argv) {
 	int count = 0;
 
 	char buffer[1024];
-	unordered_map<string,proc_t*> pidMap;
-	pidMap.reserve(600000);
+	unordered_map<std::string, ProcessList*> processLists;
+	processLists.reserve(1000);
 
 	signal(SIGINT, sig_handler);
 	signal(SIGTERM, sig_handler);
@@ -218,10 +180,9 @@ int main(int argc, char **argv) {
             }
 
 			/* dump the hash table - we need a fresh start for a fresh file */
-			for (auto iter = pidMap.begin(), end = pidMap.end(); iter != end; ) {
-				proc_t* record = iter->second;
-				delete record;
-				pidMap.erase(iter++);
+			for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
+				ProcessList* list = iter->second;
+				list->expire_all_processes();
 			}
 
 			/* use the current date and time as the suffix for this file */
@@ -244,6 +205,22 @@ int main(int argc, char **argv) {
 		} else if (recordType == TYPE_PROCSTAT) {
 			procstat_ptr = (procstat*) data;
 		}
+		ProcessList* currList = NULL;
+		auto procList_iter = processLists.find(hostname);
+		if (procList_iter == processLists.end()) {
+			/* new host! */
+			currList = new ProcessList(config.maxProcessAge);
+			auto insertVal = processLists.insert({hostname, currList});
+			if (insertVal.second) {
+				procList_iter = insertVal.first;
+			} else {
+				cout << "couldn't insert new host processlist for: " << hostname << endl;
+				delete currList;
+				currList = NULL;
+			}
+		} else {
+			currList = procList_iter->second;
+		}
 
 		outputFile->set_context(hostname, identifier, subidentifier);
         for (int i = 0; i < nRecords; i++) {
@@ -251,62 +228,33 @@ int main(int argc, char **argv) {
 			unsigned int recId = 0;
 			bool saveNewRec = false;
 			unsigned int recID = 0;
-			proc_t* record = NULL;
+			ProcessRecord* record = NULL;
 			if (recordType == TYPE_PROCDATA) {
 				pid = procdata_ptr[i].pid;
 			} else if (recordType == TYPE_PROCSTAT) {
 				pid = procstat_ptr[i].pid;
 			}
-			snprintf(buffer, 1024, "%s.%s.%s.%d", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), pid);
-			const char* key = buffer;
-			auto pidRec_iter = pidMap.find(key);
-
-			if (pidRec_iter == pidMap.end()) {
-				/* new pid! */
-				record = new proc_t;
-				bzero(record, sizeof(proc_t));
-				if (recordType == TYPE_PROCDATA) {
-					memcpy(&(record->data), &(procdata_ptr[i]), sizeof(procdata));
-					record->dataSet = true;
-				} else if (recordType == TYPE_PROCSTAT) {
-					memcpy(&(record->stat), &(procstat_ptr[i]), sizeof(procstat));
-					record->statSet = true;
-				}
-				saveNewRec = true;
-				auto insertVal = pidMap.insert({string(key), record});
-				if (insertVal.second) {
-					pidRec_iter = insertVal.first;
+			if (currList != NULL) {
+				bool newRecord = false;
+				record = currList->find_process_record(pid);
+				if (record == NULL) {
+					record = currList->new_process_record();
+					newRecord = true;
+				} 
+				if (record == NULL) {
+					cout << "couldn't get a new record!" << endl;
 				} else {
-					/* this is bad, couldn't insert! */
-					cout << "couldn't insert new process record" << endl;
-					delete record;
-					record = NULL;
-				}
-			} else {
-				record = pidRec_iter->second;
-				int cmpVal = 0;
-				if (recordType == TYPE_PROCDATA) {
-					recId = record->dataRecord;
-					if (record->nData <= 1 || (cmpVal = procdatacmp(record->data, procdata_ptr[i])) != 0) {
-						saveNewRec = true;
+					if (recordType == TYPE_PROCDATA) {
+						recId = record->set_procdata(&(procdata_ptr[i]), newRecord);
+						record->set_procdata_id(
+							outputFile->write_procdata(&(procdata_ptr[i]), recId, 1)
+						);
+					} else if (recordType == TYPE_PROCSTAT) {
+						recId = record->set_procstat(&(procstat_ptr[i]), newRecord);
+						record->set_procstat_id(
+							outputFile->write_procstat(&(procstat_ptr[i]), recId, 1)
+						);
 					}
-					memcpy(&(record->data), &(procdata_ptr[i]), sizeof(procdata));
-					record->nData++;
-				} else if (recordType == TYPE_PROCSTAT) {
-					recId = record->statRecord;
-					if (record->nStat <= 1 || (cmpVal = procstatcmp(record->stat, procstat_ptr[i])) != 0) {
-						saveNewRec = true;
-					}
-					memcpy(&(record->stat), (&procstat_ptr[i]), sizeof(procstat));
-					record->nStat++;
-				}
-			}
-			if (saveNewRec) { recId = 0; }
-			if (record != NULL) {
-				if (recordType == TYPE_PROCSTAT) {
-					record->statRecord = outputFile->write_procstat(&(procstat_ptr[i]), recId, 1);
-				} else if (recordType == TYPE_PROCDATA) {
-					record->dataRecord = outputFile->write_procdata(&(procdata_ptr[i]), recId, 1);
 				}
 			}
 		}
@@ -314,27 +262,20 @@ int main(int argc, char **argv) {
 
 		time_t currTime = time(NULL);
 		if (currTime - lastClean > config.cleanFreq || cleanUpExitFlag != 0 || resetOutputFileFlag == 1) {
-			cout << "Begin Clean: Presently tracking " << pidMap.size() << " processes" << std::endl;
-			cout << "Flushing data to disk..." << endl;
+			cout << "Begin Clean; Flushing data to disk..." << endl;
 			outputFile->flush();
 			outputFile->trim_segments(currTime - config.maxProcessAge);
-			cout << "Complete" << endl;
-			cout << "Hash cleanup:" << endl;
-			/* first trim out local hash */
-			for (auto iter = pidMap.begin(), end = pidMap.end(); iter != end; ) {
-				proc_t* record = iter->second;
-				time_t maxTime = record->data.recTime > record->stat.recTime ? record->data.recTime : record->stat.recTime;
-				if (currTime - maxTime > config.maxProcessAge) {
-					delete record;
-					pidMap.erase(iter++);
-				} else {
-					++iter;
-				}
+			cout << "Flush Complete" << endl;
+
+			int processes = 0;
+			for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ++iter) {
+				ProcessList *list = iter->second;
+				processes += list->get_process_count();
 			}
 			time_t nowTime = time(NULL);
 			time_t deltaTime = nowTime - currTime;
 			cout << "Cleaning finished in " << deltaTime << " seconds" << endl;
-			cout << "End Clean: Presently tracking " << pidMap.size() << " processes" << std::endl;
+			cout << "End Clean: Presently tracking " << processes << " processes" << endl;
 			lastClean = currTime;
 			if (resetOutputFileFlag == 1) {
 				resetOutputFileFlag++;
@@ -343,10 +284,10 @@ int main(int argc, char **argv) {
     }
 
 	/* clean up all the records */
-	for (auto iter = pidMap.begin(), end = pidMap.end(); iter != end; ) {
-		proc_t *record = iter->second;
+	for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
+		ProcessList *record = iter->second;
 		delete record;
-		pidMap.erase(iter++);
+		processLists.erase(iter++);
 	}
 	if (outputFile != NULL) {
 		outputFile->flush();
