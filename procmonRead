@@ -1,0 +1,62 @@
+#!/usr/bin/env python
+
+import pika
+import sys
+import re
+from operator import methodcaller
+from threading import Thread
+from datetime import datetime
+import time
+import curses
+
+timeout=60
+lastConnection=datetime.now()
+channel = None
+quitting = False
+
+def recv_message(channel, method_frame, header_frame, body):
+	lastConnection = datetime.now()
+	print "%s" % (method_frame.routing_key)
+	print
+
+def setupConnection(routingKeys):
+	credentials = pika.PlainCredentials('procmon','nomcorp')
+	connection = pika.BlockingConnection(pika.ConnectionParameters('genepool10.nersc.gov', 5672, "jgi", credentials))
+	channel = connection.channel()
+	channel.exchange_declare(exchange="procmon", exchange_type="topic")
+	queueRes = channel.queue_declare(exclusive=True)
+	queue_name = queueRes.method.queue
+	for routing_key in routingKeys:
+		channel.queue_bind(exchange="procmon", queue=queue_name, routing_key=routing_key)
+	try:
+		channel.basic_consume(recv_message, queue=queue_name, no_ack=True)
+		channel.start_consuming()
+	except IOError as e:
+		if e.errno == errno.EPIPE:
+			pass
+		else:
+			raise(e)
+
+def main(routingKeys):
+
+	setupConnection(routingKeys)
+
+def usage():
+	print "Usage: procmonRead <routingKey> ..."
+
+if __name__ == "__main__":
+
+	i = 1
+	pos = 0
+	routingKeys = []
+	while i < len(sys.argv):
+		if sys.argv[i] == "--help" or sys.argv[i] == "-h":
+			usage()
+			sys.exit(0)
+		else:
+			#print "Routing Key: %s" % routingKey_str
+			routingKeys.append(sys.argv[i])
+
+		i += 1
+	main(routingKeys)
+	
