@@ -50,6 +50,7 @@ def get_host_processes(hostname, fd, query):
         procdata = pandas.DataFrame(hostgroup['procdata'][...])
         procdata['key_startTime'] = procdata['startTime']
         procdata = procdata.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
+        procdata['host'] = hostname
         procstat = pandas.DataFrame(hostgroup['procstat'][...])
         procstat['key_startTime'] = procstat['startTime']
         procstat = procstat.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
@@ -73,7 +74,6 @@ def get_host_processes(hostname, fd, query):
             pd = processes.groupby(level=[0,1]).first()
             ps = procstat.ix[pd.index].groupby(level=[0,1]).first()
             t_data = pd.join(ps, rsuffix='_ps')
-            t_data['host'] = hostname
             t_data = t_data.set_index('host', append=True)
     return t_data
     
