@@ -34,6 +34,6 @@ for summary_label in summary_labels:
     for v in d:
         v['date'] = date
         v['type'] = summary_label
+        house_collection.insert(v)
 
-    house_collection.insert(d)
 

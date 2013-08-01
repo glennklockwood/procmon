@@ -16,8 +16,8 @@ module purge
 module load PrgEnv-gnu/4.7
 module load python/2.7.4
 module load hdf5/1.8.11
-module load openmpi/1.6.5_experimental
 module load uge
+module load openmpi/1.6.4
 
 ## start the houseHunter virtualenv
 . $HOME/houseHunter/bin/activate
