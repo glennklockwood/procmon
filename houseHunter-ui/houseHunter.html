@@ -1,0 +1,227 @@
+<html><title>genepool procmon HouseHunter</title>
+<head>
+<style type="text/css">
+* {
+    font-family: monospace;
+}
+.dataBox {
+    margin: 10px;
+    width: 150px;
+    height: 100px;
+    float: left;
+    background-color:#b0e0e6;
+}
+.dataBox p {
+    vertical-align: middle;
+    text-align: center;
+}
+.datum {
+    vertical-align: middle;
+    font-size: 2.7em;
+}
+.busyIndicator {
+    background-image:url('ajax-loader.gif');
+    visibility: hidden;
+    width: 100%;
+    height: 100%;
+}
+</style>
+<link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css" />
+<link href="jtable.2.3.0/themes/lightcolor/orange/jtable.min.css" rel="stylesheet" type="text/css" />
+<script src="http://code.jquery.com/jquery-1.9.1.js"></script>
+<script src="http://code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
+<script src="http://portal.nersc.gov/project/genepool/procmon/jtable.2.3.0/jquery.jtable.min.js" />
+<script src="http://code.highcharts.com/highcharts.js"></script>
+<script src="jquery.corner.js"></script>
+<script>
+function load_exec_data() {
+    user = $("#select_user").val()
+    project = $("#select_project").val()
+    date_val = $("#datepicker").val()
+    $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_summary=1&user=' + user + '&project=' + project + '&date=' + date_val, function(data) {
+        if ("users_count" in data) {
+            $("#data_nusers").html(data.users_count);
+        }
+        if ("projects_count" in data) {
+            $("#data_nprojects").html(data.projects_count);
+        }
+        if ("exec_count" in data) {
+            $("#data_nexe").html(data.exec_count);
+        }
+        if ("scripts_count" in data) {
+            $("#data_nscripts").html(data.scripts_count);
+        }
+    });
+    $("#exec_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+    $("#script_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+    $("#usersummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+    $("#projectsummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+}
+$(function() {
+    $( "#datepicker" ).datepicker({
+        dateFormat: "yymmdd",
+        defaultDate: -1,
+        constrainInput: true,
+        maxDate: -1,
+        minDate: "20130601",
+    });
+    $( "#tabs" ).tabs();
+});
+function update_summary() {
+    load_exec_data();
+}
+function change_menu_selection() {
+    id = this.id;
+    if (id != "select_user" && id != "select_project") {
+        return;
+    }
+    otherid = "select_user";
+    if (id == "select_user") {
+        otherid = "select_project";
+    }
+    $('#'+otherid).unbind('change', change_menu_selection);
+    $('#'+otherid).val('Any');
+    $('#'+otherid).bind('change', change_menu_selection);
+    update_summary();
+}
+
+function reset_selection(id, data) {
+    $(id).empty();
+    $.each(data, function() {
+        $(id).append(new Option(this, this));
+    });
+    $(id).bind('change', change_menu_selection);
+}
+$(document).ready(function() {
+    $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_users=1', function(data) {
+        reset_selection('#select_user', data);
+    });
+    $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_projects=1', function(data) {
+        reset_selection('#select_project', data);
+    });
+    $("#datepicker").datepicker('setDate', 'defaultDate');
+    $("#datepicker").bind('change', update_summary);
+    $( "#exec_table" ).jtable( {
+        title: 'houseHunter Executables',
+        paging: true,
+        pageSize: 25,
+        sorting: true,
+        defaultSorting: 'nobs DESC',
+        actions: {
+            listAction: 'http://genepool12.nersc.gov:8242/poster/get_exec',
+        },
+        fields: {
+            exePath: { title: 'exePath' },
+            nobs:    { title: 'N observations' },
+            walltime:{ title: 'Total Walltime' },
+            cpu_time:{ title: 'CPU time' }
+        }
+    });
+    $( "#script_table" ).jtable( {
+        title: 'houseHunter Scripts',
+        paging: true,
+        pageSize: 25,
+        sorting: true,
+        defaultSorting: 'nobs DESC',
+        actions: {
+            listAction: 'http://genepool12.nersc.gov:8242/poster/get_script',
+        },
+        fields: {
+            scripts: { title: 'script' },
+            exePath: { title: 'exePath' },
+            nobs:    { title: 'N observations' },
+            walltime:{ title: 'Total Walltime' },
+            cpu_time:{ title: 'CPU time' }
+        }
+    });
+    $( "#usersummary_table" ).jtable( {
+        title: 'User Summary',
+        paging: true,
+        pageSize: 25,
+        sorting: true,
+        defaultSorting: 'exe DESC',
+        actions: {
+            listAction: 'http://genepool12.nersc.gov:8242/poster/get_user_detailed_summary',
+        },
+        fields: {
+            username: { title: 'User', key:true },
+            exe:      { title: 'N Executables' },
+            script:   { title: 'N Scripts' },
+        },
+        /*
+        recordsLoaded: function(event, data) {
+            $('.jtable-data-row').click(function() {
+                var row_id = $(this).attr('data-record-key');
+                $("#select_user").val(row_id).change();
+            });
+            $('#select_user').bind('change', change_menu_selection);
+        }
+        */
+    });
+    $( "#projectsummary_table" ).jtable( {
+        title: 'Project Summary',
+        paging: true,
+        pageSize: 25,
+        sorting: true,
+        defaultSorting: 'exe DESC',
+        actions: {
+            listAction: 'http://genepool12.nersc.gov:8242/poster/get_project_detailed_summary',
+        },
+        fields: {
+            project:  { title: 'Display',
+                display: function(data) {
+                    return '<button type="button" onclick="alert(\"' + data.record.project + '\");">' + data.record.project + '</button>';
+                },
+            },
+            exe:      { title: 'N Executables' },
+            script:   { title: 'N Scripts' },
+        },
+        /*
+        recordsLoaded: function(event, data) {
+            $('.jtable-data-row').click(function() {
+                var row_id = $(this).attr('data-record-key');
+                $("#select_project").val(row_id).change();
+            });
+            $('#select_project').bind('change', change_menu_selection);
+        }
+        */
+    });
+    update_summary();
+});
+$("select").change(change_menu_selection);
+$(".dataBox").corner("30px");
+
+</script>
+</head>
+<body>
+<div id='menubar'>
+    <form>
+        <strong>Date:</strong>&nbsp;<input type='text' name='date' id='datepicker' size='12' />&nbsp;&nbsp;
+        <strong>User:</strong>&nbsp;<select name='user' id='select_user'><option value="Any">Any</option></select>&nbsp;&nbsp;
+        <strong>Project:</strong>&nbsp;<select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
+    </form>
+</div>
+
+<div id="summary_stats" style="height:160px; width:100%;">
+    <div class="dataBox"><p><span id="data_nusers" class="datum">...</span><br />Users</p></div>
+    <div class="dataBox"><p><span id="data_nprojects" class="datum">...</span><br />Projects</p></div>
+    <div class="dataBox"><p><span id="data_nexe" class="datum">...</span><br />Executables</p></div>
+    <div class="dataBox"><p><span id="data_nscripts" class="datum">...</span><br />Scripts</p></div>
+</div>
+<div id="tabs">
+<ul>
+    <li><a href="#summary_tab">Summary</a></li>
+    <li><a href="#exec_table">Executables</a></li>
+    <li><a href="#script_table">Scripts</a></li>
+</ul>
+<div id="summary_tab">
+    <div id="usersummary_table" style="width:49%;float:left"></div>
+    <div id="projectsummary_table" style="width:49%;float:right"></div>
+    <div style="clear:both"></div>
+</div>
+<div id="exec_table"></div>
+<div id="script_table"></div>
+</div>
+<hr /><br />
+</body>
+</html>
