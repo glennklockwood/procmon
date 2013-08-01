@@ -85,6 +85,11 @@ function change_menu_selection() {
     update_summary();
 }
 
+function reset_all() {
+    $('#select_user').val('Any')
+    $('#select_project').val('Any').change()
+}
+
 function reset_selection(id, data) {
     $(id).empty();
     $.each(data, function() {
@@ -144,19 +149,15 @@ $(document).ready(function() {
             listAction: 'http://genepool12.nersc.gov:8242/poster/get_user_detailed_summary',
         },
         fields: {
+            username:  { title: 'User',
+                display: function(data) {
+                    return '<button type="button" onclick="$(\'#select_user\').val(\'' + data.record.username + '\').change();">' + data.record.username + '</button>';
+                },
+            },
             username: { title: 'User', key:true },
             exe:      { title: 'N Executables' },
             script:   { title: 'N Scripts' },
         },
-        /*
-        recordsLoaded: function(event, data) {
-            $('.jtable-data-row').click(function() {
-                var row_id = $(this).attr('data-record-key');
-                $("#select_user").val(row_id).change();
-            });
-            $('#select_user').bind('change', change_menu_selection);
-        }
-        */
     });
     $( "#projectsummary_table" ).jtable( {
         title: 'Project Summary',
@@ -168,23 +169,14 @@ $(document).ready(function() {
             listAction: 'http://genepool12.nersc.gov:8242/poster/get_project_detailed_summary',
         },
         fields: {
-            project:  { title: 'Display',
+            project:  { title: 'Project',
                 display: function(data) {
-                    return '<button type="button" onclick="alert(\"' + data.record.project + '\");">' + data.record.project + '</button>';
+                    return '<button type="button" onclick="$(\'#select_project\').val(\'' + data.record.project + '\').change();">' + data.record.project + '</button>';
                 },
             },
             exe:      { title: 'N Executables' },
             script:   { title: 'N Scripts' },
         },
-        /*
-        recordsLoaded: function(event, data) {
-            $('.jtable-data-row').click(function() {
-                var row_id = $(this).attr('data-record-key');
-                $("#select_project").val(row_id).change();
-            });
-            $('#select_project').bind('change', change_menu_selection);
-        }
-        */
     });
     update_summary();
 });
@@ -199,6 +191,7 @@ $(".dataBox").corner("30px");
         <strong>Date:</strong>&nbsp;<input type='text' name='date' id='datepicker' size='12' />&nbsp;&nbsp;
         <strong>User:</strong>&nbsp;<select name='user' id='select_user'><option value="Any">Any</option></select>&nbsp;&nbsp;
         <strong>Project:</strong>&nbsp;<select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
+        <button name='reset' onclick='reset_all();return false;'>Reset</button>
     </form>
 </div>
 
