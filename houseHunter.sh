@@ -1,4 +1,7 @@
 #!/bin/bash -l
+#$ -l exclusive.c
+#$ -pe pe_16 16
+#$ -l h_rt=1:00:00
 
 ## HouseHunter batch script
 ## Author: Doug Jacobsen <dmj@nersc.gov>
@@ -24,8 +27,10 @@ module load openmpi/1.6.4
 
 export _LD_LIBRARY_PATH=$LD_LIBRARY_PATH
 
+PROCMON_SCRIPTS=$HOME/genepool/procmon
 PROCMON_SOURCE=/global/projectb/shared/data/genepool/procmon
-PROCFINDER=$HOME/genepool/procmon/procFinder.py
+PROCFINDER=$PROCMON_SCRIPTS/procFinder.py
+MONGOSUMMARY=$PROCMON_SCRIPTS/mongoSummary.py
 STARTDATE=`date -d yesterday +"%Y-%m-%d"`
 ENDDATE=`date +"%Y-%m-%d"`
 
@@ -37,6 +42,7 @@ echo ${START}
 STARTFMT=`date -d "${START}" +"%Y%m%d%H%M%S"`
 ENDFMT=`date -d "${END}" +"%Y%m%d%H%M%S"`
 STARTDATE=`date -d "${START}" +"%Y-%m-%d"`
+STARTDATE_NODASH=`date -d "${START}" +"%Y%m%d"`
 STARTDATETIME=`date -d "${START}" +"%Y-%m-%d %H:%M:%S"`
 ENDDATE=`date -d "${END}" +"%Y-%m-%d"`
 ENDDATETIME=`date -d "${END}" +"%Y-%m-%d %H:%M:%S"`
@@ -51,3 +57,5 @@ qqacct -S "$STARTDATE" -E "$ENDDATE" -q "last_good_end_time >= $STARTDATETIME &&
 
 ## run the procFinder with houseHunter options
 time mpirun --bind-to-socket python $PROCFINDER --start $STARTFMT --end $ENDFMT --save-prefix $SAVEPREFIX --qqacct-data $QQACCT_FILE exePath '^(/chos)?/house'
+
+time python $MONGOSUMMARY $SAVEPREFIX.summary.h5 $STARTDATE_NODASH
