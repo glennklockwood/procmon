@@ -27,7 +27,7 @@
 }
 </style>
 <link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css" />
-<link href="jtable.2.3.0/themes/lightcolor/orange/jtable.min.css" rel="stylesheet" type="text/css" />
+<link rel="stylesheet" type="text/css" href="jtable.2.3.0/themes/jqueryui/jtable_jqueryui.min.css" />
 <script src="http://code.jquery.com/jquery-1.9.1.js"></script>
 <script src="http://code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
 <script src="http://portal.nersc.gov/project/genepool/procmon/jtable.2.3.0/jquery.jtable.min.js" />
@@ -118,8 +118,8 @@ $(document).ready(function() {
         fields: {
             exePath: { title: 'exePath' },
             nobs:    { title: 'N observations' },
-            walltime:{ title: 'Total Walltime' },
-            cpu_time:{ title: 'CPU time' }
+            walltime:{ title: 'Total Walltime (s)' },
+            cpu_time:{ title: 'CPU time (s)', display: function(data) { return Math.round(data.record.cpu_time*100)/100; }, }
         }
     });
     $( "#script_table" ).jtable( {
@@ -135,8 +135,8 @@ $(document).ready(function() {
             scripts: { title: 'script' },
             exePath: { title: 'exePath' },
             nobs:    { title: 'N observations' },
-            walltime:{ title: 'Total Walltime' },
-            cpu_time:{ title: 'CPU time' }
+            walltime:{ title: 'Total Walltime (s)' },
+            cpu_time:{ title: 'CPU time (s)', display: function(data) { return Math.round(data.record.cpu_time*100)/100; }, }
         }
     });
     $( "#usersummary_table" ).jtable( {
@@ -147,6 +147,14 @@ $(document).ready(function() {
         defaultSorting: 'exe DESC',
         actions: {
             listAction: 'http://genepool12.nersc.gov:8242/poster/get_user_detailed_summary',
+        },
+        toolbar: {
+            items: [{
+                text: 'All Users',
+                click: function () {
+                    $('#select_user').val('Any').change();
+                }
+            }]
         },
         fields: {
             username:  { title: 'User',
@@ -167,6 +175,14 @@ $(document).ready(function() {
         defaultSorting: 'exe DESC',
         actions: {
             listAction: 'http://genepool12.nersc.gov:8242/poster/get_project_detailed_summary',
+        },
+        toolbar: {
+            items: [{
+                text: 'All Projects',
+                click: function () {
+                    $('#select_project').val('Any').change();
+                }
+            }]
         },
         fields: {
             project:  { title: 'Project',
