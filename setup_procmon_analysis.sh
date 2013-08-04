@@ -32,3 +32,4 @@ mkdir -p $INSTALLDIR/scripts
 mkdir -p $INSTALLDIR/bin
 cp procFinder.py $INSTALLDIR/scripts
 cat procHunter.sh.init | sed "s|___INSTALLDIR___|$INSTALLDIR|g" > $INSTALLDIR/bin/procHunter.sh
+chmod a+rX $INSTALLDIR/bin/procHunter.sh
