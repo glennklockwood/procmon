@@ -3,10 +3,12 @@ import sys
 import re
 import json
 import cgi
-from bson.code import Code
+import bson
 
 from multiprocessing import current_process
 import multiprocessing
+
+import datetime
 import time
 
 from BaseHTTPServer import BaseHTTPRequestHandler
@@ -19,7 +21,10 @@ from pymongo import MongoClient
 
 def note(format, *args):
     sys.stderr.write('[%s]\t%s\n' % (current_process().name, format % args))
-       
+
+def date_range(start_date, end_date):
+    for n in range(int((end_date - start_date).days)+1):
+        yield start_date + datetime.timedelta(n)
        
 class MongoDataServer(HTTPServer):
     def __init__(self, config, requestHandler):
@@ -120,7 +125,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             exeType = 'execProject'
             scriptType = 'scriptProject'
             keyVal = 'project'
-        reducer = Code("""
+        reducer = bson.code.Code("""
             function(curr, result) {
                 if (curr.type == "%s") {
                     result.exe++
@@ -130,7 +135,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             }
             """ % exeType)
         condition = {
-            '$or': [{'type':exeType}, {'type':scriptType}],
+            'type': {'$in':[exeType,scriptType]},
             'date': date
         }
         if user is not None:
@@ -148,6 +153,57 @@ class RequestHandler(BaseHTTPRequestHandler):
         retval = {'Result':'OK','Records':data,'TotalRecordCount':nRec}
         return json.dumps(retval)
 
+    def time_summary(self, qtype, ident, qdate):
+        if qtype not in ('user','project',) or ident is None or qdate is None:
+            return '{}'
+        latest_date = datetime.date.today() - datetime.timedelta(1)
+        earliest_date = datetime.date(2013, 6, 1)
+        qdate = datetime.datetime.strptime(qdate, '%Y%m%d').date()
+        start_date = qdate - datetime.timedelta(days=7)
+        end_date = qdate + datetime.timedelta(days=7)
+        if start_date < earliest_date:
+            start_date = earliest_date
+        if end_date > latest_date:
+            end_date = latest_date
+        (exeType,scriptType,qcol) = ('execUser','scriptUser','username')
+        if qtype == 'project':
+            (exeType,scriptType,qcol) = ('execProject','scriptProject','project')
+        reducer = bson.code.Code("""
+            function(curr, result) {
+                if (curr.type == "%s") {
+                    result.exe++;
+                } else {
+                    result.script++;
+                }
+            }
+            """ % exeType)
+        condition = {
+            qcol: ident,
+            'date': {'$gte':start_date.strftime("%Y%m%d"), '$lte':end_date.strftime("%Y%m%d")},
+            'type': {'$in': [exeType, scriptType] },
+        }
+        records = self.server.house.group(key={'date':1}, condition=condition, initial={'exe':0,'script':0}, reduce=reducer)
+        ret = {
+            'dates': [x.strftime('%Y%m%d') for x in date_range(start_date, end_date)],
+            'exe': [],
+            'script': [],
+
+        }
+        retprep = {}
+        for record in records:
+            retprep[record['date']] = {'exe': record['exe'], 'script': record['script']}
+        for date in date_range(start_date, end_date):
+            fdate = date.strftime('%Y%m%d')
+            exe = 0
+            script = 0
+            if fdate in retprep:
+                exe = retprep[fdate]['exe']
+                script = retprep[fdate]['script']
+            ret['exe'].append(exe)
+            ret['script'].append(script)
+            
+        print ret
+        return json.dumps(ret)
 
     def run_query(self, query):
         currtime = time.mktime(time.gmtime())
@@ -218,6 +274,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             return self.run_details_query('exec', www_user, www_project, www_date, query)
         if 'get_script' in query:
             return self.run_details_query('script', www_user, www_project, www_date, query)
+        if 'get_time_summary' in query:
+            qtype = 'user'
+            ident = www_user
+            if www_project is not None:
+                qtype = 'project'
+                ident = www_project
+            return self.time_summary(qtype, ident, www_date)
             
     def do_GET(self):
         

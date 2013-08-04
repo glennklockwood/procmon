@@ -30,10 +30,12 @@
 <link rel="stylesheet" type="text/css" href="jtable.2.3.0/themes/jqueryui/jtable_jqueryui.min.css" />
 <script src="http://code.jquery.com/jquery-1.9.1.js"></script>
 <script src="http://code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
-<script src="http://portal.nersc.gov/project/genepool/procmon/jtable.2.3.0/jquery.jtable.min.js" />
-<script src="http://code.highcharts.com/highcharts.js"></script>
+<script src="http://portal.nersc.gov/project/genepool/procmon/jtable.2.3.0/jquery.jtable.min.js"></script>
 <script src="jquery.corner.js"></script>
+<script src="http://code.highcharts.com/highcharts.js"></script>
 <script>
+var chart_data;
+
 function load_exec_data() {
     user = $("#select_user").val()
     project = $("#select_project").val()
@@ -54,9 +56,145 @@ function load_exec_data() {
     });
     $("#exec_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
     $("#script_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-    $("#usersummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-    $("#projectsummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+    if (user == "Any" && project == "Any") {
+        $("#usersummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+        $("#projectsummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+        $("#projectsummary_table").show();
+        $("#usersummary_table").show();
+        $("#usersummary_chart").hide();
+        $("#projectsummary_chart").hide();
+    }
+    if (user != "Any") {
+        $("#usersummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+        $("#projectsummary_table").hide();
+        initialize_chart('user');
+        $("#usersummary_chart").show();
+    }
+    if (project != "Any") {
+        $("#projectsummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+        $("#usersummary_table").hide();
+        initialize_chart('project');
+        $("#projectsummary_chart").show();
+    }
 }
+function initialize_chart(chart_type) {
+    var query = $("#select_" + chart_type).val();
+    var container = chart_type + 'summary_chart';
+    var date_val = $("#datepicker").val();
+    var url = 'http://genepool12.nersc.gov:8242/houseHunter.cgi?get_time_summary=1&date=' + date_val + '&' + chart_type + '=' + query;
+
+    var exeColor = '#89A54E';
+    var scriptColor = '#4572A7';
+
+    var options = {
+        chart: {
+            renderTo: container,
+        },
+        series: [{
+                    name: 'Current Day',
+                    color: '#DEDEDE',
+                    type: 'column',
+                }, { //executables
+                    name: 'Executables',
+                    color: exeColor,
+                    type: 'line',
+                    cursor: 'pointer',
+                    events: {
+                        click: function(event) {
+                            date = chart_data.dates[event.point.x];
+                            $("#datepicker").val(date).change();
+                            tab_index = 1;
+                            if (this.name == "Scripts") {
+                                tab_index = 2;
+                            }
+                            $( "#tabs" ).tabs('option', 'active', tab_index);
+                        }
+                    },
+                },{
+                    name: 'Scripts',
+                    color: scriptColor,
+                    type: 'line',
+                    yAxis: 1,
+                    cursor: 'pointer',
+                    events: {
+                        click: function(event) {
+                            date = chart_data.dates[event.point.x];
+                            $("#datepicker").val(date).change();
+                            tab_index = 1;
+                            if (this.name == "Scripts") {
+                                tab_index = 2;
+                            }
+                            $( "#tabs" ).tabs('option', 'active', tab_index);
+                        }
+                    },
+                }],
+        title: {text: query + ': Number of unique executables/scripts by Date'},
+        xAxis: {
+            categories:[],
+            labels: {
+                rotation: -45,
+                align: 'right',
+                formatter: function() {
+                    curr_date = $("#datepicker").val();
+                    if (this.value == curr_date) {
+                        return '**' + this.value + '**';
+                    }
+                    return this.value;
+                },
+            },
+        },
+        yAxis: [{ // exe axis
+            gridLineWidth: 0,
+            min: 0,
+            startOnTick: true,
+            title: {
+                text: 'N Executables',
+                style: { color: exeColor },
+            },
+            labels: {
+                style: { color: exeColor },
+            }
+        }, { // script axis     
+            gridLineWidth: 0,
+            opposite: true,
+            min: 0,
+            startOnTick: true,
+            title: {
+                text: 'N Scripts',
+                style: { color: scriptColor },
+            },
+            labels: {
+                style: { color: scriptColor },
+            }
+        }],
+    };
+
+    $.getJSON(url, function(data) {
+        chart_data = data;
+        options.series[0].data = [];
+        options.series[1].data = data.exe;
+        options.series[2].data = data.script;
+        options.xAxis.categories = data.dates;
+        curr_day = $("#datepicker").val();
+        max_val = 0;
+        for (idx in data.exe) {
+            if (max_val < data.exe[idx]) {
+                max_val = data.exe[idx]
+            }
+        }
+        max_val = max_val * 1.1;
+        options.yAxis[0].max = max_val;
+        for (idx in data.dates) {
+            if (curr_day == data.dates[idx]) {
+                options.series[0].data.push(max_val*2);
+            } else {
+                options.series[0].data.push(0);
+            }
+        }
+        $('#'+container).highcharts(options);
+    });
+}
+
 $(function() {
     $( "#datepicker" ).datepicker({
         dateFormat: "yymmdd",
@@ -64,6 +202,10 @@ $(function() {
         constrainInput: true,
         maxDate: -1,
         minDate: "20130601",
+    });
+    $( "#about_dialog" ).dialog({
+        autoOpen: false,
+        modal: true
     });
     $( "#tabs" ).tabs();
 });
@@ -104,6 +246,8 @@ $(document).ready(function() {
     $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_projects=1', function(data) {
         reset_selection('#select_project', data);
     });
+    $("#select_user").change(change_menu_selection);
+    $("#select_project").change(change_menu_selection);
     $("#datepicker").datepicker('setDate', 'defaultDate');
     $("#datepicker").bind('change', update_summary);
     $( "#exec_table" ).jtable( {
@@ -117,7 +261,7 @@ $(document).ready(function() {
         },
         fields: {
             exePath: { title: 'exePath' },
-            nobs:    { title: 'N observations' },
+            nobs:    { title: 'N instances' },
             walltime:{ title: 'Total Walltime (s)' },
             cpu_time:{ title: 'CPU time (s)', display: function(data) { return Math.round(data.record.cpu_time*100)/100; }, }
         }
@@ -134,7 +278,7 @@ $(document).ready(function() {
         fields: {
             scripts: { title: 'script' },
             exePath: { title: 'exePath' },
-            nobs:    { title: 'N observations' },
+            nobs:    { title: 'N instances' },
             walltime:{ title: 'Total Walltime (s)' },
             cpu_time:{ title: 'CPU time (s)', display: function(data) { return Math.round(data.record.cpu_time*100)/100; }, }
         }
@@ -159,7 +303,7 @@ $(document).ready(function() {
         fields: {
             username:  { title: 'User',
                 display: function(data) {
-                    return '<button type="button" onclick="$(\'#select_user\').val(\'' + data.record.username + '\').change();">' + data.record.username + '</button>';
+                    return '<a href="#" onclick="$(\'#select_user\').val(\'' + data.record.username + '\').change(); return false;">' + data.record.username + '</a>';
                 },
             },
             username: { title: 'User', key:true },
@@ -187,7 +331,7 @@ $(document).ready(function() {
         fields: {
             project:  { title: 'Project',
                 display: function(data) {
-                    return '<button type="button" onclick="$(\'#select_project\').val(\'' + data.record.project + '\').change();">' + data.record.project + '</button>';
+                    return '<a href="#" onclick="$(\'#select_project\').val(\'' + data.record.project + '\').change(); return false;">' + data.record.project + '</a>';
                 },
             },
             exe:      { title: 'N Executables' },
@@ -196,7 +340,6 @@ $(document).ready(function() {
     });
     update_summary();
 });
-$("select").change(change_menu_selection);
 $(".dataBox").corner("30px");
 
 </script>
@@ -207,7 +350,7 @@ $(".dataBox").corner("30px");
         <strong>Date:</strong>&nbsp;<input type='text' name='date' id='datepicker' size='12' />&nbsp;&nbsp;
         <strong>User:</strong>&nbsp;<select name='user' id='select_user'><option value="Any">Any</option></select>&nbsp;&nbsp;
         <strong>Project:</strong>&nbsp;<select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
-        <button name='reset' onclick='reset_all();return false;'>Reset</button>
+        <button name='reset' onclick='reset_all();return false;'>Reset</button>&nbsp;&nbsp;
     </form>
 </div>
 
@@ -224,9 +367,22 @@ $(".dataBox").corner("30px");
     <li><a href="#script_table">Scripts</a></li>
 </ul>
 <div id="summary_tab">
-    <div id="usersummary_table" style="width:49%;float:left"></div>
-    <div id="projectsummary_table" style="width:49%;float:right"></div>
+    <div style="width:49%;float:left">
+        <div id="usersummary_table"></div>
+        <div id="projectsummary_chart" style='display: none'></div>
+    </div>
+    <div style="width:49%;float:right">
+        <div id="projectsummary_table"></div>
+        <div id="usersummary_chart" style='display: none'></div>
+    </div>
     <div style="clear:both"></div>
+</div>
+<div id="about_dialog" title="About HouseHunter" style="display: none">
+    <h3>About the houseHunter</h3>
+    <p>The data presented here are daily-summarizations of all the observed processes run on the genepool cluster.  At present these are only the jobs which are run as part of a batch-job; interactive processes are not included at this time.  The processes are sampled every 30s, thus very short processes may be missed.
+    <p>Each day the sampled process data are assembled into a unique non-redundant set of processes.  Those which have a executable path resolving to /house are presented by the houseHunter (here!).  The data are summarized by exePath, by user and exePath, and by genepool-share and exePath.  In addition, executables which have 'perl', 'python', 'sh', 'bash', 'tcsh', or 'ruby' in them are further examined to try to identify the script which was run.
+    <p>To use this interface, first select the date you would like to examine on the upper-left.  Then, select the user OR project you would like to see.  Click the "Executables" tab to see the statistics for the executables.  Click the "Scripts" tab to see the statistics for the scripts.  On the "Summary" tab, clicking a user name, or a project name will automatically bring you to that user or project.  Clicking the "All Users" or "All Projects" button will return the larger summary.
+    <p>Please contact consult@nersc.gov if you have any questions.
 </div>
 <div id="exec_table"></div>
 <div id="script_table"></div>
