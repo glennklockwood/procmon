@@ -58,4 +58,4 @@ qqacct -S "$STARTDATE" -E "$ENDDATE" -q "last_good_end_time >= $STARTDATETIME &&
 ## run the procFinder with houseHunter options
 time mpirun --bind-to-socket python $PROCFINDER --start $STARTFMT --end $ENDFMT --save-prefix $SAVEPREFIX --qqacct-data $QQACCT_FILE exePath '^(/chos)?/house'
 
-time python $MONGOSUMMARY $SAVEPREFIX.summary.h5 $STARTDATE_NODASH
+time python $MONGOSUMMARY houseHunter $SAVEPREFIX.summary.h5 $STARTDATE_NODASH
