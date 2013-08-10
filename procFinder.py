@@ -429,7 +429,7 @@ def summarize_data(processes, summaries = {
     return ret
 
 def usage(ret):
-    print "procFinder.py [--h5-path <path=/global/projectb/shared/data/genepool/procmon>] [--start YYYYMMDDHHMMSS] [--end YYYYMMDDHHMMSS] [--prefix <h5prefix=procmon_genepool>] --qqacct-data <filename> --save-prefix <save_filename_prefix> <col> <regex> [<col> <regex> ...]"
+    print "procFinder.py [--h5-path <path=/global/projectb/shared/data/genepool/procmon>] [--start YYYYMMDDHHMMSS] [--end YYYYMMDDHHMMSS] [--prefix <h5prefix=procmon_genepool>] [--save-all-processes] --qqacct-data <filename> --save-prefix <save_filename_prefix> <col> <regex> [<col> <regex> ...]"
     print "  Start time defaults to yesterday at Midnight (inclusive)"
     print "  End time defaults to today at Midnight (non-inclusive)"
     print "  Therefore, the default is to process all the files from yesterday!"
@@ -445,6 +445,7 @@ def main(args):
     end_time = datetime.combine(date.today(), time(0,0,0))
     h5_path = "/global/projectb/shared/data/genepool/procmon"
     h5_prefix = "procmon_genepool"
+    save_all_processes = False
     qqacct_file = None
     save_prefix = None
 
@@ -500,6 +501,8 @@ def main(args):
                 save_prefix = args[i]
             else:
                 usage(1)
+        elif args[i] == "--save-all-processes":
+            save_all_processes = True
         elif args[i] == "--help":
             usage(0)
         else:
@@ -572,7 +575,7 @@ def main(args):
     if rank == 0:
         summ_list = {}
         final_summaries = {}
-        write_summary_debug = True
+        write_summary_debug = False
 
         for l_rank in xrange(size):
             if all_summaries[l_rank] is None:
@@ -604,15 +607,16 @@ def main(args):
         if write_summary_debug:
             cPickle.dump(summ_list, open('%s.summ_list.debug2.pk' % save_prefix, 'wb'))
     
-    all_processes = None
-    print "[%d] about to send %s processes" % (rank, processes.shape)
-    try:
-        all_processes = comm.gather(processes, root=0)
-    except:
-        pass
-    if rank == 0 and all_processes is not None:
-        processes = pandas.concat(all_processes, axis=0)
-        processes.to_hdf('%s.processes.h5' % save_prefix, 'processes')
+    if save_all_processes:
+        all_processes = None
+        print "[%d] about to send %s processes" % (rank, processes.shape)
+        try:
+            all_processes = comm.gather(processes, root=0)
+        except:
+            pass
+        if rank == 0 and all_processes is not None:
+            processes = pandas.concat(all_processes, axis=0)
+            processes.to_hdf('%s.processes.h5' % save_prefix, 'processes')
 
 
 if __name__ == "__main__":
