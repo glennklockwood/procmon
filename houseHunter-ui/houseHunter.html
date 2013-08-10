@@ -27,20 +27,25 @@
 }
 </style>
 <link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css" />
-<link rel="stylesheet" type="text/css" href="jtable.2.3.0/themes/jqueryui/jtable_jqueryui.min.css" />
+<link rel="stylesheet" type="text/css" href="DataTables-1.9.4/media/css/jquery.dataTables.css" />
 <script src="http://code.jquery.com/jquery-1.9.1.js"></script>
 <script src="http://code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
-<script src="http://portal.nersc.gov/project/genepool/procmon/jtable.2.3.0/jquery.jtable.min.js"></script>
 <script src="jquery.corner.js"></script>
 <script src="http://code.highcharts.com/highcharts.js"></script>
+<script src="DataTables-1.9.4/media/js/jquery.dataTables.js"></script>
 <script>
 var chart_data;
+var exec_table_obj;
+var script_table_obj;
+var usersummary_table_obj;
+var projectsummary_table_obj;
 
 function load_exec_data() {
     user = $("#select_user").val()
     project = $("#select_project").val()
     date_val = $("#datepicker").val()
-    $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_summary=1&user=' + user + '&project=' + project + '&date=' + date_val, function(data) {
+    collection = $("#select_collection").val()
+    $.getJSON('http://genepool12.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_summary=1&user=' + user + '&project=' + project + '&date=' + date_val, function(data) {
         if ("users_count" in data) {
             $("#data_nusers").html(data.users_count);
         }
@@ -54,34 +59,37 @@ function load_exec_data() {
             $("#data_nscripts").html(data.scripts_count);
         }
     });
-    $("#exec_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-    $("#script_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
+    exec_table_obj.fnDraw();
+    script_table_obj.fnDraw();
     if (user == "Any" && project == "Any") {
-        $("#usersummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-        $("#projectsummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-        $("#projectsummary_table").show();
-        $("#usersummary_table").show();
+        usersummary_table_obj.fnDraw();
+        projectsummary_table_obj.fnDraw();
+        $("#projectsummary_table_div").show();
+        $("#usersummary_table_div").show();
         $("#usersummary_chart").hide();
         $("#projectsummary_chart").hide();
     }
     if (user != "Any") {
-        $("#usersummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-        $("#projectsummary_table").hide();
+        usersummary_table_obj.fnDraw();
+        $("#projectsummary_table_div").hide();
+        $("#projectsummary_chart").hide();
         initialize_chart('user');
         $("#usersummary_chart").show();
     }
     if (project != "Any") {
-        $("#projectsummary_table").jtable('load', {'user':user, 'project':project, 'date':date_val});
-        $("#usersummary_table").hide();
+        projectsummary_table_obj.fnDraw();
+        $("#usersummary_table_div").hide();
         initialize_chart('project');
         $("#projectsummary_chart").show();
+        $("#usersummary_chart").hide();
     }
 }
 function initialize_chart(chart_type) {
     var query = $("#select_" + chart_type).val();
     var container = chart_type + 'summary_chart';
     var date_val = $("#datepicker").val();
-    var url = 'http://genepool12.nersc.gov:8242/houseHunter.cgi?get_time_summary=1&date=' + date_val + '&' + chart_type + '=' + query;
+    var collection = $("#select_collection").val();
+    var url = 'http://genepool12.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_time_summary=1&date=' + date_val + '&' + chart_type + '=' + query;
 
     var exeColor = '#89A54E';
     var scriptColor = '#4572A7';
@@ -133,13 +141,15 @@ function initialize_chart(chart_type) {
             categories:[],
             labels: {
                 rotation: -45,
-                align: 'right',
                 formatter: function() {
+                    var label;
                     curr_date = $("#datepicker").val();
                     if (this.value == curr_date) {
-                        return '**' + this.value + '**';
+                        label = '**' + this.value + '**';
+                    } else {
+                        label = this.value;
                     }
-                    return this.value;
+                    return label;
                 },
             },
         },
@@ -240,104 +250,116 @@ function reset_selection(id, data) {
     $(id).bind('change', change_menu_selection);
 }
 $(document).ready(function() {
-    $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_users=1', function(data) {
+    var collection = $("#select_collection").val();
+    $.getJSON('http://genepool12.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_users=1', function(data) {
         reset_selection('#select_user', data);
     });
-    $.getJSON('http://genepool12.nersc.gov:8242/houseHunter.cgi?get_projects=1', function(data) {
+    $.getJSON('http://genepool12.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_projects=1', function(data) {
         reset_selection('#select_project', data);
     });
     $("#select_user").change(change_menu_selection);
     $("#select_project").change(change_menu_selection);
     $("#datepicker").datepicker('setDate', 'defaultDate');
     $("#datepicker").bind('change', update_summary);
-    $( "#exec_table" ).jtable( {
-        title: 'houseHunter Executables',
-        paging: true,
-        pageSize: 25,
-        sorting: true,
-        defaultSorting: 'nobs DESC',
-        actions: {
-            listAction: 'http://genepool12.nersc.gov:8242/poster/get_exec',
+    exec_table_obj = $('#exec_table').dataTable( {
+        "bProcessing": true,
+        "bServerSide": true,
+        "bFilter": false,
+        "iDisplayLength": 50,
+        "sAjaxSource": "http://genepool12.nersc.gov:8242/get_mongo_data",
+        "fnServerParams": function ( aoData ) {
+            user = $("#select_user").val();
+            project = $("#select_project").val();
+            date_val = $("#datepicker").val();
+            collection = $("#select_collection").val();
+            aoData.push( {"name": "get_exec", "value": 1} );
+            aoData.push( {"name": "user", "value": user} );
+            aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "date", "value": date_val} );
+            aoData.push( {"name": "collection", "value": collection} );
         },
-        fields: {
-            exePath: { title: 'exePath' },
-            nobs:    { title: 'N instances' },
-            walltime:{ title: 'Total Walltime (s)' },
-            cpu_time:{ title: 'CPU time (s)', display: function(data) { return Math.round(data.record.cpu_time*100)/100; }, }
-        }
-    });
-    $( "#script_table" ).jtable( {
-        title: 'houseHunter Scripts',
-        paging: true,
-        pageSize: 25,
-        sorting: true,
-        defaultSorting: 'nobs DESC',
-        actions: {
-            listAction: 'http://genepool12.nersc.gov:8242/poster/get_script',
+        "aaSorting": [[1, "desc"]],
+        "aoColumnDefs": [ {
+            "aTargets": [ -1 ],
+            "mRender": function (data, type, full) { return Math.round(data*100)/100; },
+        }],
+    } ); 
+
+    script_table_obj = $('#script_table').dataTable( {
+        "bProcessing": true,
+        "bServerSide": true,
+        "bFilter": false,
+        "iDisplayLength": 50,
+        "sAjaxSource": "http://genepool12.nersc.gov:8242/get_mongo_data",
+        "fnServerParams": function ( aoData ) {
+            user = $("#select_user").val();
+            project = $("#select_project").val();
+            date_val = $("#datepicker").val();
+            collection = $("#select_collection").val();
+            aoData.push( {"name": "get_script", "value": 1} );
+            aoData.push( {"name": "user", "value": user} );
+            aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "date", "value": date_val} );
+            aoData.push( {"name": "collection", "value": collection} );
         },
-        fields: {
-            scripts: { title: 'script' },
-            exePath: { title: 'exePath' },
-            nobs:    { title: 'N instances' },
-            walltime:{ title: 'Total Walltime (s)' },
-            cpu_time:{ title: 'CPU time (s)', display: function(data) { return Math.round(data.record.cpu_time*100)/100; }, }
-        }
-    });
-    $( "#usersummary_table" ).jtable( {
-        title: 'User Summary',
-        paging: true,
-        pageSize: 25,
-        sorting: true,
-        defaultSorting: 'exe DESC',
-        actions: {
-            listAction: 'http://genepool12.nersc.gov:8242/poster/get_user_detailed_summary',
+        "aaSorting": [[2, "desc"]],
+        "aoColumnDefs": [ {
+            "aTargets": [ -1 ],
+            "mRender": function (data, type, full) { return Math.round(data*100)/100; },
+        }],
+    } ); 
+
+    usersummary_table_obj = $('#usersummary_table').dataTable( {
+        "bProcessing": true,
+        "bServerSide": true,
+        "bFilter": false,
+        "iDisplayLength": 25,
+        "sAjaxSource": "http://genepool12.nersc.gov:8242/get_mongo_data",
+        "fnServerParams": function ( aoData ) {
+            user = $("#select_user").val();
+            project = $("#select_project").val();
+            date_val = $("#datepicker").val();
+            collection = $("#select_collection").val();
+            aoData.push( {"name": "get_user_detailed_summary", "value": 1} );
+            aoData.push( {"name": "user", "value": user} );
+            aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "date", "value": date_val} );
+            aoData.push( {"name": "collection", "value": collection} );
         },
-        toolbar: {
-            items: [{
-                text: 'All Users',
-                click: function () {
-                    $('#select_user').val('Any').change();
-                }
-            }]
-        },
-        fields: {
-            username:  { title: 'User',
-                display: function(data) {
-                    return '<a href="#" onclick="$(\'#select_user\').val(\'' + data.record.username + '\').change(); return false;">' + data.record.username + '</a>';
-                },
+        "aaSorting": [[1, "desc"]],
+        "aoColumnDefs": [ {
+            "aTargets": [ 0 ],
+            "mRender": function (data, type, full) {
+                return '<a href="#" onclick="$(\'#select_user\').val(\'' + data + '\').change(); return false;">' + data + '</a>';
             },
-            username: { title: 'User', key:true },
-            exe:      { title: 'N Executables' },
-            script:   { title: 'N Scripts' },
+        }],
+    } ); 
+    projectsummary_table_obj = $('#projectsummary_table').dataTable( {
+        "bProcessing": true,
+        "bServerSide": true,
+        "bFilter": false,
+        "iDisplayLength": 25,
+        "sAjaxSource": "http://genepool12.nersc.gov:8242/get_mongo_data",
+        "fnServerParams": function ( aoData ) {
+            user = $("#select_user").val();
+            project = $("#select_project").val();
+            date_val = $("#datepicker").val();
+            collection = $("#select_collection").val();
+            aoData.push( {"name": "get_project_detailed_summary", "value": 1} );
+            aoData.push( {"name": "user", "value": user} );
+            aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "date", "value": date_val} );
+            aoData.push( {"name": "collection", "value": collection} );
         },
-    });
-    $( "#projectsummary_table" ).jtable( {
-        title: 'Project Summary',
-        paging: true,
-        pageSize: 25,
-        sorting: true,
-        defaultSorting: 'exe DESC',
-        actions: {
-            listAction: 'http://genepool12.nersc.gov:8242/poster/get_project_detailed_summary',
-        },
-        toolbar: {
-            items: [{
-                text: 'All Projects',
-                click: function () {
-                    $('#select_project').val('Any').change();
-                }
-            }]
-        },
-        fields: {
-            project:  { title: 'Project',
-                display: function(data) {
-                    return '<a href="#" onclick="$(\'#select_project\').val(\'' + data.record.project + '\').change(); return false;">' + data.record.project + '</a>';
-                },
+        "aaSorting": [[1, "desc"]],
+        "aoColumnDefs": [ {
+            "aTargets": [ 0 ],
+            "mRender": function (data, type, full) {
+                return '<a href="#" onclick="$(\'#select_project\').val(\'' + data + '\').change(); return false;">' + data + '</a>';
             },
-            exe:      { title: 'N Executables' },
-            script:   { title: 'N Scripts' },
-        },
-    });
+        }],
+    } ); 
+
     update_summary();
 });
 $(".dataBox").corner("30px");
@@ -351,6 +373,7 @@ $(".dataBox").corner("30px");
         <strong>User:</strong>&nbsp;<select name='user' id='select_user'><option value="Any">Any</option></select>&nbsp;&nbsp;
         <strong>Project:</strong>&nbsp;<select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
         <button name='reset' onclick='reset_all();return false;'>Reset</button>&nbsp;&nbsp;
+        <strong>Data:</strong>&nbsp;<select name='collection' id='select_collection' onchange='update_summary();return false;'><option value="houseHunter">houseHunter</option><option value="firehose">firehose</option></select>&nbsp;&nbsp;
     </form>
 </div>
 
@@ -363,16 +386,34 @@ $(".dataBox").corner("30px");
 <div id="tabs">
 <ul>
     <li><a href="#summary_tab">Summary</a></li>
-    <li><a href="#exec_table">Executables</a></li>
-    <li><a href="#script_table">Scripts</a></li>
+    <li><a href="#exec_table_div">Executables</a></li>
+    <li><a href="#script_table_div">Scripts</a></li>
 </ul>
 <div id="summary_tab">
     <div style="width:49%;float:left">
-        <div id="usersummary_table"></div>
+        <div id="usersummary_table_div">
+        <table id="usersummary_table">
+            <thead>
+                <th>User</th>
+                <th>N Executables</th>
+                <th>N Scripts</th>
+            </thead>
+            <tbody></tbody>
+        </table>
+        </div>
         <div id="projectsummary_chart" style='display: none'></div>
     </div>
     <div style="width:49%;float:right">
-        <div id="projectsummary_table"></div>
+        <div id="projectsummary_table_div">
+        <table id="projectsummary_table">
+            <thead>
+                <th>Project</th>
+                <th>N Executables</th>
+                <th>N Scripts</th>
+            </thead>
+            <tbody></tbody>
+        </table>
+        </div>
         <div id="usersummary_chart" style='display: none'></div>
     </div>
     <div style="clear:both"></div>
@@ -384,8 +425,29 @@ $(".dataBox").corner("30px");
     <p>To use this interface, first select the date you would like to examine on the upper-left.  Then, select the user OR project you would like to see.  Click the "Executables" tab to see the statistics for the executables.  Click the "Scripts" tab to see the statistics for the scripts.  On the "Summary" tab, clicking a user name, or a project name will automatically bring you to that user or project.  Clicking the "All Users" or "All Projects" button will return the larger summary.
     <p>Please contact consult@nersc.gov if you have any questions.
 </div>
-<div id="exec_table"></div>
-<div id="script_table"></div>
+<div id="exec_table_div">
+    <table id="exec_table">
+        <thead>
+            <th>exePath</th>
+            <th>N instances</th>
+            <th>Total Walltime (s)</th>
+            <th>CPU time (s)</th>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+<div id="script_table_div">
+    <table id="script_table">
+        <thead>
+            <th>script</th>
+            <th>exePath</th>
+            <th>N instances</th>
+            <th>Total Walltime (s)</th>
+            <th>CPU time (s)</th>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
 </div>
 <hr /><br />
 </body>
