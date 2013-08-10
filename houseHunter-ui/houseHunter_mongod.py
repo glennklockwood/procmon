@@ -25,6 +25,35 @@ def note(format, *args):
 def date_range(start_date, end_date):
     for n in range(int((end_date - start_date).days)+1):
         yield start_date + datetime.timedelta(n)
+
+def parse_datatable_query(query, columns):
+    start = 0
+    length = 50
+    sort = []
+    if 'iDisplayStart' in query:
+        start = int(query['iDisplayStart'])
+    if 'iDisplayLength' in query:
+        length = int(query['iDisplayLength'])
+    if 'iSortCol_0' in query and 'iSortingCols' in query:
+        for idx in xrange(int(query['iSortingCols'])):
+            sval = 'iSortCol_%d' % idx
+            if sval not in query:
+                continue
+            sval = int(query[sval])
+            col = 'bSortable_%d' % sval
+            if col in query and query[col] == 'true':
+                col = 'sSortDir_%d' % idx
+                if col in query:
+                    if query[col] == 'asc':
+                        sort.append((columns[sval], 1,))
+                    else:
+                        sort.append((columns[sval], -1,))
+    if len(sort) == 0:
+        sort.append((columns[0], 1,))
+    ret = {'start': start, 'length': length, 'sort': sort}
+    print ret
+    return ret
+
        
 class MongoDataServer(HTTPServer):
     def __init__(self, config, requestHandler):
@@ -33,10 +62,10 @@ class MongoDataServer(HTTPServer):
         self.config = config
         
     def serve(self):
-        self.client = MongoClient('genepool12.nersc.gov', 27017)
+        self.client = MongoClient('128.55.56.19', 27017)
         self.db = self.client.procmon
         self.db.authenticate('usgweb', '23409yasfh39@knvDD')
-        self.house = self.db['houseHunter']
+        self.collections = ['houseHunter','firehose']
         self.cache = {}
         try:
             while True:
@@ -49,29 +78,20 @@ class RequestHandler(BaseHTTPRequestHandler):
     #def log_message(self, format, *args):
     #    note(format, args, "")
         
-    def run_details_query(self, qtype, user, project, date, query):
+    def run_details_query(self, qtype, user, project, date, queryHash):
         if date is None:
-            return '{"Result":"FAIL"}' 
-        sortField = 'exePath'
-        sortOrder = 1
-        startRec = 0
-        rangeRec = None
-        if 'jtSorting' in query:
-            (sortField, sortOrder) = query['jtSorting'].split('%20')
-            if sortOrder == 'ASC':
-                sortOrder = 1
-            else:
-                sortOrder = -1
-        if 'jtStartIndex' in query:
-            startRec = int(query['jtStartIndex'])
-        if 'jtPageSize' in query:
-            rangeRec = int(query['jtPageSize'])
+            return '{}'
+        
+        columns = ('exePath','nobs','walltime','cpu_time',)
+        ttype = 'executables'
                 
         query = {'date': date}
         if qtype == 'script':
             ttype = 'scripts'
-        else:
-            ttype = 'executables'
+            columns = ('scripts','exePath','nobs','walltime','cpu_time',)
+
+        qdata = parse_datatable_query(queryHash, columns)
+
         if user is not None:
             if qtype == 'script':
                 ttype = 'scriptUser'
@@ -85,38 +105,25 @@ class RequestHandler(BaseHTTPRequestHandler):
                 ttype = 'execProject'
             query['project'] = project
         query['type'] = ttype
-        cursor = self.server.house.find(query).sort(sortField, sortOrder)
+        cursor = self.server.house.find(query).sort(qdata['sort'])
         nRec = cursor.count()
-        if rangeRec is None:
-            rangeRec = nRec
-        cdata = cursor[startRec:startRec+rangeRec]
+        cdata = cursor[qdata['start']:qdata['start']+qdata['length']]
         data = []
         for value in cdata:
-            value['_id'] = str(value['_id'])
-            data.append(value)
-        retval = {'Result':'OK','Records':data,'TotalRecordCount':nRec}
+            row = []
+            for col in columns:
+                row.append(value[col])
+            data.append(row)
+        retval = {'aaData': data, 'iTotalRecords': nRec, 'iTotalDisplayRecords': nRec}
+        if 'sEcho' in queryHash:
+            retval['sEcho'] = int(queryHash['sEcho'])
         return json.dumps(retval)
 
-    def run_summ_query(self, qtype, user, project, date, query):
+    def run_summ_query(self, qtype, user, project, date, queryHash):
         if date is None:
-            return "{'Result':'FAIL'}"
+            return "{}"
 
-        sortField = 'exe'
-        sortOrder = 1
-        startRec = 0
-        rangeRec = None
         keyVal = 'username'
-        if 'jtSorting' in query:
-            (sortField, sortOrder) = query['jtSorting'].split('%20')
-            if sortOrder == 'ASC':
-                sortOrder = 1
-            else:
-                sortOrder = -1
-        if 'jtStartIndex' in query:
-            startRec = int(query['jtStartIndex'])
-        if 'jtPageSize' in query:
-            rangeRec = int(query['jtPageSize'])
-
         if qtype == 'user':
             exeType = 'execUser'
             scriptType = 'scriptUser'
@@ -138,19 +145,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             'type': {'$in':[exeType,scriptType]},
             'date': date
         }
+        columns = (keyVal, 'exe', 'script')
+        qdata = parse_datatable_query(queryHash, columns)
         if user is not None:
             condition['username'] = user
         if project is not None:
             condition['project'] = project
         cursor = self.server.house.group(key = {keyVal:1}, condition = condition, initial = {"exe":0, "script":0}, reduce=reducer)
         nRec = len(cursor)
-        if rangeRec is None:
-            rangeRec = nRec
-        cursor = sorted(cursor, key=lambda x:x[sortField])
-        if sortOrder == -1:
+        cursor = sorted(cursor, key=lambda x:x[qdata['sort'][0][0]])
+        if qdata['sort'][0][1] == -1:
             cursor = cursor[::-1]
-        data = cursor[startRec:startRec+rangeRec]
-        retval = {'Result':'OK','Records':data,'TotalRecordCount':nRec}
+        cdata = cursor[qdata['start']:qdata['start']+qdata['length']]
+        data = []
+        for value in cdata:
+            row = []
+            for col in columns:
+                row.append(value[col])
+            data.append(row)
+        retval = {'aaData': data, 'iTotalRecords': nRec, 'iTotalDisplayRecords': nRec}
+        if 'sEcho' in queryHash:
+            retval['sEcho'] = int(queryHash['sEcho'])
         return json.dumps(retval)
 
     def time_summary(self, qtype, ident, qdate):
@@ -205,7 +220,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         print ret
         return json.dumps(ret)
 
-    def run_query(self, query):
+    def run_query(self, collection, query):
+        self.server.house = self.server.db[collection]
         currtime = time.mktime(time.gmtime())
         www_project = None
         www_user = None
@@ -309,13 +325,13 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
         path = parsed_request.path
-        if path != "/houseHunter.cgi":
+        if path[1:] != 'get_mongo_data' or 'collection' not in queryHash or queryHash['collection'] not in self.server.collections:
             self.send_response(404)
             self.end_headers()
         else:
             self.send_response(200)
             self.send_header('Access-Control-Allow-Origin','http://portal.nersc.gov')
-            message = self.run_query(queryHash)
+            message = self.run_query(queryHash['collection'], queryHash)
             self.send_header('Content-type','application/json')
             self.end_headers()
             self.wfile.write(message)
@@ -343,7 +359,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = parsed_request.path
         path = os.path.split(path)
         print 'POST: %s' % str(path)
-        if path[0] != '/poster':
+        if path[0][1:] != 'get_mongo_data' or 'collection' not in queryHash or queryHash['collection'] not in self.server.collections:
             self.send_response(404)
 
         self.send_response(200)
@@ -351,7 +367,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type','application/json')
         self.end_headers()
         queryHash[path[-1]] = 1
-        message = self.run_query(queryHash)
+        message = self.run_query(path[0][1:], queryHash)
         self.wfile.write(message)
         self.wfile.write('\n')
     
