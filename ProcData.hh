@@ -85,15 +85,16 @@ typedef struct _procstat {
 } procstat;
 
 typedef struct _procfd {
-	char id[IDENTIFIER_SIZE];
-	char subid[IDENTIFIER_SIZE];
+	char identifier[IDENTIFIER_SIZE];
+	char subidentifier[IDENTIFIER_SIZE];
 	unsigned int pid;
 	unsigned int ppid;
     unsigned long recTime;
     unsigned long recTimeUSec;
+    unsigned long startTime;
+    unsigned long startTimeUSec;
     char path[BUFFER_SIZE];
 	int fd;
-	int fds;
 	unsigned int mode;
 } procfd;
 

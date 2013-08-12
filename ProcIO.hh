@@ -51,7 +51,8 @@ typedef enum _ProcIOFileMode {
 typedef enum _ProcRecordType {
     TYPE_PROCDATA = 0,
     TYPE_PROCSTAT = 1,
-    TYPE_INVALID = 2,
+    TYPE_PROCFD = 2,
+    TYPE_INVALID = 3,
 } ProcRecordType;
 
 using namespace std;
@@ -63,6 +64,7 @@ public:
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
+    virtual unsigned int write_procfd(procfd* start_ptr, int count);
 protected:
 	bool contextSet;
     string identifier;
@@ -77,11 +79,13 @@ public:
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier) override;
     virtual unsigned int write_procdata(procdata* start_ptr, int count) override;
     virtual unsigned int write_procstat(procstat* start_ptr, int count) override;
-    ProcRecordType read_stream_record(procdata* procData, procstat* procStat);
+    virtual unsigned int write_procfd(procfd* start_ptr, int count) override;
+    ProcRecordType read_stream_record(procdata* procData, procstat* procStat, procfd* procFD);
 private:
 	int fill_buffer();
 	bool read_procstat(procstat*);
 	bool read_procdata(procdata*);
+    bool read_procfd(procfd*);
 
     string filename;
     ProcIOFileMode mode;
@@ -95,7 +99,7 @@ class hdf5Ref {
 	friend class ProcHDF5IO;
 
 public:
-	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize);
+	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize);
 	~hdf5Ref();
 
 private:
@@ -103,26 +107,32 @@ private:
 	hid_t group;
 	hid_t procstatDS;
 	hid_t procdataDS;
+    hid_t procfdDS;
 	hid_t procstatSizeID;
 	hid_t procdataSizeID;
+    hit_t procfdSizeID;
 	unsigned int procstatSize;
 	unsigned int procdataSize;
+    unsigned int procfdSize;
 	time_t lastUpdate;
 };
 
 class ProcHDF5IO : public ProcIO {
 public:
-    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE);
+    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE, unsigned int fdBlockSize=DEFAULT_FD_BLOCK_SIZE);
     ~ProcHDF5IO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, unsigned int start_id, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
+    unsigned int read_procfd(procfd* procFD, unsigned int id);
     unsigned int read_procdata(procdata* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procstat(procstat* start_ptr, unsigned int start_id, unsigned int count);
+    unsigned int read_procfd(procfd* start_ptr, unsigned int start_id, unsigned int count);
 	unsigned int get_nprocdata();
 	unsigned int get_nprocstat();
+	unsigned int get_nprocfd();
 	void flush();
 	void trim_segments(time_t cutoff);
 private:
@@ -144,9 +154,11 @@ private:
     /* identifiers for complex types */
     hid_t type_procdata;
     hid_t type_procstat;
+    hid_t type_procfd;
 
 	unsigned int dataBlockSize;
 	unsigned int statBlockSize;
+	unsigned int fdBlockSize;
 };
 #endif
 
@@ -158,6 +170,7 @@ public:
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
+    virtual unsigned int write_procfd(procfd* start_ptr, int count);
     ProcRecordType read_stream_record(void **data, int *nRec);
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
@@ -167,10 +180,12 @@ private:
 
 	bool _read_procstat(procstat *startPtr, int nRecords, const char* buffer, int nBytes);
 	bool _read_procdata(procdata *startPtr, int nRecords, const char* buffer, int nBytes);
+	bool _read_procfd(procfd *startPtr, int nRecords, const char* buffer, int nBytes);
 	bool _set_frame_context(const string& routingKey);
 
 	bool _read_procstat(procstat*, int, char*, int);
 	bool _read_procdata(procdata*, int, char*, int);
+	bool _read_procfd(procfd*, int, char*, int);
 
     string mqServer;
     int port;

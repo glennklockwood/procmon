@@ -294,6 +294,34 @@ int parseProcStatM(int pid, procdata* procData, procstat* statData) {
 	return 0;
 }
 
+int parse_fds(int pid, int maxfd, procfd *all_procfd, int *p_idx, procstat *statData) {
+    char buffer[BUFFER_SIZE];
+    struct stat link;
+    int start_idx = *p_idx;
+    int rbytes = 0;
+    for (int fd = 3; fd < maxfd; fd++) {
+		snprintf(buffer, BUFFER_SIZE, "/proc/%d/fd/%d", pid, fd);
+        if (lstat(buffer, &link) != 0) {
+            break;
+        }
+        int idx = (*p_idx)++;
+        all_procfd[idx].pid = pid;
+        all_procfd[idx].ppid = statData->ppid;
+        all_procfd[idx].recTime = statData->recTime;
+        all_procfd[idx].recTimeUSec = statData->recTimeUSec;
+        all_procfd[idx].startTime = statData->startTime;
+        all_procfd[idx].startTimeUSec = statData->startTimeUSec;
+        all_procfd[idx].fd = fd;
+        all_procfd[idx].mode = link.st_mode;
+		if ((rbytes = readlink(buffer, all_procfd[idx].path, BUFFER_SIZE)) <= 0) {
+			snprintf(all_procfd[idx].path, BUFFER_SIZE, "Unknown");
+		} else {
+			all_procfd[idx].path[rbytes] = 0;
+		}
+    }
+    return *p_idx - start_idx;
+}
+
 int fileFillBuffer(FILE* fp, char* buffer, int buffSize, char** sptr, char** ptr, char** eptr) {
     if (fp == NULL) return 0;
     if (*sptr != NULL) {
@@ -415,7 +443,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, time_t boottime, std::vector<ProcIO*>* output) {
+int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pageSize, time_t boottime, std::vector<ProcIO*>* output) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char timebuffer[BUFFER_SIZE];
@@ -546,6 +574,8 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
 
     procstat all_procstat[ntargets];
     procdata all_procdata[ntargets];
+    procfd all_procfd[ntargets*maxfd + 1];
+    int fdidx = 0;
     bzero(all_procdata, sizeof(procdata)*ntargets);
 
 	/* for each pid, capture:
@@ -618,12 +648,18 @@ int searchProcFs(int ppid, int tgtGid, long clockTicksPerSec, long pageSize, tim
             snprintf(temp_procData->cmdArgs, BUFFER_SIZE, "Unknown");
             temp_procData->cmdArgBytes = 0;
         }
+        if (maxfd > 2) {
+            parse_fds(pids[idx], maxfd, all_procfd, &fdidx, statData);
+        }
         memcpy(&(all_procstat[idx]), statData, sizeof(procstat));
 	}
 
     for (std::vector<ProcIO*>::iterator iter = output->begin(), end = output->end(); iter != end; iter++) {
         (*iter)->write_procstat(all_procstat, ntargets);
         (*iter)->write_procdata(all_procdata, ntargets);
+        if (fdidx > 0) {
+            (*iter)->write_procfd(all_procfd, fdidx);
+        }
     }
 
 	free(pids);
@@ -712,16 +748,18 @@ int main(int argc, char** argv) {
 		return 4;
 	}
 
-	std::cout << "targetPPid      : " << config.targetPPid << std::endl;
-	std::cout << "tgtGid          : " << config.tgtGid << std::endl;
-	std::cout << "clockTicksPerSec: " << config.clockTicksPerSec << std::endl;
-	std::cout << "boottime        : " << config.boottime << std::endl;
+    if (config.verbose) {
+	    std::cout << "targetPPid      : " << config.targetPPid << std::endl;
+	    std::cout << "tgtGid          : " << config.tgtGid << std::endl;
+	    std::cout << "clockTicksPerSec: " << config.clockTicksPerSec << std::endl;
+	    std::cout << "boottime        : " << config.boottime << std::endl;
+    }
 
 	while (cleanUpFlag == 0) {
 		struct timeval cycleTime;
 		gettimeofday(&cycleTime, NULL);
 
-		retCode = searchProcFs(config.targetPPid, config.tgtGid, config.clockTicksPerSec, config.pageSize, config.boottime, &outputMethods);
+		retCode = searchProcFs(config.targetPPid, config.tgtGid, config.maxfd, config.clockTicksPerSec, config.pageSize, config.boottime, &outputMethods);
 		if (retCode <= 0) {
             retCode *= -1;
             break;
