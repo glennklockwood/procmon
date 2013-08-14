@@ -25,6 +25,7 @@
 #include <string>
 #ifdef SECURED
 #include <pthread.h>
+#include <sys/capability.h>
 #endif
 
 #include "ProcData.hh"
@@ -43,6 +44,11 @@ struct all_data_t {
     int capacity_procFD;
 
 };
+
+inline void fatal_error(const char *error) {
+    fprintf(stderr, "Failed: %s; bailing out.\n", error);
+    exit(1);
+}
 
 /* global variables - these are global for signal handling, and inter-thread communication */
 int cleanUpFlag = 0;
@@ -765,8 +771,21 @@ pthread_mutex_t token_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_barrier_t rbarrier;
 static void *reader_thread_start(void *) {
     int retCode = 0;
-    //cap_value_t capability = CAP_SYS_PTRACE;
-    //cap_t capabilities = cap_get_proc();
+
+    /* read current capabilities */
+    cap_t capabilities = cap_get_proc();
+    if (cap_clear(capabilities) != 0) fatal_error("Couldn't clear capabilities.");
+
+    /* reset capabilities to just CAP_SYS_PTRACE */
+    cap_value_t capability[] = { CAP_SYS_PTRACE };
+    if (cap_set_flag(capabilities, CAP_EFFECTIVE, 1, capability, CAP_SET) != 0)
+        fatal_error("Couldn't set capability flags");
+    if (cap_set_flag(capabilities, CAP_PERMITTED, 1, capability, CAP_SET) != 0)
+        fatal_error("Couldn't set capability flags");
+    if (cap_set_proc(capabilities) != 0)
+        fatal_error("Couldn't set capbilities.");
+    cap_free(capabilities);
+
     for ( ; ; ) {
         pthread_mutex_lock(&token_lock);
         pthread_barrier_wait(&rbarrier);
@@ -818,6 +837,11 @@ int main(int argc, char** argv) {
         perror("Failed to start reader thread. Bailing out.");
         exit(1);
     }
+
+    cap_t empty = cap_init();
+    if (cap_set_proc(empty) != 0)
+        fatal_error("Couldn't set capbilities.");
+    cap_free(empty);
 #endif
 
 	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
@@ -901,6 +925,18 @@ int main(int argc, char** argv) {
 
 		if (cleanUpFlag == 0) {
 			int sleepInterval = config->frequency;
+
+        char buffer[BUFFER_SIZE];
+        char buffer2[BUFFER_SIZE];
+        int rbytes = 0;
+		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", 1);
+		if ((rbytes = readlink(buffer, buffer2, BUFFER_SIZE)) <= 0) {
+			snprintf(buffer2, BUFFER_SIZE, "Unknown");
+		} else {
+			buffer2[rbytes] = 0;
+		}
+        printf("readlink for /proc/1/exe: %s\n", buffer2);
+
 			if (config->initialPhase > 0) {
 				struct timeval currTime;
 				double timeDelta;

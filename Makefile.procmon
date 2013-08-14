@@ -14,7 +14,7 @@ AMQP_LDFLAGS=-L$(RABBITMQ_C_DIR)/lib -lrabbitmq -lpthread -lssl -lcrypto -lz -ld
 CONFIG="echo > config.h"
 
 CFLAGS=$(EXTRA) 
-LDFLAGS=-static
+LDFLAGS=
 
 ifdef GENEPOOL
 	USE_AMQP=1
@@ -25,7 +25,7 @@ endif
 
 ifdef SECURED
     CFLAGS += "-DSECURED=1"
-    LDFLAGS +=-pthread
+    LDFLAGS +=-pthread -lcap
 endif
 
 ifdef USE_HDF5
