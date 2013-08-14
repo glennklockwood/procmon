@@ -23,13 +23,32 @@
 #include <math.h>
 #include <iostream>
 #include <string>
+#ifdef SECURED
+#include <pthread.h>
+#endif
 
 #include "ProcData.hh"
 #include "ProcIO.hh"
 #include "procmon.hh"
 
-/* global variables - these are global for signal handling */
-int cleanUpFlag;
+struct all_data_t {
+    procstat *procStat;
+    procdata *procData;
+    procfd *procFD;
+    int n_procStat;
+    int n_procData;
+    int n_procFD;
+    int capacity_procStat;
+    int capacity_procData;
+    int capacity_procFD;
+
+};
+
+/* global variables - these are global for signal handling, and inter-thread communication */
+int cleanUpFlag = 0;
+int search_procfs_count = 0;
+struct all_data_t all_data;
+ProcmonConfig *config = NULL;
 
 void sig_handler(int signum) {
 	/* if we receive any trapped signal, just set the cleanUpFlag
@@ -443,7 +462,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pageSize, time_t boottime, std::vector<ProcIO*>* output) {
+int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pageSize, time_t boottime) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char timebuffer[BUFFER_SIZE];
@@ -572,11 +591,57 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S", &datetime);
 	snprintf(timebuffer, BUFFER_SIZE, "%s.%03u,%f", buffer, before.tv_usec/1000, timeDelta);
 
-    procstat all_procstat[ntargets];
-    procdata all_procdata[ntargets];
-    procfd all_procfd[ntargets*maxfd + 1];
+    if (ntargets > 0) {
+        if (all_data.procStat == NULL) {
+            all_data.procStat = (procstat *) malloc(sizeof(procstat) * ntargets * 2);
+            all_data.capacity_procStat = ntargets * 2;
+            if (all_data.procStat == NULL) {
+                fprintf(stderr, "Failed to allocate memory; exiting...\n");
+                exit(1);
+            }
+        } else if (ntargets < all_data.capacity_procStat) {
+            all_data.procStat = (procstat *) realloc(all_data.procStat, sizeof(procstat) * ntargets * 2);
+            all_data.capacity_procStat = ntargets * 2;
+            if (all_data.procStat == NULL) {
+                fprintf(stderr, "Failed to allocate memory; exiting...\n");
+                exit(1);
+            }
+        }
+        if (all_data.procData == NULL) {
+            all_data.procData = (procdata *) malloc(sizeof(procdata) * ntargets * 2);
+            all_data.capacity_procData = ntargets * 2;
+            if (all_data.procData == NULL) {
+                fprintf(stderr, "Failed to allocate memory; exiting...\n");
+                exit(1);
+            }
+        } else if (ntargets < all_data.capacity_procData) {
+            all_data.procData = (procdata *) realloc(all_data.procData, sizeof(procdata) * ntargets * 2);
+            all_data.capacity_procData = ntargets * 2;
+            if (all_data.procData == NULL) {
+                fprintf(stderr, "Failed to allocate memory; exiting...\n");
+                exit(1);
+            }
+        }
+        if (all_data.procFD == NULL) {
+            all_data.procFD = (procfd *) malloc(sizeof(procfd) * ntargets * 2 * maxfd + 1);
+            all_data.capacity_procFD = ntargets * 2 * maxfd + 1;
+            if (all_data.procFD == NULL) {
+                fprintf(stderr, "Failed to allocate memory; exiting...\n");
+                exit(1);
+            }
+        } else if (ntargets < all_data.capacity_procFD) {
+            all_data.procFD = (procfd *) realloc(all_data.procFD, sizeof(procfd) * ntargets * 2 * maxfd + 1);
+            all_data.capacity_procFD = ntargets * 2 * maxfd + 1;
+            if (all_data.procFD == NULL) {
+                fprintf(stderr, "Failed to allocate memory; exiting...\n");
+                exit(1);
+            }
+        }
+
+        bzero(all_data.procStat, sizeof(procstat) * ntargets);
+        bzero(all_data.procData, sizeof(procdata) * ntargets);
+    }
     int fdidx = 0;
-    bzero(all_procdata, sizeof(procdata)*ntargets);
 
 	/* for each pid, capture:
 	 *   io data, stat values, exe, cwd
@@ -585,7 +650,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		ssize_t rbytes = 0;
         double temp_time = 0;
 		procstat* statData = &(procStats[indices[idx]]);
-        procdata* temp_procData = &(all_procdata[idx]); 
+        procdata* temp_procData = &(all_data.procData[idx]); 
 
 		/* read stat */
 		parseProcStat(pids[idx], statData, temp_procData, boottime, clockTicksPerSec);
@@ -649,18 +714,16 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
             temp_procData->cmdArgBytes = 0;
         }
         if (maxfd > 2) {
-            parse_fds(pids[idx], maxfd, all_procfd, &fdidx, statData);
+            parse_fds(pids[idx], maxfd, all_data.procFD, &fdidx, statData);
         }
-        memcpy(&(all_procstat[idx]), statData, sizeof(procstat));
+        memcpy(&(all_data.procStat[idx]), statData, sizeof(procstat));
 	}
 
-    for (std::vector<ProcIO*>::iterator iter = output->begin(), end = output->end(); iter != end; iter++) {
-        (*iter)->write_procstat(all_procstat, ntargets);
-        (*iter)->write_procdata(all_procdata, ntargets);
-        if (fdidx > 0) {
-            (*iter)->write_procfd(all_procfd, fdidx);
-        }
-    }
+    /* save data in global space */
+    all_data.n_procStat = ntargets;
+    all_data.n_procData = ntargets;
+    all_data.n_procFD = fdidx;
+    search_procfs_count = ntargets;
 
 	free(pids);
 	free(procStats);
@@ -697,8 +760,29 @@ static void daemonize() {
 	freopen("/dev/null", "w", stderr);
 }
 
+#ifdef SECURED
+pthread_mutex_t token_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_barrier_t rbarrier;
+static void *reader_thread_start(void *) {
+    int retCode = 0;
+    //cap_value_t capability = CAP_SYS_PTRACE;
+    //cap_t capabilities = cap_get_proc();
+    for ( ; ; ) {
+        pthread_mutex_lock(&token_lock);
+        pthread_barrier_wait(&rbarrier);
+        if (cleanUpFlag == 0) {
+		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
+        }
+        pthread_mutex_unlock(&token_lock);
+        pthread_barrier_wait(&rbarrier);
+        if (cleanUpFlag != 0) {
+            pthread_exit(NULL);
+        }
+    }
+}
+#endif
+
 int main(int argc, char** argv) {
-    ProcmonConfig config(argc, argv);
 	int retCode = 0;
 	int i = 0;
 	struct timeval startTime;
@@ -706,6 +790,7 @@ int main(int argc, char** argv) {
     char outputFilename[BUFFER_SIZE];
     char hostname[BUFFER_SIZE];
     char identifier[BUFFER_SIZE];
+    config = new ProcmonConfig(argc, argv);
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
@@ -717,28 +802,43 @@ int main(int argc, char** argv) {
 	signal(SIGUSR1, sig_handler);
 	signal(SIGUSR2, sig_handler);
 
-	if (config.daemonize) {
+	if (config->daemonize) {
 		daemonize();
 	}
-	std::cout << "hostname: " << config.hostname << "; identifier: " << config.identifier << "; subidentifier: " << config.subidentifier << std::endl;
+
+#ifdef SECURED
+    pthread_t reader_thread;
+    pthread_barrier_init(&rbarrier, NULL, 2);
+    if (pthread_mutex_lock(&token_lock) != 0) {
+        /* handle error */
+    }
+    retCode = pthread_create(&reader_thread, NULL, reader_thread_start, NULL);
+    if (retCode != 0) {
+        errno = retCode;
+        perror("Failed to start reader thread. Bailing out.");
+        exit(1);
+    }
+#endif
+
+	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
 
     std::vector<ProcIO*> outputMethods;
-    if (config.outputFlags & OUTPUT_TYPE_TEXT) {
-        ProcIO* out = new ProcTextIO(config.outputTextFilename, FILE_MODE_WRITE);
-        out->set_context(config.hostname, config.identifier, config.subidentifier);
+    if (config->outputFlags & OUTPUT_TYPE_TEXT) {
+        ProcIO* out = new ProcTextIO(config->outputTextFilename, FILE_MODE_WRITE);
+        out->set_context(config->hostname, config->identifier, config->subidentifier);
         outputMethods.push_back(out);
     }
 #ifdef __USE_HDF5
-    if (config.outputFlags & OUTPUT_TYPE_HDF5) {
-        ProcIO* out = new ProcHDF5IO(config.outputTextFilename, FILE_MODE_WRITE);
-        out->set_context(config.hostname, config.identifier, config.subidentifier);
+    if (config->outputFlags & OUTPUT_TYPE_HDF5) {
+        ProcIO* out = new ProcHDF5IO(config->outputTextFilename, FILE_MODE_WRITE);
+        out->set_context(config->hostname, config->identifier, config->subidentifier);
         outputMethods.push_back(out);
     }
 #endif
 #ifdef __USE_AMQP
-    if (config.outputFlags & OUTPUT_TYPE_AMQP) {
-        ProcIO* out = new ProcAMQPIO(config.mqServer, config.mqPort, config.mqVHost, config.mqUser, config.mqPassword, config.mqExchangeName, config.mqFrameSize, FILE_MODE_WRITE);
-        out->set_context(config.hostname, config.identifier, config.subidentifier);
+    if (config->outputFlags & OUTPUT_TYPE_AMQP) {
+        ProcIO* out = new ProcAMQPIO(config->mqServer, config->mqPort, config->mqVHost, config->mqUser, config->mqPassword, config->mqExchangeName, config->mqFrameSize, FILE_MODE_WRITE);
+        out->set_context(config->hostname, config->identifier, config->subidentifier);
         outputMethods.push_back(out);
     }
 #endif
@@ -748,47 +848,88 @@ int main(int argc, char** argv) {
 		return 4;
 	}
 
-    if (config.verbose) {
-	    std::cout << "targetPPid      : " << config.targetPPid << std::endl;
-	    std::cout << "tgtGid          : " << config.tgtGid << std::endl;
-	    std::cout << "clockTicksPerSec: " << config.clockTicksPerSec << std::endl;
-	    std::cout << "boottime        : " << config.boottime << std::endl;
+    if (config->verbose) {
+	    std::cout << "targetPPid      : " << config->targetPPid << std::endl;
+	    std::cout << "tgtGid          : " << config->tgtGid << std::endl;
+	    std::cout << "clockTicksPerSec: " << config->clockTicksPerSec << std::endl;
+	    std::cout << "boottime        : " << config->boottime << std::endl;
     }
+    memset(&all_data, 0, sizeof(struct all_data_t));
 
-	while (cleanUpFlag == 0) {
+	for ( ; ; ) {
 		struct timeval cycleTime;
 		gettimeofday(&cycleTime, NULL);
+        retCode = 0;
 
-		retCode = searchProcFs(config.targetPPid, config.tgtGid, config.maxfd, config.clockTicksPerSec, config.pageSize, config.boottime, &outputMethods);
+        /* set the global state variables */
+        all_data.n_procStat = 0;
+        all_data.n_procData = 0;
+        all_data.n_procFD = 0;
+        search_procfs_count = 0;
+
+#ifdef SECURED
+        pthread_mutex_unlock(&token_lock);
+        pthread_barrier_wait(&rbarrier);
+        pthread_mutex_lock(&token_lock);
+        retCode = search_procfs_count;
+#else
+        if (cleanUpFlag == 0) {
+		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
+        }
+#endif
 		if (retCode <= 0) {
             retCode *= -1;
-            break;
-		}
+            cleanUpFlag = 1;
+		} else  {
+            for (auto iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
+
+                if (all_data.n_procStat > 0) {
+                    (*iter)->write_procstat(all_data.procStat, all_data.n_procStat);
+                }
+                if (all_data.n_procData > 0) {
+                    (*iter)->write_procdata(all_data.procData, all_data.n_procData);
+                }
+                if (all_data.n_procFD > 0) {
+                    (*iter)->write_procfd(all_data.procFD, all_data.n_procFD);
+                }
+            }
+        }
+
+#ifdef SECURED
+        pthread_barrier_wait(&rbarrier);
+#endif
+
 		if (cleanUpFlag == 0) {
-			int sleepInterval = config.frequency;
-			if (config.initialPhase > 0) {
+			int sleepInterval = config->frequency;
+			if (config->initialPhase > 0) {
 				struct timeval currTime;
 				double timeDelta;
 				if (gettimeofday(&currTime, NULL) == 0) {
 					timeDelta = (currTime.tv_sec - startTime.tv_sec) + (double)((currTime.tv_usec - startTime.tv_usec))*1e-06;
-					if (timeDelta > config.initialPhase) {
-						config.initialPhase = 0;
+					if (timeDelta > config->initialPhase) {
+						config->initialPhase = 0;
 					} else {
-						sleepInterval = config.initialFrequency;
+						sleepInterval = config->initialFrequency;
 					}
 					timeDelta = (currTime.tv_sec - cycleTime.tv_sec) + (double)((currTime.tv_usec - cycleTime.tv_usec))*1e-06;
 					sleepInterval -= floor(timeDelta);
 				}
 			}
 			sleep(sleepInterval);
-		}
-		if (config.debug > 0) {
-			if (config.debug == 1) break;
-			config.debug--;
-		}
+		} else {
+            break;
+        }
 	}
     for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {
         delete *ptr;
     }
+    delete config;
+    if (all_data.procStat != NULL) free(all_data.procStat);
+    if (all_data.procData != NULL) free(all_data.procData);
+    if (all_data.procFD != NULL) free(all_data.procFD);
+#ifdef SECURED
+    pthread_mutex_destroy(&token_lock);
+    pthread_barrier_destroy(&rbarrier);
+#endif
 	exit(retCode);
 }

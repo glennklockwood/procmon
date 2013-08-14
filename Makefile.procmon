@@ -23,6 +23,11 @@ ifdef GENEPOOL
 	CFLAGS += "-DUSE_CONFIG_H=1"
 endif
 
+ifdef SECURED
+    CFLAGS += "-DSECURED=1"
+    LDFLAGS +=-pthread
+endif
+
 ifdef USE_HDF5
 	CFLAGS += $(HDF5_INCLUDE)
 	LDFLAGS += $(HDF5_LDFLAGS)
