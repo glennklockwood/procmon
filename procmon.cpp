@@ -926,17 +926,6 @@ int main(int argc, char** argv) {
 		if (cleanUpFlag == 0) {
 			int sleepInterval = config->frequency;
 
-        char buffer[BUFFER_SIZE];
-        char buffer2[BUFFER_SIZE];
-        int rbytes = 0;
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", 1);
-		if ((rbytes = readlink(buffer, buffer2, BUFFER_SIZE)) <= 0) {
-			snprintf(buffer2, BUFFER_SIZE, "Unknown");
-		} else {
-			buffer2[rbytes] = 0;
-		}
-        printf("readlink for /proc/1/exe: %s\n", buffer2);
-
 			if (config->initialPhase > 0) {
 				struct timeval currTime;
 				double timeDelta;
