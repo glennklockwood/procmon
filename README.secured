@@ -1,0 +1,37 @@
+The privileged version of procmon is intended to be run on interactive nodes.
+Not in batch.  It is solely for situations where there is no convenient way to
+start the procmon as the user it is monitoring.  The idea is to run the procmon
+process with the CAP_SYS_PTRACE capability, which gives it access to read
+/proc/<pid>/exe, cwd, and fds.
+
+The "normal" version of procmon runs as a serial process, it reads all the
+process data, then writes it out to the IO layer.
+
+The "secured" version of procmon is a two-threaded process: one for reading
+process data, and the second for writing the IO and interacting with the user.
+When the reader thread is initialized, it will enable the CAP_SYS_PTRACE
+capability.  After the reader thread is split off, the main program then drops
+all capabilities.  This means that if procmon is started as root, only the
+reader thread will retain privileges, while the IO thread has none.
+
+The intended usage is for root to give CAP_SYS_PTRACE capabilities to the
+procmon executable, and then to run procmon as a non-privileged user.  If
+a filesystem can't be identified which supports capabilities, the procmon still
+drops all the capabilities it doesn't need, so it may be acceptable to run the
+secured procmon as root.
+
+Compilation:
+make -f Makefile.procmon clean
+make -f Makefile.procmon SECURED=1
+
+Installation:
+1. copy procmon to the local filesystem (filesystem supporting capabilities)
+2. As root:
+    chown nobody:nobody /path/to/procmon
+    chmod 755 /path/to/procmon
+    chmod u+s /path/to/procmon
+    setcap cap_sys_ptrace=p /path/to/procmon
+
+   This will ensure that procmon is only run as the "nobody" user.
+   It will also give the procmon the ability to gain cap_sys_ptrace.
+3. Inform Doug where it is installed.

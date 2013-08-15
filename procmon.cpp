@@ -45,8 +45,8 @@ struct all_data_t {
 
 };
 
-inline void fatal_error(const char *error) {
-    fprintf(stderr, "Failed: %s; bailing out.\n", error);
+inline void fatal_error(const char *error, int err) {
+    fprintf(stderr, "Failed: %s; %d; bailing out.\n", error, err);
     exit(1);
 }
 
@@ -771,28 +771,29 @@ pthread_mutex_t token_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_barrier_t rbarrier;
 static void *reader_thread_start(void *) {
     int retCode = 0;
+    int err = 0;
 
     /* read current capabilities */
     cap_t capabilities = cap_get_proc();
-    if (cap_clear(capabilities) != 0) fatal_error("Couldn't clear capabilities.");
+    if ((err = cap_clear(capabilities)) != 0) fatal_error("Couldn't clear capabilities.", err);
 
     /* reset capabilities to just CAP_SYS_PTRACE */
     cap_value_t capability[] = { CAP_SYS_PTRACE };
-    if (cap_set_flag(capabilities, CAP_EFFECTIVE, 1, capability, CAP_SET) != 0)
-        fatal_error("Couldn't set capability flags");
-    if (cap_set_flag(capabilities, CAP_PERMITTED, 1, capability, CAP_SET) != 0)
-        fatal_error("Couldn't set capability flags");
-    if (cap_set_proc(capabilities) != 0)
-        fatal_error("Couldn't set capbilities.");
+    if ((err = cap_set_flag(capabilities, CAP_EFFECTIVE, 1, capability, CAP_SET)) != 0)
+        fatal_error("Couldn't set capability flags", err);
+    if ((err = cap_set_flag(capabilities, CAP_PERMITTED, 1, capability, CAP_SET)) != 0)
+        fatal_error("Couldn't set capability flags", err);
+    if ((err = cap_set_proc(capabilities)) != 0)
+        fatal_error("Couldn't set capbilities.", err);
     cap_free(capabilities);
 
     for ( ; ; ) {
-        pthread_mutex_lock(&token_lock);
+        if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
         pthread_barrier_wait(&rbarrier);
         if (cleanUpFlag == 0) {
 		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
         }
-        pthread_mutex_unlock(&token_lock);
+        if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Reader failed to unlock token.", err);
         pthread_barrier_wait(&rbarrier);
         if (cleanUpFlag != 0) {
             pthread_exit(NULL);
@@ -827,7 +828,8 @@ int main(int argc, char** argv) {
 
 #ifdef SECURED
     pthread_t reader_thread;
-    pthread_barrier_init(&rbarrier, NULL, 2);
+    int err;
+    if ( (err = pthread_barrier_init(&rbarrier, NULL, 2)) != 0) fatal_error("Failed to initialize barrier", err);
     if (pthread_mutex_lock(&token_lock) != 0) {
         /* handle error */
     }
@@ -839,8 +841,7 @@ int main(int argc, char** argv) {
     }
 
     cap_t empty = cap_init();
-    if (cap_set_proc(empty) != 0)
-        fatal_error("Couldn't set capbilities.");
+    if ((err = cap_set_proc(empty)) != 0) fatal_error("Couldn't set capbilities.", err);
     cap_free(empty);
 #endif
 
@@ -882,6 +883,7 @@ int main(int argc, char** argv) {
 
 	for ( ; ; ) {
 		struct timeval cycleTime;
+        int err = 0;
 		gettimeofday(&cycleTime, NULL);
         retCode = 0;
 
@@ -892,9 +894,9 @@ int main(int argc, char** argv) {
         search_procfs_count = 0;
 
 #ifdef SECURED
-        pthread_mutex_unlock(&token_lock);
+        if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Writer failed to unlock token.", err);
         pthread_barrier_wait(&rbarrier);
-        pthread_mutex_lock(&token_lock);
+        if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Writer failed to lock token.", err);
         retCode = search_procfs_count;
 #else
         if (cleanUpFlag == 0) {
