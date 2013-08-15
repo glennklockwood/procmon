@@ -5,6 +5,6 @@
 
 INSTALL_PATH=/global/project/projectdirs/genepool/www/procmon
 
-install: houseHunter.html
+install: houseHunter.html .htaccess
 	chmod a+rX $^
 	cp -p $^ $(INSTALL_PATH)

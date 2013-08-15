@@ -26,12 +26,12 @@
     height: 100%;
 }
 </style>
-<link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css" />
+<link rel="stylesheet" type="text/css" href="jquery-ui-1.10.3/themes/smoothness/jquery-ui.min.css" />
 <link rel="stylesheet" type="text/css" href="DataTables-1.9.4/media/css/jquery.dataTables.css" />
-<script src="http://code.jquery.com/jquery-1.9.1.js"></script>
-<script src="http://code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
+<script src="jquery-ui-1.10.3/jquery-1.9.1.js"></script>
+<script src="jquery-ui-1.10.3/ui/minified/jquery-ui.min.js"></script>
 <script src="jquery.corner.js"></script>
-<script src="http://code.highcharts.com/highcharts.js"></script>
+<script src="js/highcharts.js"></script>
 <script src="DataTables-1.9.4/media/js/jquery.dataTables.js"></script>
 <script>
 var chart_data;
@@ -72,6 +72,7 @@ function load_exec_data() {
     if (user != "Any") {
         usersummary_table_obj.fnDraw();
         $("#projectsummary_table_div").hide();
+        $("#usersummary_table_div").show();
         $("#projectsummary_chart").hide();
         initialize_chart('user');
         $("#usersummary_chart").show();
@@ -79,6 +80,7 @@ function load_exec_data() {
     if (project != "Any") {
         projectsummary_table_obj.fnDraw();
         $("#usersummary_table_div").hide();
+        $("#projectsummary_table_div").show();
         initialize_chart('project');
         $("#projectsummary_chart").show();
         $("#usersummary_chart").hide();
@@ -215,7 +217,8 @@ $(function() {
     });
     $( "#about_dialog" ).dialog({
         autoOpen: false,
-        modal: true
+        modal: true,
+        width: '60%',
     });
     $( "#tabs" ).tabs();
 });
@@ -374,6 +377,7 @@ $(".dataBox").corner("30px");
         <strong>Project:</strong>&nbsp;<select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
         <button name='reset' onclick='reset_all();return false;'>Reset</button>&nbsp;&nbsp;
         <strong>Data:</strong>&nbsp;<select name='collection' id='select_collection' onchange='update_summary();return false;'><option value="houseHunter">houseHunter</option><option value="firehose">firehose</option></select>&nbsp;&nbsp;
+        <strong><a href='#' onclick='$("#about_dialog").dialog("open"); return false;'>About</a></strong>&nbsp;&nbsp;
     </form>
 </div>
 
@@ -420,9 +424,9 @@ $(".dataBox").corner("30px");
 </div>
 <div id="about_dialog" title="About HouseHunter" style="display: none">
     <h3>About the houseHunter</h3>
-    <p>The data presented here are daily-summarizations of all the observed processes run on the genepool cluster.  At present these are only the jobs which are run as part of a batch-job; interactive processes are not included at this time.  The processes are sampled every 30s, thus very short processes may be missed.
-    <p>Each day the sampled process data are assembled into a unique non-redundant set of processes.  Those which have a executable path resolving to /house are presented by the houseHunter (here!).  The data are summarized by exePath, by user and exePath, and by genepool-share and exePath.  In addition, executables which have 'perl', 'python', 'sh', 'bash', 'tcsh', or 'ruby' in them are further examined to try to identify the script which was run.
-    <p>To use this interface, first select the date you would like to examine on the upper-left.  Then, select the user OR project you would like to see.  Click the "Executables" tab to see the statistics for the executables.  Click the "Scripts" tab to see the statistics for the scripts.  On the "Summary" tab, clicking a user name, or a project name will automatically bring you to that user or project.  Clicking the "All Users" or "All Projects" button will return the larger summary.
+    <p>The data presented here are daily-summarizations of all the observed processes run on the genepool cluster.  This interface only the jobs which are run as part of a batch-job; interactive processes are not included at this time (mostly, more on that in a minute).  The processes are sampled every 30s, thus very short processes may be missed, and there is a bias towards long-running processes.
+    <p>Each day the sampled process data are assembled into a unique non-redundant set of processes.  Those which have a executable path resolving to /house or /jgi/tools are presented in the houseHunter dataset.  The firehose dataset contains summarizations of all sampled executables.  The "Unknown" category are those which were run on the interactive nodes.  The data are summarized by exePath, by user and exePath, and by genepool-share and exePath.  In addition, executables which have 'perl', 'python', 'sh', 'bash', 'tcsh', or 'ruby' in them are further examined to try to identify the script which was run. Process summarization jobs are submitted to genepool at midnight each day, so data should be updated by 12:30AM.
+    <p>To use this interface, first select the date you would like to examine on the upper-left.  Then, select the user OR project you would like to see.  Click the "Executables" tab to see the statistics for the executables.  Click the "Scripts" tab to see the statistics for the scripts.  On the "Summary" tab, clicking a user name, or a project name will automatically bring you to that user or project.  Clicking the "Reset" button will return the larger summary of all users and projects.
     <p>Please contact consult@nersc.gov if you have any questions.
 </div>
 <div id="exec_table_div">
