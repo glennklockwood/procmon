@@ -51,12 +51,12 @@ ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHos
 bool ProcAMQPIO::_amqp_open() {
 	int istatus = 0;
 	conn = amqp_new_connection();
-	socket = amqp_tcp_socket_new();
+	socket = amqp_tcp_socket_new(conn);
 	istatus = amqp_socket_open(socket, mqServer.c_str(), port);
 	if (istatus != 0) {
 		throw ProcIOException("Failed AMQP connection to " + mqServer + ":" + to_string(port));
 	}
-	amqp_set_socket(conn, socket);
+	//amqp_set_socket(conn, socket);
 	_amqp_eval_status(amqp_login(conn, mqVHost.c_str(), 0, frameSize, 0, AMQP_SASL_METHOD_PLAIN, username.c_str(), password.c_str()));
 	if (amqpError) {
 		throw ProcIOException("Failed AMQP login to " + mqServer + ":" + to_string(port) + " as " + username + "; Error: " + amqpErrorMessage);
@@ -87,7 +87,7 @@ bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
 			amqpErrorMessage = "missing RPC reply type (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ")";
 			break;
 		case AMQP_RESPONSE_LIBRARY_EXCEPTION:
-			amqpErrorMessage = string(amqp_error_string(status.library_error)) + " (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + to_string( (unsigned int) status.library_error) + ")";
+			amqpErrorMessage = string(amqp_error_string2(status.library_error)) + " (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + to_string( (unsigned int) status.library_error) + ")";
 			break;
 		case AMQP_RESPONSE_SERVER_EXCEPTION: {
 			switch (status.reply.id) {
@@ -201,7 +201,7 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, int *nRec) {
 					*data = malloc(sizeof(procdata) * nRecords);
 					recType = TYPE_PROCDATA;
 				} else if (frameMessageType == "procfd") {
-                    *data = malloc(sizeof(procfd) * nRcords);
+                    *data = malloc(sizeof(procfd) * nRecords);
                     recType = TYPE_PROCFD;
                 }
 				if (*data == NULL) {
@@ -486,7 +486,7 @@ unsigned int ProcAMQPIO::write_procfd(procfd* start_ptr, int count) {
     for (int i = 0; i < count; i++) {
         procfd* procFD = &(start_ptr[i]);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%d,%lu,%lu,%lu,%lu", procFD->pid,procFD->ppid,procFD->recTime,procFD->recTimeUSec,procFD->startTime,procFD->startTimeUSec);
-        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procData->path), procData->path);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procFD->path), procFD->path);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%u\n", procFD->fd,procFD->mode);
     }
 	*ptr = 0;

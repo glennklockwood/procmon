@@ -50,6 +50,7 @@ inline void fatal_error(const char *error, int err) {
     exit(1);
 }
 
+
 /* global variables - these are global for signal handling, and inter-thread communication */
 int cleanUpFlag = 0;
 int search_procfs_count = 0;
@@ -789,12 +790,12 @@ static void *reader_thread_start(void *) {
 
     for ( ; ; ) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
-        pthread_barrier_wait(&rbarrier);
+        if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
         if (cleanUpFlag == 0) {
 		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
         }
         if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Reader failed to unlock token.", err);
-        pthread_barrier_wait(&rbarrier);
+        if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait in late-loop", err);
         if (cleanUpFlag != 0) {
             pthread_exit(NULL);
         }
@@ -895,7 +896,7 @@ int main(int argc, char** argv) {
 
 #ifdef SECURED
         if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Writer failed to unlock token.", err);
-        pthread_barrier_wait(&rbarrier);
+        if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Writer failed to lock token.", err);
         retCode = search_procfs_count;
 #else
@@ -922,7 +923,7 @@ int main(int argc, char** argv) {
         }
 
 #ifdef SECURED
-        pthread_barrier_wait(&rbarrier);
+        if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait in late-loop", err);
 #endif
 
 		if (cleanUpFlag == 0) {
