@@ -1,0 +1,4 @@
+Options +FollowSymLinks
+RewriteEngine On
+RewriteCond %{HTTP_HOST} ^portal.nersc.gov [NC]
+RewriteRule ^(.*)$ https://portal-auth.nersc.gov/project/genepool/procmon/$1 [R=301,L]

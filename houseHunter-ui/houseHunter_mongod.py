@@ -330,7 +330,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
         else:
             self.send_response(200)
-            self.send_header('Access-Control-Allow-Origin','http://portal.nersc.gov')
+            self.send_header('Access-Control-Allow-Origin','https://portal-auth.nersc.gov')
             message = self.run_query(queryHash['collection'], queryHash)
             self.send_header('Content-type','application/json')
             self.end_headers()
@@ -363,7 +363,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
 
         self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin','http://portal.nersc.gov')
+        self.send_header('Access-Control-Allow-Origin','https://portal-auth.nersc.gov')
         self.send_header('Content-type','application/json')
         self.end_headers()
         queryHash[path[-1]] = 1
