@@ -6,8 +6,8 @@
 
 OPT_EXTRA=-O3
 EXTRA=-std=c++11 $(OPT_EXTRA)
-HDF5_INCLUDE=-I$(HDF5_DIR)/include -D__USE_HDF5=1
-AMQP_INCLUDE=-I$(RABBITMQ_C_DIR)/include -D__USE_AMQP=1
+HDF5_INCLUDE=-I$(HDF5_DIR)/include -DUSE_HDF5=1
+AMQP_INCLUDE=-I$(RABBITMQ_C_DIR)/include -DUSE_AMQP=1
 
 HDF5_LDFLAGS=-L$(HDF5_DIR)/lib -lhdf5
 AMQP_LDFLAGS=$(RABBITMQ_C_DIR)/lib/librabbitmq.a -lrt
@@ -53,14 +53,14 @@ procmon: procmon.o ProcIO.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
 ProcReducer: ProcReducer.o ProcIO.o
 	$(CXX) -o $@ $^ $(LDFLAGS)
-procmon.o: procmon.cpp
-	$(CXX) -c $(CFLAGS) -o $@ -c $^
+procmon.o: procmon.cpp procmon.hh config.h
+	$(CXX) -c $(CFLAGS) -o $@ -c procmon.cpp
 driver.o: driver.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
 ProcReducer.o: ProcReducer.cpp
 	$(CXX) -c $(CFLAGS) -o $@ -c $^
-ProcIO.o: ProcIO.cpp
-	$(CXX) -c $(CFLAGS) -o $@ -c $^
+ProcIO.o: ProcIO.cpp config.h ProcIO.hh
+	$(CXX) -c $(CFLAGS) -o $@ -c ProcIO.cpp
 
 clean:
 	$(RM) *.o procmon driver config.h

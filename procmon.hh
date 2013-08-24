@@ -57,8 +57,10 @@ public:
     bool verbose;
 	int debug;
     int maxfd;
+#ifdef SECURED
     int effective_uid;
     int effective_gid;
+#endif
     std::string identifier;
     std::string subidentifier;
 
@@ -72,10 +74,11 @@ public:
     /* Output Options */
     unsigned int outputFlags;
     std::string outputTextFilename;
-#ifdef __USE_HDF5
+#ifdef USE_HDF5
     std::string outputHDF5Filename;
 #endif
 
+#ifdef USE_AMQP
     /* AMQP options */
     std::string mqServer;
     unsigned int mqPort;
@@ -84,6 +87,7 @@ public:
 	std::string mqPassword;
     std::string mqExchangeName;
     unsigned int mqFrameSize;
+#endif
 
     ProcmonConfig(int argc, char** argv) {
         int gid_range_min = -1;
@@ -101,9 +105,11 @@ public:
         outputFlags = DEFAULT_OUTPUT_FLAGS;
         tgtGid = 0;
         maxfd = 0;
+#ifdef SECURED
         effective_uid = -1;
         effective_gid = -1;
-
+#endif
+#ifdef USE_AMQP
 		mqServer = DEFAULT_AMQP_HOST;
 		mqPort = DEFAULT_AMQP_PORT;
 		mqUser = DEFAULT_AMQP_USER;
@@ -111,6 +117,7 @@ public:
         mqVHost = DEFAULT_AMQP_VHOST;
 		mqExchangeName = DEFAULT_AMQP_EXCHANGE_NAME;
 		mqFrameSize = DEFAULT_AMQP_FRAMESIZE;
+#endif
 
 		identifier = DEFAULT_IDENTIFIER;
 		subidentifier = DEFAULT_SUBIDENTIFIER;
@@ -135,8 +142,10 @@ public:
             {"frequency", required_argument, 0, 'f'},
             {"initialphase", required_argument, 0, 'i'},
             {"initialfrequency", required_argument, 0, 'F'},
+#ifdef SECURED
             {"user", required_argument, 0, 'u'},
             {"group", required_argument, 0, 'r'},
+#endif
             {"ppid", required_argument, 0, 'p'},
             {"group_min", required_argument, 0, 'g'},
             {"group_max", required_argument, 0, 'G'},
@@ -144,8 +153,11 @@ public:
             {"identifier", required_argument, 0, 'I'},
             {"subidentifier", required_argument, 0, 'S'},
             {"outputtext", required_argument, 0, 'o'},
+#ifdef USE_HDF5
             {"outputhdf5", required_argument, 0, 'O'},
+#endif
             {"debug", required_argument, 0, 'D'},
+#ifdef USE_AMQP
             {"mqhostname", required_argument, 0, 'H'},
             {"mqport", required_argument, 0, 'P'},
             {"mqvhost", required_argument, 0, 'Q'},
@@ -153,14 +165,24 @@ public:
             {"mquser", required_argument, 0, 'U'},
             {"mqpassword", required_argument, 0, 'Y'},
             {"mqframe", required_argument, 0, 'R'},
+#endif
             { 0, 0, 0, 0},
         };
         int c;
+        string getopt_str = "hVvdf:i:F:p:W:g:G:I:S:o:D:";
+#ifdef USE_AMQP
+        getopt_str += "H:P:E:Q:U:Y:R:";
+#endif
+#ifdef USE_HDF5
+        getopt_str += "O:";
+#endif
+#ifdef SECURED
+        getopt_str += "u:r:";
+#endif
 
         for ( ; ; ) {
             int option_index = 0;
-            c = getopt_long(argc, argv,
-                    "hVvdf:i:F:u:r:p:W:g:G:I:S:o:O:D:H:P:E:Q:U:Y:R:",
+            c = getopt_long(argc, argv, getopt_str.c_str(),
                     prg_options, &option_index
             );
             if (c == -1) {
@@ -192,6 +214,7 @@ public:
                         usage(1);
                     }
                     break;
+#ifdef SECURED
                 case 'u':
                     /* deal with USER arg */
                     if (optarg != NULL && strlen(optarg) > 0) {
@@ -208,7 +231,6 @@ public:
                             effective_uid = user_data->pw_uid;
                         }
                     }
-                    fprintf(stderr, "found uid req for: %d\n", effective_uid);
                     if (effective_uid <= 0) {
                         cerr << "user, if specified, must resolve to a uid > 0" << endl;
                         usage(1);
@@ -227,11 +249,11 @@ public:
                             effective_gid = group_data->gr_gid;
                         }
                     }
-                    fprintf(stderr, "found gid req for: %d\n", effective_gid);
                     if (effective_gid <= 0) {
                         cerr << "group, if specified, must resolve to a gid > 0" << endl;
                     }
                     break;
+#endif
                 case 'p':
                     targetPPid = atoi(optarg);
                     if (targetPPid <= 0) {
@@ -263,14 +285,11 @@ public:
                 case 'I': identifier = string(optarg); break;
                 case 'S': subidentifier = string(optarg); break;
                 case 'o': outputTextFilename = string(optarg); break;
+#ifdef USE_HDF5
                 case 'O':
-#ifdef __USE_HDF5
                     outputHDF5Filename = string(optarg);
-#else
-                    cerr << "HDF5 output is not supported by this build of procmon." << endl;
-                    exit(1);
-#endif                   
                     break;
+#endif                   
                 case 'D':
                     debug = atoi(optarg);
                     if (debug < 0) {
@@ -278,6 +297,7 @@ public:
                         usage(1);
                     }
                     break;
+#ifdef USE_AMQP
                 case 'H': mqServer = string(optarg); break;
                 case 'P':
                     mqPort = (unsigned int) atoi(optarg);
@@ -289,6 +309,7 @@ public:
                 case 'R': 
                     mqFrameSize = (unsigned int) atoi(optarg);
                     break;
+#endif
                 case ':': usage(1); break;
 
             }
@@ -297,7 +318,7 @@ public:
         if (outputTextFilename != "") {
             outputFlags |= OUTPUT_TYPE_TEXT;
         }
-#ifdef __USE_HDF5
+#ifdef USE_HDF5
         if (outputHDF5Filename != "") {
             outputFlags |= OUTPUT_TYPE_HDF5;
         }
@@ -331,51 +352,63 @@ public:
 	}
 
     void usage(int err_code) {
-        cout << "procmon - NERSC process monitor" << endl << endl;
-        cout << "Basic Options:" << endl;
-        cout << "  -h [ --help ]      Print help message" << endl;
-        cout << "  -V [ --version ]   Print procmon version" << endl;
-        cout << "  -v [ --verbose ]   Print extra information" << endl;
-        cout << endl;
-        cout << "Configuration Options:" << endl;
-        cout << "  -d [ --daemonize ]                 Daemonize the procmon process" << endl;
-        cout << "  -f [ --frequency ] integer (=30)   Time elapsed between measurements" << endl;
-        cout << "                                     during normal data collection (in" << endl;
-        cout << "                                     seconds)" << endl;
-        cout << "  -i [ --initialphase ] integer (=30)     Length of the initial phase (in" << endl;
-        cout << "                                          seconds)" << endl;
-        cout << "  -F [ --initialfrequency ] integer (=30) Time elapsed between measurements" << endl;
-        cout << "                                          during initial phase (in seconds)" << endl;
-        cout << "  -p [ --ppid ] integer (=1)              Parent process ID of monitorying" << endl;
-        cout << "                                          hierarchy" << endl;
-        cout << "  -g [ --group_min ] integer              Minimum group id in GridEngine gid" << endl;
-        cout << "                                          range (second group process ident)" << endl;
-        cout << "  -G [ --group_max ] integer              Maximum group id in GridEngine gid" << endl;
-        cout << "                                          range (second group process ident)" << endl;
-        cout << "  -I [ --identifier ] string (=JOB_ID)    identifier for tagging data" << endl;
-        cout << "  -S [ --subidentifier ] string (=SGE_TASK_ID)" << endl;
-        cout << "                                          secondary identifier for tagging" << endl;
-        cout << "                                          data" << endl;
-        cout << "  -o [ --outputtext ] string              filename for text output (optional)" << endl;
-        cout << "  -O [ --outputhdf5 ] string              filename for HDF5 output (optional)" << endl;
-        cout << "  -D [ --debug ] integer (=0)             debugging level" << endl;
-        cout << endl;
-        cout << "AMQP Configuration Options:" << endl;
-        cout << "  -H [ --mqhostname ] string (=genepool10.nersc.gov)" << endl;
-        cout << "                                          hostname for AMQP Server" << endl;
-        cout << "  -P [ --mqport ] integer (=5672)         port for AMQP Server" << endl;
-        cout << "  -Q [ --mqvhost ] string (=jgi)          virtual-host for AMQP Server" << endl;
-        cout << "  -E [ --mqexchange ] string (=procmon)   exchange name for AMQP Server" << endl;
-        cout << "  -U [ --mquser ] string  (built-in)      username for AMQP Server" << endl;
-        cout << "  -Y [ --mqpasssword ] string (build-in)  password for AMQP Server" << endl;
-        cout << "  -R [ --mqframe ] integer (=131072)      maximum frame size for AMQP Messages" << endl;
-        cout << "                                          (bytes)" << endl;
-        cout << endl;
+        printf("procmon - NERSC process monitor");
+#ifdef SECURED
+        printf("; **Interactive Edition**");
+#endif
+        printf("\n");
+        printf("Basic Options:\n");
+        printf("  -h [ --help ]      Print help message\n");
+        printf("  -V [ --version ]   Print procmon version\n");
+        printf("  -v [ --verbose ]   Print extra information\n");
+        printf("\n");
+        printf("Configuration Options:\n");
+        printf("  -d [ --daemonize ]                      Daemonize the procmon process\n");
+#ifdef SECURED
+        printf("  -u [ --user ] string/integer            username/uid to setuid\n");
+        printf("  -g [ --group ] string/integer           group/gid to setgid\n");
+#endif
+        printf("  -f [ --frequency ] integer (=%02d)        Time elapsed between measurements\n", DEFAULT_FREQUENCY);
+        printf("                                          during normal data collection (in\n");
+        printf("                                          seconds)\n");
+        printf("  -i [ --initialphase ] integer (=%02d)     Length of the initial phase (in\n", DEFAULT_INITIAL_PHASE);
+        printf("                                          seconds)\n");
+        printf("  -F [ --initialfrequency ] integer (=%02d) Time elapsed between measurements\n", DEFAULT_INITIAL_PHASE_FREQUENCY);
+        printf("                                          during initial phase (in seconds)\n");
+        printf("  -p [ --ppid ] integer (=%d)              Parent process ID of monitorying\n", 1);
+        printf("                                          hierarchy\n");
+        printf("  -g [ --group_min ] integer              Minimum group id in GridEngine gid\n");
+        printf("                                          range (second group process ident)\n");
+        printf("  -G [ --group_max ] integer              Maximum group id in GridEngine gid\n");
+        printf("                                          range (second group process ident)\n");
+        printf("  -I [ --identifier ] string (=%s)    identifier for tagging data\n", DEFAULT_IDENTIFIER);
+        printf("  -S [ --subidentifier ] string (=%s)\n", DEFAULT_SUBIDENTIFIER);
+        printf("                                          secondary identifier for tagging\n");
+        printf("                                          data\n");
+        printf("  -o [ --outputtext ] string              filename for text output (optional)\n");
+#ifdef USE_HDF5
+        printf("  -O [ --outputhdf5 ] string              filename for HDF5 output (optional)\n");
+#endif
+        printf("  -D [ --debug ] integer (=0)             debugging level\n");
+        printf("\n");
+#ifdef USE_AMQP
+        printf("AMQP Configuration Options:\n");
+        printf("  -H [ --mqhostname ] string (=%s)\n", DEFAULT_AMQP_HOST);
+        printf("                                          hostname for AMQP Server\n");
+        printf("  -P [ --mqport ] integer (=%d)         port for AMQP Server\n", DEFAULT_AMQP_PORT);
+        printf("  -Q [ --mqvhost ] string (=%s)          virtual-host for AMQP Server\n", DEFAULT_AMQP_VHOST);
+        printf("  -E [ --mqexchange ] string (=%s)   exchange name for AMQP Server\n", DEFAULT_AMQP_EXCHANGE_NAME);
+        printf("  -U [ --mquser ] string  (built-in)      username for AMQP Server\n");
+        printf("  -Y [ --mqpasssword ] string (built-in)  password for AMQP Server\n");
+        printf("  -R [ --mqframe ] integer (=%d)      maximum frame size for AMQP Messages\n", DEFAULT_AMQP_FRAMESIZE);
+        printf("                                          (bytes)\n");
+#endif
+        printf("\n");
         exit(err_code);
     }
     void version() {
         cout << "Procmon " << PROCMON_VERSION;
-#ifdef __PROCMON_SECURED__
+#ifdef SECURED
         cout << " (interactive)";
 #endif
         cout << endl;

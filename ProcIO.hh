@@ -21,11 +21,11 @@
 
 #include "config.h"
 
-#ifdef __USE_HDF5
+#ifdef USE_HDF5
 #include "hdf5.h"
-#endif /* __USE_HDF5 */
+#endif /* USE_HDF5 */
 
-#ifdef __USE_AMQP
+#ifdef USE_AMQP
 #include <amqp_tcp_socket.h>
 #include <amqp_framing.h>
 #endif
@@ -94,7 +94,7 @@ private:
 	char buffer[TEXT_BUFFER_SIZE];
 };
 
-#ifdef __USE_HDF5
+#ifdef USE_HDF5
 class hdf5Ref {
 	friend class ProcHDF5IO;
 
@@ -162,7 +162,7 @@ private:
 };
 #endif
 
-#ifdef __USE_AMQP
+#ifdef USE_AMQP
 class ProcAMQPIO : public ProcIO {
 public:
     ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, const string& _username, const string& _password, const string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);

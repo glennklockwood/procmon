@@ -34,7 +34,7 @@ unsigned int ProcIO::write_procfd(procfd* start_ptr, int count) {
 	return 0;
 }
 
-#ifdef __USE_AMQP
+#ifdef USE_AMQP
 ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, 
 	const string& _username, const string& _password, const string& _exchangeName, 
 	const int _frameSize, const ProcIOFileMode _mode):
@@ -591,7 +591,7 @@ bool ProcAMQPIO::_amqp_bind_context() {
 }
 #endif
 
-#ifdef __USE_HDF5
+#ifdef USE_HDF5
 hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsinged int fdBlockSize) {
 	group = -1;
 	procstatDS = -1;

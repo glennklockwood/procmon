@@ -872,14 +872,14 @@ int main(int argc, char** argv) {
         out->set_context(config->hostname, config->identifier, config->subidentifier);
         outputMethods.push_back(out);
     }
-#ifdef __USE_HDF5
+#ifdef USE_HDF5
     if (config->outputFlags & OUTPUT_TYPE_HDF5) {
         ProcIO* out = new ProcHDF5IO(config->outputTextFilename, FILE_MODE_WRITE);
         out->set_context(config->hostname, config->identifier, config->subidentifier);
         outputMethods.push_back(out);
     }
 #endif
-#ifdef __USE_AMQP
+#ifdef USE_AMQP
     if (config->outputFlags & OUTPUT_TYPE_AMQP) {
         ProcIO* out = new ProcAMQPIO(config->mqServer, config->mqPort, config->mqVHost, config->mqUser, config->mqPassword, config->mqExchangeName, config->mqFrameSize, FILE_MODE_WRITE);
         out->set_context(config->hostname, config->identifier, config->subidentifier);
