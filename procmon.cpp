@@ -814,6 +814,16 @@ int main(int argc, char** argv) {
     char hostname[BUFFER_SIZE];
     char identifier[BUFFER_SIZE];
     config = new ProcmonConfig(argc, argv);
+    if (getuid() == 0) {
+#ifdef SECURED
+        if (config->effective_uid <= 0) {
+            cerr << "WARNING: Executing (secured) procmon as root; capabilities will be dropped!" << endl;
+        }
+#else
+        cerr << "ERROR: Do not run non-secured procmon with root privileges.  Build with SECURED=1.  Exiting." << endl;
+        exit(1);
+#endif
+    }
 
 	/* initialize global variables */
 	cleanUpFlag = 0;
@@ -886,7 +896,6 @@ int main(int argc, char** argv) {
         outputMethods.push_back(out);
     }
 #endif
-	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
 
 	if (gettimeofday(&startTime, NULL) != 0) {
 		fprintf(stderr, "FAILED to get start time\n");
