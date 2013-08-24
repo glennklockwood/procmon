@@ -26,6 +26,7 @@
 #ifdef SECURED
 #include <pthread.h>
 #include <sys/capability.h>
+#include <sys/prctl.h>
 #endif
 
 #include "ProcData.hh"
@@ -787,6 +788,7 @@ static void *reader_thread_start(void *) {
     if ((err = cap_set_proc(capabilities)) != 0)
         fatal_error("Couldn't set capbilities.", err);
     cap_free(capabilities);
+    if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
 
     for ( ; ; ) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
@@ -830,6 +832,7 @@ int main(int argc, char** argv) {
 #ifdef SECURED
     pthread_t reader_thread;
     int err;
+    bool dropped_privs = false;
     if ( (err = pthread_barrier_init(&rbarrier, NULL, 2)) != 0) fatal_error("Failed to initialize barrier", err);
     if (pthread_mutex_lock(&token_lock) != 0) {
         /* handle error */
@@ -841,9 +844,24 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    cap_t empty = cap_init();
-    if ((err = cap_set_proc(empty)) != 0) fatal_error("Couldn't set capbilities.", err);
-    cap_free(empty);
+    /* if the effective_uid or effective_gid are > 0, switch users
+     * change gid then uid, the barrier is to ensure that the other thread has
+     * had time to acquire CAP_SYS_PTRACE, and drop the rest  */
+    if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
+    if (config->effective_gid > 0) {
+        setgid(config->effective_gid);
+    }
+    if (config->effective_uid > 0) {
+        if (setuid(config->effective_uid) == 0) {
+            dropped_privs = true;
+        }
+    }
+    if (!dropped_privs) {
+        cap_t empty = cap_init();
+        if ((err = cap_set_proc(empty)) != 0) fatal_error("[W] Couldn't set capbilities.", err);
+        dropped_privs = true;
+        cap_free(empty);
+    }
 #endif
 
 	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
@@ -868,6 +886,7 @@ int main(int argc, char** argv) {
         outputMethods.push_back(out);
     }
 #endif
+	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
 
 	if (gettimeofday(&startTime, NULL) != 0) {
 		fprintf(stderr, "FAILED to get start time\n");

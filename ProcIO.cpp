@@ -1277,7 +1277,7 @@ bool ProcTextIO::set_context(const string& _hostname, const string& _identifier,
 
 	endPos = _subidentifier.find('.');
 	endPos = endPos == string::npos ? _subidentifier.size() : endPos;
-	subidentifier.assign(_identifier, 0, endPos);
+	subidentifier.assign(_subidentifier, 0, endPos);
 	return true;
 }
 

@@ -6,6 +6,8 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <vector>
+#include <pwd.h>
+#include <grp.h>
 
 #include "config.h"
 
@@ -55,6 +57,8 @@ public:
     bool verbose;
 	int debug;
     int maxfd;
+    int effective_uid;
+    int effective_gid;
     std::string identifier;
     std::string subidentifier;
 
@@ -97,10 +101,14 @@ public:
         outputFlags = DEFAULT_OUTPUT_FLAGS;
         tgtGid = 0;
         maxfd = 0;
+        effective_uid = -1;
+        effective_gid = -1;
 
 		mqServer = DEFAULT_AMQP_HOST;
 		mqPort = DEFAULT_AMQP_PORT;
 		mqUser = DEFAULT_AMQP_USER;
+        mqPassword = DEFAULT_AMQP_PASSWORD;
+        mqVHost = DEFAULT_AMQP_VHOST;
 		mqExchangeName = DEFAULT_AMQP_EXCHANGE_NAME;
 		mqFrameSize = DEFAULT_AMQP_FRAMESIZE;
 
@@ -127,6 +135,8 @@ public:
             {"frequency", required_argument, 0, 'f'},
             {"initialphase", required_argument, 0, 'i'},
             {"initialfrequency", required_argument, 0, 'F'},
+            {"user", required_argument, 0, 'u'},
+            {"group", required_argument, 0, 'r'},
             {"ppid", required_argument, 0, 'p'},
             {"group_min", required_argument, 0, 'g'},
             {"group_max", required_argument, 0, 'G'},
@@ -150,7 +160,7 @@ public:
         for ( ; ; ) {
             int option_index = 0;
             c = getopt_long(argc, argv,
-                    "hVvdf:i:F:p:W:g:G:I:S:o:O:D:H:P:E:Q:U:Y:R:",
+                    "hVvdf:i:F:u:r:p:W:g:G:I:S:o:O:D:H:P:E:Q:U:Y:R:",
                     prg_options, &option_index
             );
             if (c == -1) {
@@ -180,6 +190,46 @@ public:
                     if (initialFrequency <= 0) {
                         cerr << "Initial-frequency, if specified,  must be at least 1 second!" << endl;
                         usage(1);
+                    }
+                    break;
+                case 'u':
+                    /* deal with USER arg */
+                    if (optarg != NULL && strlen(optarg) > 0) {
+                        struct passwd *user_data = getpwnam(optarg);
+                        if (user_data == NULL) {
+                            int uid = atoi(optarg);
+                            if (uid > 0) {
+                                user_data = getpwuid(uid);
+                                if (user_data != NULL) {
+                                    effective_uid = user_data->pw_uid;
+                                }
+                            }
+                        } else {
+                            effective_uid = user_data->pw_uid;
+                        }
+                    }
+                    fprintf(stderr, "found uid req for: %d\n", effective_uid);
+                    if (effective_uid <= 0) {
+                        cerr << "user, if specified, must resolve to a uid > 0" << endl;
+                        usage(1);
+                    }
+                    break;
+                case 'r':
+                    /* deal with GROUP arg */
+                    if (optarg != NULL && strlen(optarg) > 0) {
+                        struct group *group_data = getgrnam(optarg);
+                        if (group_data == NULL) {
+                            int gid = atoi(optarg);
+                            if (group_data != NULL) {
+                                effective_gid = group_data->gr_gid;
+                            }
+                        } else {
+                            effective_gid = group_data->gr_gid;
+                        }
+                    }
+                    fprintf(stderr, "found gid req for: %d\n", effective_gid);
+                    if (effective_gid <= 0) {
+                        cerr << "group, if specified, must resolve to a gid > 0" << endl;
                     }
                     break;
                 case 'p':
