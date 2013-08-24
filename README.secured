@@ -20,18 +20,30 @@ a filesystem can't be identified which supports capabilities, the procmon still
 drops all the capabilities it doesn't need, so it may be acceptable to run the
 secured procmon as root.
 
-Compilation:
+Compilation on and for genepool:
+module purge
+module load PrgEnv-gnu/4.8
+module load rabbitmq-c/0.4.0_nossl
 make -f Makefile.procmon clean
-make -f Makefile.procmon SECURED=1
+make -f Makefile.procmon GENEPOOL=1 SECURED=1
 
 Installation:
 1. copy procmon to the local filesystem (filesystem supporting capabilities)
 2. As root:
     chown nobody:nobody /path/to/procmon
-    chmod 755 /path/to/procmon
-    chmod u+s /path/to/procmon
+    chmod 500 /path/to/procmon
     setcap cap_sys_ptrace=p /path/to/procmon
 
    This will ensure that procmon is only run as the "nobody" user.
    It will also give the procmon the ability to gain cap_sys_ptrace.
 3. Inform Doug where it is installed.
+
+ALTERNATIVE: run as root
+   # /path/to/procmon -u nobody -r nobody <other flags>
+
+When run as root, it is advisable to supply the -u (user) and -r (group) flags
+to switch user and group for the IO thread (main process).  The reader thread
+does not setuid (because this would require keeping CAP_SYS_SETUID), but does
+drop all other root capabilities.  Even if the process is run with root without
+the -u and -r flags, it will detect that it is running as root, and drop all
+non-required capabilities.
