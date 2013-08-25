@@ -175,6 +175,7 @@ public:
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
 	bool _amqp_open();
+    bool _amqp_close(bool);
     bool _amqp_bind_context();
 	bool _amqp_eval_status(amqp_rpc_reply_t _status);
 
@@ -186,6 +187,8 @@ private:
 	bool _read_procstat(procstat*, int, char*, int);
 	bool _read_procdata(procdata*, int, char*, int);
 	bool _read_procfd(procfd*, int, char*, int);
+
+    bool _send_message(const char *tag, amqp_bytes_t& message);
 
     string mqServer;
     int port;

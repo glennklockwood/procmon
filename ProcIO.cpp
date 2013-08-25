@@ -45,7 +45,11 @@ ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHos
 {
 	connected = false;
 	amqpError = false;
-	_amqp_open();
+    try {
+	    _amqp_open();
+    } catch (const ProcIOException &e) {
+        cerr << "Caught (and ignored) exception: " << e.what() << endl;
+    }
 }
 
 bool ProcAMQPIO::_amqp_open() {
@@ -75,6 +79,31 @@ bool ProcAMQPIO::_amqp_open() {
 	}
 	connected = true;
 	return connected;
+}
+
+bool ProcAMQPIO::_amqp_close(bool throw_errors) {
+	if (connected) {
+		_amqp_eval_status(amqp_channel_close(conn, 1, AMQP_REPLY_SUCCESS));
+		if (amqpError) {
+            string message = "AMQP channel close failed: " + amqpErrorMessage;
+            if (throw_errors) {
+                throw ProcIOException(message);
+            } else {
+                cerr << message << endl;
+            }
+		}
+		_amqp_eval_status(amqp_connection_close(conn, AMQP_REPLY_SUCCESS));
+		if (amqpError) {
+            string message = "AMQP connection close failed: " + amqpErrorMessage;
+            if (throw_errors) {
+                throw ProcIOException(message);
+            } else {
+                cerr << message << endl;
+            }
+		}
+		amqp_destroy_connection(conn);
+        connected = false;
+	}
 }
 
 bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
@@ -113,17 +142,7 @@ bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
 }
 
 ProcAMQPIO::~ProcAMQPIO() {
-	if (connected) {
-		_amqp_eval_status(amqp_channel_close(conn, 1, AMQP_REPLY_SUCCESS));
-		if (amqpError) {
-			throw ProcIOException("AMQP channel close failed: " + amqpErrorMessage);
-		}
-		_amqp_eval_status(amqp_connection_close(conn, AMQP_REPLY_SUCCESS));
-		if (amqpError) {
-			throw ProcIOException("AMQP connection close failed: " + amqpErrorMessage);
-		}
-		amqp_destroy_connection(conn);
-	}
+    _amqp_close(false);
 }
 
 ProcRecordType ProcAMQPIO::read_stream_record(void **data, int *nRec) {
@@ -433,14 +452,7 @@ unsigned int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
 	amqp_bytes_t message;
 	message.bytes = buffer;
 	message.len = nBytes;
-
-	char routingKey[512];
-	snprintf(routingKey, 512, "%s.%s.%s.%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), "procdata");
-	int istatus = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes(routingKey), 0, 0, NULL, message);
-	if (istatus != 0) {
-		fprintf(stderr, "WARNING: error on message publication\n");
-	}
-    return nBytes;
+    return _send_message("procdata", message) ? nBytes : 0;
 }
 
 unsigned int ProcAMQPIO::write_procstat(procstat* start_ptr, int count) {
@@ -469,14 +481,38 @@ unsigned int ProcAMQPIO::write_procstat(procstat* start_ptr, int count) {
 	amqp_bytes_t message;
 	message.bytes = buffer;
 	message.len = nBytes;
+    return _send_message("procstat", message) ? nBytes : 0;
+}
 
+bool ProcAMQPIO::_send_message(const char *tag, amqp_bytes_t& message) {
 	char routingKey[512];
-	snprintf(routingKey, 512, "%s.%s.%s.%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), "procstat");
-	int istatus = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes(routingKey), 0, 0, NULL, message);
-	if (istatus != 0) {
-		fprintf(stderr, "WARNING: error on message publication\n");
+    int istatus = 0;
+    bool message_sent = false;
+	snprintf(routingKey, 512, "%s.%s.%s.%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), tag);
+    routingKey[511] = 0;
+    for (int count = 0; count <= PROCMON_AMQP_MESSAGE_RETRIES; count++) {
+	    int istatus = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes(routingKey), 0, 0, NULL, message);
+        switch (istatus) {
+            case 0:
+                message_sent = true;
+                break;
+            case AMQP_STATUS_SOCKET_ERROR:
+            case AMQP_STATUS_CONNECTION_CLOSED:
+                /* deconstruct existing connection (if it exists), and rebuild */
+                _amqp_close(false); //close the connection without acting on errors
+                try {
+                    _amqp_open();   //attempt to reconnect
+                } catch (const ProcIOException& e) {
+                    cerr << "Trapped (and ignoring) error: " << e.what() << endl;
+                }
+                break;
+
+        }
+        if (istatus != 0) {
+		    fprintf(stderr, "WARNING: error on message publication: %d\n", istatus);
+        }
 	}
-    return nBytes;
+    return message_sent;
 }
 
 unsigned int ProcAMQPIO::write_procfd(procfd* start_ptr, int count) {
@@ -498,14 +534,7 @@ unsigned int ProcAMQPIO::write_procfd(procfd* start_ptr, int count) {
 	amqp_bytes_t message;
 	message.bytes = buffer;
 	message.len = nBytes;
-
-	char routingKey[512];
-	snprintf(routingKey, 512, "%s.%s.%s.%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), "procfd");
-	int istatus = amqp_basic_publish(conn, 1, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes(routingKey), 0, 0, NULL, message);
-	if (istatus != 0) {
-		fprintf(stderr, "WARNING: error on message publication\n");
-	}
-    return nBytes;
+    return _send_message("procfd", message) ? nBytes : 0;
 }
 
 bool ProcAMQPIO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
