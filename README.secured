@@ -24,8 +24,8 @@ Compilation on and for genepool:
 module purge
 module load PrgEnv-gnu/4.8
 module load rabbitmq-c/0.4.0_nossl
-make -f Makefile.procmon clean
-make -f Makefile.procmon GENEPOOL=1 SECURED=1
+make -f Makefile clean
+make -f Makefile GENEPOOL=1 SECURED=1
 
 Installation:
 1. copy procmon to the local filesystem (filesystem supporting capabilities)
