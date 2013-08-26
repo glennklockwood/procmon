@@ -110,7 +110,7 @@ private:
     hid_t procfdDS;
 	hid_t procstatSizeID;
 	hid_t procdataSizeID;
-    hit_t procfdSizeID;
+    hid_t procfdSizeID;
 	unsigned int procstatSize;
 	unsigned int procdataSize;
     unsigned int procfdSize;
@@ -124,6 +124,7 @@ public:
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, unsigned int start_id, int count);
+    virtual unsigned int write_procfd(procfd* start_ptr, unsigned int start_id, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
     unsigned int read_procfd(procfd* procFD, unsigned int id);

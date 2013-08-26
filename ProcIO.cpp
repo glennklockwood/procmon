@@ -326,6 +326,8 @@ bool ProcAMQPIO::_read_procdata(procdata *startPtr, int nRecords, char* buffer, 
 	char* ePtr = buffer + nBytes;
 	char* sPtr = ptr;
 
+    cerr << "received " << nRecords << " records" << endl;
+
     int pos = 0;
 	int idx = 0;
 	int readBytes = -1;
@@ -353,26 +355,27 @@ bool ProcAMQPIO::_read_procdata(procdata *startPtr, int nRecords, char* buffer, 
                 case 6: readBytes = atoi(sPtr); break;
                 case 7:
 					memcpy(procData->execName, sPtr, sizeof(char)*readBytes);
-					procData->execName[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					procData->execName[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE-1] = 0;
+                    cerr << procData->execName << endl;
 					readBytes = -1;
 					break;
                 case 8: readBytes = atoi(sPtr); break;
                 case 9:
 					memcpy(procData->cmdArgs, sPtr, sizeof(char)*readBytes);
-					procData->cmdArgs[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					procData->cmdArgs[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE-1] = 0;
 					procData->cmdArgBytes = readBytes;
 					readBytes = -1;
 					break;
                 case 10: readBytes = atoi(sPtr); break;
                 case 11:
 					memcpy(procData->exePath, sPtr, sizeof(char)*readBytes);
-					procData->exePath[readBytes < EXEBUFFER_SIZE ? readBytes : EXEBUFFER_SIZE] = 0;
+					procData->exePath[readBytes < EXEBUFFER_SIZE ? readBytes : EXEBUFFER_SIZE-1] = 0;
 					readBytes = -1;
 					break;
                 case 12: readBytes = atoi(sPtr); break;
                 case 13:
 					memcpy(procData->cwdPath, sPtr, sizeof(char)*readBytes);
-					procData->cwdPath[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					procData->cwdPath[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE - 1] = 0;
 					readBytes = -1;
 					break;
             }
@@ -416,7 +419,7 @@ bool ProcAMQPIO::_read_procfd(procfd *startPtr, int nRecords, char* buffer, int 
                 case 6: readBytes = atoi(sPtr); break;
                 case 7:
 					memcpy(procFD->path, sPtr, sizeof(char)*readBytes);
-					procFD->path[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE] = 0;
+					procFD->path[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE - 1] = 0;
 					readBytes = -1;
 					break;
                 case 8: procFD->fd = atoi(sPtr); break;
@@ -523,7 +526,7 @@ unsigned int ProcAMQPIO::write_procfd(procfd* start_ptr, int count) {
         procfd* procFD = &(start_ptr[i]);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%d,%lu,%lu,%lu,%lu", procFD->pid,procFD->ppid,procFD->recTime,procFD->recTimeUSec,procFD->startTime,procFD->startTimeUSec);
         ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%lu,%s", strlen(procFD->path), procFD->path);
-        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), "%d,%u\n", procFD->fd,procFD->mode);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer), ",%d,%u\n", procFD->fd,procFD->mode);
     }
 	*ptr = 0;
     nBytes = ptr - buffer;
@@ -621,7 +624,7 @@ bool ProcAMQPIO::_amqp_bind_context() {
 #endif
 
 #ifdef USE_HDF5
-hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsinged int fdBlockSize) {
+hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize) {
 	group = -1;
 	procstatDS = -1;
 	procdataDS = -1;
@@ -751,7 +754,7 @@ unsigned int ProcHDF5IO::read_procstat(procstat* procStat, unsigned int id) {
     return read_procstat(procStat, id, 1);
 }
 
-unsigned int ProcHDF5IO::read_procfd(procstat* procFD, unsigned int id) {
+unsigned int ProcHDF5IO::read_procfd(procfd* procFD, unsigned int id) {
     return read_procfd(procFD, id, 1);
 }
 
@@ -912,6 +915,14 @@ unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int st
     return write_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count, dataBlockSize);
 }
 
+unsigned int ProcHDF5IO::write_procfd(procfd* start_pointer, unsigned int start_id, int count) {
+	for (int i = 0; i < count; i++) {
+		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	}
+    return write_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count, fdBlockSize);
+}
+
 unsigned int ProcHDF5IO::read_procstat(procstat* start_pointer, unsigned int start_id, unsigned int count) {
     return read_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count);
 }
@@ -920,7 +931,7 @@ unsigned int ProcHDF5IO::read_procdata(procdata* start_pointer, unsigned int sta
     return read_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count);
 }
 
-unsigned int ProcHDF5IO::read_procfd(procstat* start_pointer, unsigned int start_id, unsigned int count) {
+unsigned int ProcHDF5IO::read_procfd(procfd* start_pointer, unsigned int start_id, unsigned int count) {
     return read_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count);
 }
 
@@ -942,7 +953,7 @@ unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, voi
     } else if (recordType == TYPE_PROCDATA) {
        ds = hdf5Segment->procdataDS;
     } else if (recordType == TYPE_PROCFD) {
-       ds = hdf5Second->procfdDS;
+       ds = hdf5Segment->procfdDS;
     }
     hid_t dataspace = H5Dget_space(ds);
     hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
@@ -989,7 +1000,7 @@ unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, vo
        size_attribute = hdf5Segment->procdataSizeID;
        nRecords = &(hdf5Segment->procdataSize);
     } else if (recordType == TYPE_PROCFD) {
-       ds = hdf5Second->procfdDS;
+       ds = hdf5Segment->procfdDS;
        size_attribute = hdf5Segment->procfdSizeID;
        nRecords = &(hdf5Segment->procfdSize);
     }
