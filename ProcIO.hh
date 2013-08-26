@@ -172,7 +172,7 @@ public:
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, int count);
-    ProcRecordType read_stream_record(void **data, int *nRec);
+    ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec);
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
 	bool _amqp_open();

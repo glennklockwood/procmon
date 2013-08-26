@@ -145,7 +145,7 @@ ProcAMQPIO::~ProcAMQPIO() {
     _amqp_close(false);
 }
 
-ProcRecordType ProcAMQPIO::read_stream_record(void **data, int *nRec) {
+ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, int *nRec) {
 	ProcRecordType recType = TYPE_INVALID;
     for ( ; ; ) {
         amqp_frame_t frame;
@@ -213,15 +213,24 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, int *nRec) {
 				ptr++;
 			}
 			if (nRecords > 0) {
+                size_t required_size = 0;
 				if (frameMessageType == "procstat") {
-					*data = malloc(sizeof(procstat) * nRecords);
+					required_size = sizeof(procstat) * nRecords;
 					recType = TYPE_PROCSTAT;
 				} else if (frameMessageType == "procdata") {
-					*data = malloc(sizeof(procdata) * nRecords);
+					required_size = sizeof(procdata) * nRecords;
 					recType = TYPE_PROCDATA;
 				} else if (frameMessageType == "procfd") {
-                    *data = malloc(sizeof(procfd) * nRecords);
+                    required_size = sizeof(procfd) * nRecords;
                     recType = TYPE_PROCFD;
+                }
+                size_t alloc_size = (size_t) (required_size * 1.2);
+                if (*pool_size == 0) {
+                    *data = malloc(alloc_size);
+                    *pool_size = alloc_size;
+                } else if (*pool_size < required_size) {
+                    *data = realloc(*data, alloc_size);
+                    *pool_size = alloc_size;
                 }
 				if (*data == NULL) {
 					throw ProcIOException("failed to allocate memory for " + to_string(nRecords) + " " + frameMessageType + " records");
@@ -356,7 +365,6 @@ bool ProcAMQPIO::_read_procdata(procdata *startPtr, int nRecords, char* buffer, 
                 case 7:
 					memcpy(procData->execName, sPtr, sizeof(char)*readBytes);
 					procData->execName[readBytes < BUFFER_SIZE ? readBytes : BUFFER_SIZE-1] = 0;
-                    cerr << procData->execName << endl;
 					readBytes = -1;
 					break;
                 case 8: readBytes = atoi(sPtr); break;

@@ -20,7 +20,7 @@ int cleanUpExitFlag = 0;
 int resetOutputFileFlag = 0;
 
 void sig_handler(int signum) {
-	/* if we receive any trapped signal, just set the cleanUpFlag
+    /* if we receive any trapped signal, just set the cleanUpFlag
      * this will break the infinite loop and cause the message
      * buffer to get written out
      */
@@ -28,7 +28,7 @@ void sig_handler(int signum) {
 }
 
 void sighup_handler(int signum) {
-	/* if we receive any trapped signal, just set the cleanUpFlag
+    /* if we receive any trapped signal, just set the cleanUpFlag
      * this will break the infinite loop and cause the message
      * buffer to get written out
      */
@@ -37,96 +37,96 @@ void sighup_handler(int signum) {
 
 class proc_t {
 public:
-	proc_t(): statSet(false),dataSet(false) { }
-	bool statSet;
-	bool dataSet;
-	procstat stat;
-	procdata data;
-	unsigned int statRecord;
-	unsigned int dataRecord;
-	int nData;
-	int nStat;
+    proc_t(): statSet(false),dataSet(false) { }
+    bool statSet;
+    bool dataSet;
+    procstat stat;
+    procdata data;
+    unsigned int statRecord;
+    unsigned int dataRecord;
+    int nData;
+    int nStat;
 };
 
 class ProcReducerConfig {
 public:
-	ProcReducerConfig(int argc, char **argv) {
-		/* Parse command line arguments */
-		po::options_description basic("Basic Options");
-		basic.add_options()
-			("version", "Print version information")
-			("help,h", "Print help message")
-			("verbose,v", "Print extra (debugging) information")
-		;
-		po::options_description config("Configuration Options");
-		config.add_options()
-			("daemonize,d", "Daemonize the procmon process")
-			("hostname,H",po::value<std::string>(&(this->hostname))->default_value(DEFAULT_REDUCER_HOSTNAME), "identifier for tagging data")
-			("identifier,I",po::value<std::string>(&(this->identifier))->default_value(DEFAULT_REDUCER_IDENTIFIER), "identifier for tagging data")
-			("subidentifier,S",po::value<std::string>(&(this->subidentifier))->default_value(DEFAULT_REDUCER_SUBIDENTIFIER), "secondary identifier for tagging data")
-			("outputhdf5prefix,O",po::value<std::string>(&(this->outputHDF5FilenamePrefix))->default_value(DEFAULT_REDUCER_OUTPUT_PREFIX), "prefix for hdf5 output filename [final names will be prefix.YYYYMMDDhhmmss.h5 (required)")
-			("cleanfreq,c",po::value<int>(&(this->cleanFreq))->default_value(DEFAULT_REDUCER_CLEAN_FREQUENCY), "time between process hash table cleaning runs")
-			("maxage,m",po::value<int>(&(this->maxProcessAge))->default_value(DEFAULT_REDUCER_MAX_PROCESS_AGE), "timeout since last communication from a pid before allowing removal from hash table (cleaning)")
-			("statblock",po::value<int>(&(this->statBlockSize))->default_value(DEFAULT_STAT_BLOCK_SIZE), "number of stat records per block in hdf5 file" )
-			("datablock",po::value<int>(&(this->dataBlockSize))->default_value(DEFAULT_DATA_BLOCK_SIZE), "number of data records per block in hdf5 file" )
-			("debug", "enter debugging mode")
-		;
-		po::options_description mqconfig("AMQP Configuration Options");
-		mqconfig.add_options()
-			("mqhostname,H", po::value<std::string>(&(this->mqServer))->default_value(DEFAULT_AMQP_HOST), "hostname for AMQP Server")
-			("mqport,P",po::value<unsigned int>(&(this->mqPort))->default_value(DEFAULT_AMQP_PORT), "port for AMQP Server")
-			("mqvhost,V",po::value<std::string>(&(this->mqVHost))->default_value(DEFAULT_AMQP_VHOST), "virtual-host for AMQP Server")
-			("mqexchange,E",po::value<std::string>(&(this->mqExchangeName))->default_value("procmon"), "exchange name for AMQP Server")
-			("mqUser",po::value<std::string>(&(this->mqUser))->default_value(DEFAULT_AMQP_USER), "virtual-host for AMQP Server")
-			("mqPassword",po::value<std::string>(&(this->mqPassword)), "virtual-host for AMQP Server")
-			("mqframe,F",po::value<unsigned int>(&(this->mqFrameSize))->default_value(DEFAULT_AMQP_FRAMESIZE), "maximum frame size for AMQP Messages (bytes)")
-		;
+    ProcReducerConfig(int argc, char **argv) {
+        /* Parse command line arguments */
+        po::options_description basic("Basic Options");
+        basic.add_options()
+            ("version", "Print version information")
+            ("help,h", "Print help message")
+            ("verbose,v", "Print extra (debugging) information")
+        ;
+        po::options_description config("Configuration Options");
+        config.add_options()
+            ("daemonize,d", "Daemonize the procmon process")
+            ("hostname,H",po::value<std::string>(&(this->hostname))->default_value(DEFAULT_REDUCER_HOSTNAME), "identifier for tagging data")
+            ("identifier,I",po::value<std::string>(&(this->identifier))->default_value(DEFAULT_REDUCER_IDENTIFIER), "identifier for tagging data")
+            ("subidentifier,S",po::value<std::string>(&(this->subidentifier))->default_value(DEFAULT_REDUCER_SUBIDENTIFIER), "secondary identifier for tagging data")
+            ("outputhdf5prefix,O",po::value<std::string>(&(this->outputHDF5FilenamePrefix))->default_value(DEFAULT_REDUCER_OUTPUT_PREFIX), "prefix for hdf5 output filename [final names will be prefix.YYYYMMDDhhmmss.h5 (required)")
+            ("cleanfreq,c",po::value<int>(&(this->cleanFreq))->default_value(DEFAULT_REDUCER_CLEAN_FREQUENCY), "time between process hash table cleaning runs")
+            ("maxage,m",po::value<int>(&(this->maxProcessAge))->default_value(DEFAULT_REDUCER_MAX_PROCESS_AGE), "timeout since last communication from a pid before allowing removal from hash table (cleaning)")
+            ("statblock",po::value<int>(&(this->statBlockSize))->default_value(DEFAULT_STAT_BLOCK_SIZE), "number of stat records per block in hdf5 file" )
+            ("datablock",po::value<int>(&(this->dataBlockSize))->default_value(DEFAULT_DATA_BLOCK_SIZE), "number of data records per block in hdf5 file" )
+            ("debug", "enter debugging mode")
+        ;
+        po::options_description mqconfig("AMQP Configuration Options");
+        mqconfig.add_options()
+            ("mqhostname,H", po::value<std::string>(&(this->mqServer))->default_value(DEFAULT_AMQP_HOST), "hostname for AMQP Server")
+            ("mqport,P",po::value<unsigned int>(&(this->mqPort))->default_value(DEFAULT_AMQP_PORT), "port for AMQP Server")
+            ("mqvhost,V",po::value<std::string>(&(this->mqVHost))->default_value(DEFAULT_AMQP_VHOST), "virtual-host for AMQP Server")
+            ("mqexchange,E",po::value<std::string>(&(this->mqExchangeName))->default_value("procmon"), "exchange name for AMQP Server")
+            ("mqUser",po::value<std::string>(&(this->mqUser))->default_value(DEFAULT_AMQP_USER), "virtual-host for AMQP Server")
+            ("mqPassword",po::value<std::string>(&(this->mqPassword)), "virtual-host for AMQP Server")
+            ("mqframe,F",po::value<unsigned int>(&(this->mqFrameSize))->default_value(DEFAULT_AMQP_FRAMESIZE), "maximum frame size for AMQP Messages (bytes)")
+        ;
 
-		po::options_description options;
-		options.add(basic).add(config).add(mqconfig);
-		po::variables_map vm;
-		try {
-			po::store(po::command_line_parser(argc, argv).options(options).run(), vm);
-			po::notify(vm);
-			if (vm.count("help")) {
-				std::cout << options << std::endl;
-				exit(0);
-			}
-			if (vm.count("daemonize")) {
-				daemonize = true;
-			}
-			if (vm.count("debug")) {
-				debug = true;
-			}
-			if (vm.count("mqPassword") == 0) {
-				mqPassword = DEFAULT_AMQP_PASSWORD;
-			}
-		} catch (std::exception &e) {
-			std::cout << e.what() << std::endl;
-			std::cout << options << std::endl;
-			exit(1);
-		}
-	}
-	string mqServer;
-	string mqVHost;
-	string mqExchangeName;
-	string mqUser;
-	string mqPassword;
-	unsigned int mqPort;
-	unsigned int mqFrameSize;
-	bool debug;
-	bool daemonize;
+        po::options_description options;
+        options.add(basic).add(config).add(mqconfig);
+        po::variables_map vm;
+        try {
+            po::store(po::command_line_parser(argc, argv).options(options).run(), vm);
+            po::notify(vm);
+            if (vm.count("help")) {
+                std::cout << options << std::endl;
+                exit(0);
+            }
+            if (vm.count("daemonize")) {
+                daemonize = true;
+            }
+            if (vm.count("debug")) {
+                debug = true;
+            }
+            if (vm.count("mqPassword") == 0) {
+                mqPassword = DEFAULT_AMQP_PASSWORD;
+            }
+        } catch (std::exception &e) {
+            std::cout << e.what() << std::endl;
+            std::cout << options << std::endl;
+            exit(1);
+        }
+    }
+    string mqServer;
+    string mqVHost;
+    string mqExchangeName;
+    string mqUser;
+    string mqPassword;
+    unsigned int mqPort;
+    unsigned int mqFrameSize;
+    bool debug;
+    bool daemonize;
 
-	string hostname;
-	string identifier;
-	string subidentifier;
+    string hostname;
+    string identifier;
+    string subidentifier;
 
-	string outputHDF5FilenamePrefix;
+    string outputHDF5FilenamePrefix;
 
-	int cleanFreq;
-	int maxProcessAge;
-	int dataBlockSize;
-	int statBlockSize;
+    int cleanFreq;
+    int maxProcessAge;
+    int dataBlockSize;
+    int statBlockSize;
 
 };
 
@@ -173,8 +173,8 @@ unsigned int set_process_record(ProcRecordType recordType, void *data, int i, Pr
 }
 
 int main(int argc, char **argv) {
-	cleanUpExitFlag = 0;
-	resetOutputFileFlag = 0;
+    cleanUpExitFlag = 0;
+    resetOutputFileFlag = 0;
 
     ProcReducerConfig config(argc, argv);
     ProcAMQPIO *conn = new ProcAMQPIO(config.mqServer, config.mqPort, config.mqVHost, config.mqUser, config.mqPassword, config.mqExchangeName, config.mqFrameSize, FILE_MODE_READ);
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
     ProcHDF5IO* outputFile = NULL;
 
     time_t currTimestamp = time(NULL);
-	time_t lastClean = 0;
+    time_t lastClean = 0;
     struct tm currTm;
     memset(&currTm, 0, sizeof(struct tm));
     currTm.tm_isdst = -1;
@@ -191,135 +191,137 @@ int main(int argc, char **argv) {
     int last_day = currTm.tm_mday;
     string hostname, identifier, subidentifier;
 
-	int saveCnt = 0;
-	int nRecords = 0;
-	string outputFilename;
-	int count = 0;
+    int saveCnt = 0;
+    int nRecords = 0;
+    string outputFilename;
+    int count = 0;
+    void* data = NULL;
+    size_t data_size = 0;
 
-	char buffer[1024];
-	unordered_map<std::string, ProcessList*> processLists;
-	processLists.reserve(1000);
+    char buffer[1024];
+    unordered_map<std::string, ProcessList*> processLists;
+    processLists.reserve(1000);
 
-	signal(SIGINT, sig_handler);
-	signal(SIGTERM, sig_handler);
-	signal(SIGXCPU, sig_handler);
-	signal(SIGUSR1, sig_handler);
-	signal(SIGUSR2, sig_handler);
-	signal(SIGHUP, sighup_handler);
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+    signal(SIGXCPU, sig_handler);
+    signal(SIGUSR1, sig_handler);
+    signal(SIGUSR2, sig_handler);
+    signal(SIGHUP, sighup_handler);
 
     while (cleanUpExitFlag == 0) {
         currTimestamp = time(NULL);
         localtime_r(&currTimestamp, &currTm);
 
         if (currTm.tm_mday != last_day || outputFile == NULL || resetOutputFileFlag == 2) {
-			/* flush the file buffers and clean up the old references to the old file */
+            /* flush the file buffers and clean up the old references to the old file */
             if (outputFile != NULL) {
-				outputFile->flush();
+                outputFile->flush();
                 delete outputFile;
                 outputFile = NULL;
             }
 
-			/* dump the hash table - we need a fresh start for a fresh file */
-			for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
-				ProcessList* list = iter->second;
-				list->expire_all_processes();
-			}
+            /* dump the hash table - we need a fresh start for a fresh file */
+            for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
+                ProcessList* list = iter->second;
+                list->expire_all_processes();
+            }
 
-			/* use the current date and time as the suffix for this file */
-			strftime(buffer, 1024, "%Y%m%d%H%M%S", &currTm);
-			outputFilename = config.outputHDF5FilenamePrefix + "." + string(buffer) + ".h5";
+            /* use the current date and time as the suffix for this file */
+            strftime(buffer, 1024, "%Y%m%d%H%M%S", &currTm);
+            outputFilename = config.outputHDF5FilenamePrefix + "." + string(buffer) + ".h5";
             outputFile = new ProcHDF5IO(outputFilename, FILE_MODE_WRITE);
-			resetOutputFileFlag = 0;
+            resetOutputFileFlag = 0;
         }
         last_day = currTm.tm_mday;
 
-		void* data = NULL;
-        ProcRecordType recordType = conn->read_stream_record(&data, &nRecords);
-		conn->get_frame_context(hostname, identifier, subidentifier);
+        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords);
+        conn->get_frame_context(hostname, identifier, subidentifier);
 
-		if (data == NULL) {
-			continue;
-		}
-		ProcessList* currList = NULL;
-		auto procList_iter = processLists.find(hostname);
-		if (procList_iter == processLists.end()) {
-			/* new host! */
-			currList = new ProcessList(config.maxProcessAge);
-			auto insertVal = processLists.insert({hostname, currList});
-			if (insertVal.second) {
-				procList_iter = insertVal.first;
-			} else {
-				cout << "couldn't insert new host processlist for: " << hostname << endl;
-				delete currList;
-				currList = NULL;
-			}
-		} else {
-			currList = procList_iter->second;
-		}
+        if (data == NULL) {
+            continue;
+        }
+        ProcessList* currList = NULL;
+        auto procList_iter = processLists.find(hostname);
+        if (procList_iter == processLists.end()) {
+            /* new host! */
+            currList = new ProcessList(config.maxProcessAge);
+            auto insertVal = processLists.insert({hostname, currList});
+            if (insertVal.second) {
+                procList_iter = insertVal.first;
+            } else {
+                cout << "couldn't insert new host processlist for: " << hostname << endl;
+                delete currList;
+                currList = NULL;
+            }
+        } else {
+            currList = procList_iter->second;
+        }
 
-		outputFile->set_context(hostname, identifier, subidentifier);
+        outputFile->set_context(hostname, identifier, subidentifier);
         int last_pid = -1;
         ProcessRecord *last_record = NULL;
         for (int i = 0; i < nRecords; i++) {
-			unsigned int recId = 0;
-			bool saveNewRec = false;
-			unsigned int recID = 0;
-			ProcessRecord* record = NULL;
+            unsigned int recId = 0;
+            bool saveNewRec = false;
+            unsigned int recID = 0;
+            ProcessRecord* record = NULL;
 
             int pid = get_record_pid(recordType, data, i);
-			if (currList != NULL) {
-				bool newRecord = false;
-				record = currList->find_process_record(pid);
-				if (record == NULL) {
-					record = currList->new_process_record();
-					newRecord = true;
-				} 
-				if (record == NULL) {
-					cout << "couldn't get a new record!" << endl;
-				} else {
+            if (currList != NULL) {
+                bool newRecord = false;
+                record = currList->find_process_record(pid);
+                if (record == NULL) {
+                    record = currList->new_process_record();
+                    newRecord = true;
+                } 
+                if (record == NULL) {
+                    cout << "couldn't get a new record!" << endl;
+                } else {
                     set_process_record(recordType, data, i, record, newRecord, outputFile);
                 }
-			}
-		}
-		free(data);
+            }
+        }
 
-		time_t currTime = time(NULL);
-		if (currTime - lastClean > config.cleanFreq || cleanUpExitFlag != 0 || resetOutputFileFlag == 1) {
-			cout << "Begin Clean; Flushing data to disk..." << endl;
-			outputFile->flush();
-			outputFile->trim_segments(currTime - config.maxProcessAge);
-			cout << "Flush Complete" << endl;
+        time_t currTime = time(NULL);
+        if (currTime - lastClean > config.cleanFreq || cleanUpExitFlag != 0 || resetOutputFileFlag == 1) {
+            cout << "Begin Clean; Flushing data to disk..." << endl;
+            outputFile->flush();
+            outputFile->trim_segments(currTime - config.maxProcessAge);
+            cout << "Flush Complete" << endl;
 
-			int processes = 0;
-			for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ++iter) {
-				ProcessList *list = iter->second;
-				processes += list->get_process_count();
-			}
-			time_t nowTime = time(NULL);
-			time_t deltaTime = nowTime - currTime;
-			cout << "Cleaning finished in " << deltaTime << " seconds" << endl;
-			cout << "End Clean: Presently tracking " << processes << " processes" << endl;
-			lastClean = currTime;
-			if (resetOutputFileFlag == 1) {
-				resetOutputFileFlag++;
-			}
-		}
+            int processes = 0;
+            cerr << "have " << processLists.size() << " process lists" << endl;
+            for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ++iter) {
+                ProcessList *list = iter->second;
+                processes += list->get_process_count();
+            }
+            time_t nowTime = time(NULL);
+            time_t deltaTime = nowTime - currTime;
+            cout << "Cleaning finished in " << deltaTime << " seconds" << endl;
+            cout << "End Clean: Presently tracking " << processes << " processes" << endl;
+            lastClean = currTime;
+            if (resetOutputFileFlag == 1) {
+                resetOutputFileFlag++;
+            }
+        }
     }
+    free(data);
 
-	/* clean up all the records */
-	for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
-		ProcessList *record = iter->second;
-		delete record;
-		processLists.erase(iter++);
-	}
-	if (outputFile != NULL) {
-		outputFile->flush();
-		delete outputFile;
-		outputFile = NULL;
-	}
-	if (conn != NULL) {
-		delete conn;
-		conn = NULL;
-	}
+    /* clean up all the records */
+    for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
+        ProcessList *record = iter->second;
+        delete record;
+        processLists.erase(iter++);
+    }
+    if (outputFile != NULL) {
+        outputFile->flush();
+        delete outputFile;
+        outputFile = NULL;
+    }
+    if (conn != NULL) {
+        delete conn;
+        conn = NULL;
+    }
     return 0;
 }
