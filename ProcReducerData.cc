@@ -20,6 +20,17 @@ int procdatacmp(const procdata& a, const procdata& b) {
 	return 0;
 }
 
+int procfdcmp(const procfd& a, const procfd& b) {
+    if (a.pid != b.pid) return 1;
+	if (a.ppid != b.ppid) return 2;
+	if (a.startTime != b.startTime) return 3;
+	if (a.startTimeUSec != b.startTimeUSec) return 4;
+	if (strcmp(a.path, b.path) != 0) return 5;
+	if (a.fd != b.fd) return 6;
+	if (a.mode != b.mode) return 7;
+    return 0;
+}
+
 int procstatcmp(const procstat& a, const procstat& b) {
 	if (a.pid != b.pid) return 1;
 	if (a.ppid != b.ppid) return 2;
@@ -82,6 +93,14 @@ void ProcessRecord::set_procstat_id(unsigned int id) {
 	currRecord.statRecord = id;
 }
 
+void ProcessRecord::set_procfd_id(unsigned int id, procfd *procFD) {
+    int effective_fd = procFD->fd - 3;
+    if (effective_fd < 0 || effective_fd >= REDUCER_MAX_FDS) {
+        throw ReducerInvalidFDException(effective_fd);
+    }
+    currRecord.fdRecord[effective_fd] = id;
+}
+
 unsigned int ProcessRecord::set_procstat(procstat *procStat, bool newRecord) {
 	unsigned int recId = 0;
 	active = true;
@@ -118,6 +137,29 @@ unsigned int ProcessRecord::set_procdata(procdata *procData, bool newRecord) {
 	}
 	memcpy(&(currRecord.data), procData, sizeof(procdata));
 	return recId;
+}
+
+unsigned int ProcessRecord::set_procfd(procfd *procFD, bool newRecord) {
+    unsigned int recId = 0;
+    active = true;
+    int effective_fd = procFD->fd - 3; //never measure 0,1,2
+    if (effective_fd < 0 || effective_fd >= REDUCER_MAX_FDS) {
+        throw ReducerInvalidFDException(effective_fd);
+    }
+    if (newRecord || !currRecord.fdSet[effective_fd]) {
+        prevRecord.fdSet[effective_fd] = false;
+        currRecord.fdSet[effective_fd] = true;
+    } else {
+        recId = currRecord.fdRecord[effective_fd];
+        if (procfdcmp(currRecord.fd[effective_fd], *procFD) != 0) {
+            recId = 0;
+            memcpy(&(prevRecord.fd[effective_fd]), &(currRecord.fd[effective_fd]), sizeof(procfd));
+            prevRecord.fdSet[effective_fd] = true;
+            prevRecord.fdRecord[effective_fd] = currRecord.fdRecord[effective_fd];
+        }
+    }
+    memcpy(&(currRecord.fd[effective_fd]), procFD, sizeof(procfd));
+    return recId;
 }
 
 ProcessList::ProcessList(const time_t& _maxAge): maxAge(_maxAge) {

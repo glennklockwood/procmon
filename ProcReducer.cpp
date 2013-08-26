@@ -130,6 +130,48 @@ public:
 
 };
 
+unsigned int get_record_pid(ProcRecordType type, void *data, int n) {
+    if (type == TYPE_PROCDATA) {
+        procdata *ptr = (procdata*) data;
+        return ptr[n].pid;
+    } else if (type == TYPE_PROCSTAT) {
+        procstat *ptr = (procstat*) data;
+        return ptr[n].pid;
+    } else if (type == TYPE_PROCFD) {
+        procfd *ptr = (procfd*) data;
+        return ptr[n].pid;
+    }
+    return 0;
+}
+
+unsigned int set_process_record(ProcRecordType recordType, void *data, int i, ProcessRecord *record, bool newRecord, ProcHDF5IO *outputFile) {
+    if (recordType == TYPE_PROCDATA) {
+        procdata *ptr = (procdata *) data;
+        unsigned int recId = record->set_procdata(&(ptr[i]), newRecord);
+        record->set_procdata_id(
+            outputFile->write_procdata(&(ptr[i]), recId, 1)
+        );
+    } else if (recordType == TYPE_PROCSTAT) {
+        procstat *ptr = (procstat *) data;
+        unsigned int recId = record->set_procstat(&(ptr[i]), newRecord);
+        record->set_procstat_id(
+            outputFile->write_procstat(&(ptr[i]), recId, 1)
+        );
+    } else if (recordType == TYPE_PROCFD) {
+        procfd *ptr = (procfd *) data;
+        try {
+            unsigned int recId = record->set_procfd(&(ptr[i]), newRecord);
+            record->set_procfd_id(
+                outputFile->write_procfd(&(ptr[i]), recId, 1),
+                &(ptr[i])
+            );
+        } catch (ReducerInvalidFDException &e) {
+            cerr << "Caught (and ignored) invalid FD exception: " << e.what() << endl;
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
 	cleanUpExitFlag = 0;
 	resetOutputFileFlag = 0;
@@ -149,8 +191,6 @@ int main(int argc, char **argv) {
     int last_day = currTm.tm_mday;
     string hostname, identifier, subidentifier;
 
-	procstat* procstat_ptr = NULL;
-	procdata* procdata_ptr = NULL;
 	int saveCnt = 0;
 	int nRecords = 0;
 	string outputFilename;
@@ -200,11 +240,6 @@ int main(int argc, char **argv) {
 		if (data == NULL) {
 			continue;
 		}
-		if (recordType == TYPE_PROCDATA) {
-			procdata_ptr = (procdata*) data;
-		} else if (recordType == TYPE_PROCSTAT) {
-			procstat_ptr = (procstat*) data;
-		}
 		ProcessList* currList = NULL;
 		auto procList_iter = processLists.find(hostname);
 		if (procList_iter == processLists.end()) {
@@ -223,17 +258,15 @@ int main(int argc, char **argv) {
 		}
 
 		outputFile->set_context(hostname, identifier, subidentifier);
+        int last_pid = -1;
+        ProcessRecord *last_record = NULL;
         for (int i = 0; i < nRecords; i++) {
-			int pid = 0;
 			unsigned int recId = 0;
 			bool saveNewRec = false;
 			unsigned int recID = 0;
 			ProcessRecord* record = NULL;
-			if (recordType == TYPE_PROCDATA) {
-				pid = procdata_ptr[i].pid;
-			} else if (recordType == TYPE_PROCSTAT) {
-				pid = procstat_ptr[i].pid;
-			}
+
+            int pid = get_record_pid(recordType, data, i);
 			if (currList != NULL) {
 				bool newRecord = false;
 				record = currList->find_process_record(pid);
@@ -244,18 +277,8 @@ int main(int argc, char **argv) {
 				if (record == NULL) {
 					cout << "couldn't get a new record!" << endl;
 				} else {
-					if (recordType == TYPE_PROCDATA) {
-						recId = record->set_procdata(&(procdata_ptr[i]), newRecord);
-						record->set_procdata_id(
-							outputFile->write_procdata(&(procdata_ptr[i]), recId, 1)
-						);
-					} else if (recordType == TYPE_PROCSTAT) {
-						recId = record->set_procstat(&(procstat_ptr[i]), newRecord);
-						record->set_procstat_id(
-							outputFile->write_procstat(&(procstat_ptr[i]), recId, 1)
-						);
-					}
-				}
+                    set_process_record(recordType, data, i, record, newRecord, outputFile);
+                }
 			}
 		}
 		free(data);

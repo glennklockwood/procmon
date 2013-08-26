@@ -2,6 +2,7 @@
 #define __PROC_REDUCER_DATA_
 
 #include "ProcData.hh"
+#include "config.h"
 #include <vector>
 #include <deque>
 
@@ -12,10 +13,13 @@ using namespace std;
 typedef struct _SingleProcessRecord {
     bool statSet;
     bool dataSet;
+    bool fdSet[REDUCER_MAX_FDS];
     procstat stat;
     procdata data;
+    procfd fd[REDUCER_MAX_FDS];
     unsigned int statRecord;
     unsigned int dataRecord;
+    unsigned int fdRecord[REDUCER_MAX_FDS];
 } SingleProcessRecord;
 
 class ProcessRecord {
@@ -26,8 +30,10 @@ public:
     time_t getAge(const time_t &currTime);
 	unsigned int set_procdata(procdata*, bool newRecord);
 	unsigned int set_procstat(procstat*, bool newRecord);
+    unsigned int set_procfd(procfd*, bool newRecord);
 	void set_procdata_id(unsigned int id);
 	void set_procstat_id(unsigned int id);
+    void set_procfd_id(unsigned int id, procfd*);
 private:
     SingleProcessRecord currRecord;
     SingleProcessRecord prevRecord;
@@ -55,6 +61,21 @@ private:
     vector<ProcessRecord*> processLists;
     deque<ProcessRecord*> unusedProcessQueue;
     time_t maxAge;
+};
+
+class ReducerInvalidFDException : public exception {
+public:
+	ReducerInvalidFDException(int attempted_fds) {
+        error = "Attempted to load " + to_string(attempted_fds) + " fds - out of bounds! (MAX: " + to_string(REDUCER_MAX_FDS);
+	}
+
+	virtual const char* what() const throw() {
+		return error.c_str();
+	}
+
+	~ReducerInvalidFDException() throw() { }
+private:
+    string error;
 };
 
 
