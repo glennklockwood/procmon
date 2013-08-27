@@ -14,6 +14,7 @@ import time
 from BaseHTTPServer import BaseHTTPRequestHandler
 from BaseHTTPServer import HTTPServer
 import urlparse
+import ssl
 from xml.parsers import expat
 
 from pymongo import MongoClient
@@ -59,6 +60,13 @@ class MongoDataServer(HTTPServer):
     def __init__(self, config, requestHandler):
         print config
         HTTPServer.__init__(self, (config['address'], config['port']), requestHandler)
+        self.socket = ssl.wrap_socket(self.socket, certfile=config['ssl_cert'], keyfile=config['ssl_key'])
+#ctx = SSL.Context(SSL.SSLv23_METHOD)
+#ctx.use_privatekey_file(config['ssl_key'])
+#        ctx.use_certificate_file(config['ssl_cert'])
+#        self.socket = SSL.Connection(ctx, socket.socket(self.address_family, self.socket_type))
+#        self.server_bind()
+#        self.server_activate()
         self.config = config
         
     def serve(self):
@@ -75,6 +83,10 @@ class MongoDataServer(HTTPServer):
 
 
 class RequestHandler(BaseHTTPRequestHandler):
+#def setup(self):
+#        self.connection = self.request
+#        self.rfile = socket._fileobject(self.request, "rb", self.rbufsize)
+#        self.wfile = socket._fileobject(self.request, "wb", self.wbufsize)
     #def log_message(self, format, *args):
     #    note(format, args, "")
         
@@ -394,12 +406,16 @@ def main(argv):
     argParser.add_argument("-I", "--ip", nargs=1, help="Binding IP address", default=["genepool04.nersc.gov"], type=str)
     argParser.add_argument("-p", "--port", nargs=1, help="Port", default=[8242], type=int)
     argParser.add_argument("-t", "--threads", nargs=1, help="number of server threads (+1 for task management)", default=[2], type=int)
+    argParser.add_argument("-s", "--ssl_cert", nargs=1, help="path to ssl certificate", default=['None'], type=str)
+    argParser.add_argument("-S", "--ssl_key", nargs=1, help="path to ssl key", default=['None'], type=str)
 
     argData = argParser.parse_args(argv[1:])
     config = {}
     config['address'] = argData.ip[0]
     config['port'] = int(argData.port[0])
     config['nHTTPServerProcesses'] = int(argData.threads[0])
+    config['ssl_cert'] = argData.ssl_cert[0]
+    config['ssl_key'] = argData.ssl_key[0]
 
     defaultConfig = {
         'address': '128.55.71.23',
