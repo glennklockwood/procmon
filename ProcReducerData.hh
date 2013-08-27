@@ -6,7 +6,7 @@
 #include <vector>
 #include <deque>
 
-#define PROCESSES_PER_LIST 1200
+#define PROCESSES_PER_LIST 50
 
 using namespace std;
 
@@ -28,6 +28,7 @@ public:
     ProcessRecord();
     bool operator==(const unsigned int pid) const;
     time_t getAge(const time_t &currTime);
+    void expire();
 	unsigned int set_procdata(procdata*, bool newRecord);
 	unsigned int set_procstat(procstat*, bool newRecord);
     unsigned int set_procfd(procfd*, bool newRecord);
@@ -36,7 +37,6 @@ public:
     void set_procfd_id(unsigned int id, procfd*);
 private:
     SingleProcessRecord currRecord;
-    SingleProcessRecord prevRecord;
     bool active;
 	int nData;
 	int nStat;

@@ -6,7 +6,7 @@
 using namespace std;
 
 ProcessRecord::ProcessRecord() {
-    active = false;
+    expire();
 }
 
 int procdatacmp(const procdata& a, const procdata& b) {
@@ -83,7 +83,22 @@ time_t ProcessRecord::getAge(const time_t &currTime) {
     if (currRecord.statSet) {
         return currTime - currRecord.stat.recTime;
     }
+    for (int i = 0; i < REDUCER_MAX_FDS; i++) {
+        if (currRecord.fdSet[i]) {
+            return currTime - currRecord.fd[i].recTime;
+        }
+    }
+
     return 0;
+}
+
+void ProcessRecord::expire() {
+    active = false;
+    currRecord.dataSet = false;
+    currRecord.statSet = false;
+    for (int i = 0; i < REDUCER_MAX_FDS; i++) {
+        currRecord.fdSet[i] = false;
+    }
 }
 
 void ProcessRecord::set_procdata_id(unsigned int id) {
@@ -106,15 +121,11 @@ unsigned int ProcessRecord::set_procstat(procstat *procStat, bool newRecord) {
 	unsigned int recId = 0;
 	active = true;
 	if (newRecord || !currRecord.statSet) {
-		prevRecord.statSet = false;
 		currRecord.statSet = true;
 	} else {
 		recId = currRecord.statRecord;
 		if (procstatcmp(currRecord.stat, *procStat) != 0) {
 			recId = 0;
-			memcpy(&(prevRecord.stat), &(currRecord.stat), sizeof(procstat));
-			prevRecord.statSet = true;
-			prevRecord.statRecord = currRecord.statRecord;
 		}
 	}
 	memcpy(&(currRecord.stat), procStat, sizeof(procstat));
@@ -125,15 +136,11 @@ unsigned int ProcessRecord::set_procdata(procdata *procData, bool newRecord) {
 	unsigned int recId = 0;
 	active = true;
 	if (newRecord || !currRecord.dataSet) {
-		prevRecord.dataSet = false;
 		currRecord.dataSet = true;
 	} else {
 		recId = currRecord.dataRecord;
 		if (procdatacmp(currRecord.data, *procData) != 0) {
 			recId = 0;
-			memcpy(&(prevRecord.data), &(currRecord.data), sizeof(procdata));
-			prevRecord.dataSet = true;
-			prevRecord.dataRecord = currRecord.dataRecord;
 		}
 	}
 	memcpy(&(currRecord.data), procData, sizeof(procdata));
@@ -148,15 +155,11 @@ unsigned int ProcessRecord::set_procfd(procfd *procFD, bool newRecord) {
         throw ReducerInvalidFDException(effective_fd);
     }
     if (newRecord || !currRecord.fdSet[effective_fd]) {
-        prevRecord.fdSet[effective_fd] = false;
         currRecord.fdSet[effective_fd] = true;
     } else {
         recId = currRecord.fdRecord[effective_fd];
         if (procfdcmp(currRecord.fd[effective_fd], *procFD) != 0) {
             recId = 0;
-            memcpy(&(prevRecord.fd[effective_fd]), &(currRecord.fd[effective_fd]), sizeof(procfd));
-            prevRecord.fdSet[effective_fd] = true;
-            prevRecord.fdRecord[effective_fd] = currRecord.fdRecord[effective_fd];
         }
     }
     memcpy(&(currRecord.fd[effective_fd]), procFD, sizeof(procfd));
@@ -169,6 +172,7 @@ ProcessList::ProcessList(const time_t& _maxAge): maxAge(_maxAge) {
 
 bool ProcessList::add_new_process_list() {
     ProcessRecord *new_list = new ProcessRecord[PROCESSES_PER_LIST];
+    memset(new_list, 0, sizeof(ProcessRecord)*PROCESSES_PER_LIST);
     if (new_list == NULL) {
         return false;
     }
@@ -221,14 +225,12 @@ unsigned int ProcessList::get_process_count() {
 bool ProcessList::find_expired_processes() {
     int nFound = 0;
     time_t currTime = time(NULL);
-    vector<pair<ProcessRecord*,ProcessRecord*> > termMemRange;
     for (auto& list: processLists) {
         ProcessRecord *ptr = list;
         ProcessRecord *end = ptr + PROCESSES_PER_LIST;
-        termMemRange.push_back({ptr,end});
         while (ptr < end) {
             if (ptr->getAge(currTime) > maxAge) {
-                ptr->active = false;
+                ptr->expire();
                 unusedProcessQueue.push_back(ptr);
             }
             ptr++;
@@ -293,7 +295,7 @@ void ProcessList::expire_all_processes() {
         ProcessRecord *ptr = list;
         ProcessRecord *end = ptr + PROCESSES_PER_LIST;
         while (ptr < end) {
-        	ptr->active = false;
+            ptr->expire();
             unusedProcessQueue.push_back(ptr);
             ptr++;
         }
