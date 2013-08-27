@@ -178,7 +178,6 @@ int main(int argc, char **argv) {
 
     ProcReducerConfig config(argc, argv);
     ProcAMQPIO *conn = new ProcAMQPIO(config.mqServer, config.mqPort, config.mqVHost, config.mqUser, config.mqPassword, config.mqExchangeName, config.mqFrameSize, FILE_MODE_READ);
-    //ProcAMQPIO conn(DEFAULT_AMQP_HOST, DEFAULT_AMQP_PORT, DEFAULT_AMQP_VHOST, DEFAULT_AMQP_USER, DEFAULT_AMQP_PASSWORD, DEFAULT_AMQP_EXCHANGE_NAME, DEFAULT_AMQP_FRAMESIZE, FILE_MODE_READ);
     conn->set_context(config.hostname, config.identifier, config.subidentifier);
     ProcHDF5IO* outputFile = NULL;
 
@@ -188,7 +187,7 @@ int main(int argc, char **argv) {
     memset(&currTm, 0, sizeof(struct tm));
     currTm.tm_isdst = -1;
     localtime_r(&currTimestamp, &currTm);
-    int last_day = currTm.tm_mday;
+    int last_hour = currTm.tm_hour;
     string hostname, identifier, subidentifier;
 
     int saveCnt = 0;
@@ -213,7 +212,7 @@ int main(int argc, char **argv) {
         currTimestamp = time(NULL);
         localtime_r(&currTimestamp, &currTm);
 
-        if (currTm.tm_mday != last_day || outputFile == NULL || resetOutputFileFlag == 2) {
+        if (currTm.tm_hour != last_hour || outputFile == NULL || resetOutputFileFlag == 2) {
             /* flush the file buffers and clean up the old references to the old file */
             if (outputFile != NULL) {
                 outputFile->flush();
@@ -233,7 +232,7 @@ int main(int argc, char **argv) {
             outputFile = new ProcHDF5IO(outputFilename, FILE_MODE_WRITE);
             resetOutputFileFlag = 0;
         }
-        last_day = currTm.tm_mday;
+        last_hour = currTm.tm_hour;
 
         ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords);
         conn->get_frame_context(hostname, identifier, subidentifier);
