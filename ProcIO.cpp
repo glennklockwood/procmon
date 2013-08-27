@@ -335,8 +335,6 @@ bool ProcAMQPIO::_read_procdata(procdata *startPtr, int nRecords, char* buffer, 
 	char* ePtr = buffer + nBytes;
 	char* sPtr = ptr;
 
-    cerr << "received " << nRecords << " records" << endl;
-
     int pos = 0;
 	int idx = 0;
 	int readBytes = -1;

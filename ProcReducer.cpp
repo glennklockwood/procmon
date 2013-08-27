@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
             }
 
             /* dump the hash table - we need a fresh start for a fresh file */
-            for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ) {
+            for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ++iter) {
                 ProcessList* list = iter->second;
                 list->expire_all_processes();
             }
