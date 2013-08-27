@@ -58,8 +58,8 @@ public:
 	int debug;
     int maxfd;
 #ifdef SECURED
-    int effective_uid;
-    int effective_gid;
+    int target_uid;
+    int target_gid;
 #endif
     std::string identifier;
     std::string subidentifier;
@@ -106,8 +106,8 @@ public:
         tgtGid = 0;
         maxfd = 0;
 #ifdef SECURED
-        effective_uid = -1;
-        effective_gid = -1;
+        target_uid = -1;
+        target_gid = -1;
 #endif
 #ifdef USE_AMQP
 		mqServer = DEFAULT_AMQP_HOST;
@@ -224,14 +224,14 @@ public:
                             if (uid > 0) {
                                 user_data = getpwuid(uid);
                                 if (user_data != NULL) {
-                                    effective_uid = user_data->pw_uid;
+                                    target_uid = user_data->pw_uid;
                                 }
                             }
                         } else {
-                            effective_uid = user_data->pw_uid;
+                            target_uid = user_data->pw_uid;
                         }
                     }
-                    if (effective_uid <= 0) {
+                    if (target_uid <= 0) {
                         cerr << "user, if specified, must resolve to a uid > 0" << endl;
                         usage(1);
                     }
@@ -243,13 +243,13 @@ public:
                         if (group_data == NULL) {
                             int gid = atoi(optarg);
                             if (group_data != NULL) {
-                                effective_gid = group_data->gr_gid;
+                                target_gid = group_data->gr_gid;
                             }
                         } else {
-                            effective_gid = group_data->gr_gid;
+                            target_gid = group_data->gr_gid;
                         }
                     }
-                    if (effective_gid <= 0) {
+                    if (target_gid <= 0) {
                         cerr << "group, if specified, must resolve to a gid > 0" << endl;
                     }
                     break;

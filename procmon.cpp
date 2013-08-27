@@ -769,26 +769,100 @@ static void daemonize() {
 }
 
 #ifdef SECURED
+void display_perms_ownership(const char *thread_id) {
+    gid_t curr_groups[512];
+    uid_t curr_ruid, curr_euid, curr_suid;
+    gid_t curr_rgid, curr_egid, curr_sgid;
+    int cnt = getgroups(512, curr_groups);
+    fprintf(stderr, "[%s] group list: ", thread_id);
+    for (int i = 0; i < cnt; i++) {
+        fprintf(stderr, "%s%d", i != 0 ? " ," : "", curr_groups[i]);
+    }
+    fprintf(stderr, "\n");
+    if (getresuid(&curr_ruid, &curr_euid, &curr_suid) == 0) {
+        fprintf(stderr, "[%s] real_uid: %d, eff_uid: %d, saved_uid: %d\n", thread_id, curr_ruid, curr_euid, curr_suid);
+    } else {
+        fprintf(stderr, "[%s] WARNING: failed to getresuid()\n", thread_id);
+    }
+    if (getresgid(&curr_rgid, &curr_egid, &curr_sgid) == 0) {
+        fprintf(stderr, "[%s] real_gid: %d, eff_gid: %d, saved_gid: %d\n", thread_id, curr_rgid, curr_egid, curr_sgid);
+    }
+    cap_t capabilities = cap_get_proc();
+    if (capabilities != NULL) {
+        char *capstr = cap_to_text(capabilities, NULL);
+        if (capstr != NULL) {
+            fprintf(stderr, "[%s] Capabilities: %s\n", thread_id, capstr);
+            //free(capstr);
+        } else {
+            fprintf(stderr, "[%s] WARNING: failed to cap_to_text()\n");
+        }
+        cap_free(capabilities);
+    } else {
+        fprintf(stderr, "[%s] WARNING: failed to get capabilities\n");
+    }
+}
+
+bool perform_setuid(const char *id) {
+    bool dropped_privs = false;
+    uid_t tgt_uid = getuid();
+    gid_t tgt_gid = getgid();
+    if (config->target_uid > 0) {
+        tgt_uid = config->target_uid;
+    }
+    if (config->target_gid <= 0) {
+        struct passwd *tgt_user = getpwuid(tgt_uid);
+        if (tgt_user != NULL) {
+            tgt_gid = tgt_user->pw_gid;
+        }
+    } else {
+        tgt_gid = config->target_gid;
+    }
+    if (setgroups(1, &tgt_gid) != 0) {
+        fprintf(stderr, "[%s] WARNING: Failed to trim groups.  Will continue.\n", id);
+    }
+    if (setresgid(tgt_gid, tgt_gid, tgt_gid) != 0) {
+        fprintf(stderr, "[%s] WARNING: Failed to setresgid.  Will continue.\n", id);
+    }
+    if (tgt_uid > 0) {
+        if (setresuid(tgt_uid, tgt_uid, tgt_uid) == 0) {
+            dropped_privs = true;
+        } else {
+            fprintf(stderr, "[%s] WARNING: FAILED To setresuid.  Will attempt to drop capabilities instead.\n", id);
+        }
+    }
+    return dropped_privs;
+}
+
 pthread_mutex_t token_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_barrier_t rbarrier;
 static void *reader_thread_start(void *) {
     int retCode = 0;
     int err = 0;
 
+    if (config->verbose) display_perms_ownership("R, initial");
+
     /* read current capabilities */
     cap_t capabilities = cap_get_proc();
-    if ((err = cap_clear(capabilities)) != 0) fatal_error("Couldn't clear capabilities.", err);
+    if (capabilities == NULL) fatal_error("[R] failed to cap_get_proc()", errno);
+    if ((err = cap_clear(capabilities)) != 0) fatal_error("[R] Couldn't clear capabilities data structure.", err);
 
     /* reset capabilities to just CAP_SYS_PTRACE */
     cap_value_t capability[] = { CAP_SYS_PTRACE };
     if ((err = cap_set_flag(capabilities, CAP_EFFECTIVE, 1, capability, CAP_SET)) != 0)
-        fatal_error("Couldn't set capability flags", err);
+        fatal_error("[R] Couldn't set capability flags", err);
     if ((err = cap_set_flag(capabilities, CAP_PERMITTED, 1, capability, CAP_SET)) != 0)
-        fatal_error("Couldn't set capability flags", err);
+        fatal_error("[R] Couldn't set capability flags", err);
     if ((err = cap_set_proc(capabilities)) != 0)
-        fatal_error("Couldn't set capbilities.", err);
+        fatal_error("[R] Couldn't set capbilities, secured procmon must be run as root or with cap_sys_ptrace permitted.", err);
     cap_free(capabilities);
+
+    if (config->verbose) display_perms_ownership("R, after R perms-set");
+    /* initial barrier-wait is used to synchronize capability/setuid activities
+     * of the secured procmon. Without it there is a race between this thread's
+     * cap_set_proc, and the other thread's setresuid */
     if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
+    if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
+    if (config->verbose) display_perms_ownership("R, after W perms-set");
 
     for ( ; ; ) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
@@ -816,7 +890,7 @@ int main(int argc, char** argv) {
     config = new ProcmonConfig(argc, argv);
     if (getuid() == 0) {
 #ifdef SECURED
-        if (config->effective_uid <= 0) {
+        if (config->target_uid <= 0) {
             cerr << "WARNING: Executing (secured) procmon as root; capabilities will be dropped!" << endl;
         }
 #else
@@ -854,24 +928,25 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    /* if the effective_uid or effective_gid are > 0, switch users
+    /* if the target_uid or target_gid are > 0, switch users
      * change gid then uid, the barrier is to ensure that the other thread has
      * had time to acquire CAP_SYS_PTRACE, and drop the rest  */
     if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
-    if (config->effective_gid > 0) {
-        setgid(config->effective_gid);
-    }
-    if (config->effective_uid > 0) {
-        if (setuid(config->effective_uid) == 0) {
-            dropped_privs = true;
-        }
-    }
+    if (config->verbose) display_perms_ownership("W, before W perms-set");
+
+    dropped_privs = perform_setuid("R");
+
     if (!dropped_privs) {
         cap_t empty = cap_init();
+        if (empty == NULL) fatal_error("[W] couldn't cap_init()", errno);
         if ((err = cap_set_proc(empty)) != 0) fatal_error("[W] Couldn't set capbilities.", err);
         dropped_privs = true;
         cap_free(empty);
     }
+
+    if (config->verbose) display_perms_ownership("W, after W perms-set");
+    if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
+
 #endif
 
 	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
