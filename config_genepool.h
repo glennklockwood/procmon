@@ -4,7 +4,7 @@
 #define DEFAULT_OUTPUT_FLAGS 4 /* AMQP output */
 #define DEFAULT_IDENTIFIER "JOB_ID"
 #define DEFAULT_SUBIDENTIFIER "SGE_TASK_ID"
-#define DEFAULT_AMQP_HOST "genepool10.nersc.gov"
+#define DEFAULT_AMQP_HOST "genepool-mq.nersc.gov"
 #define DEFAULT_AMQP_PORT 5672
 #define DEFAULT_AMQP_VHOST "jgi"
 #define DEFAULT_AMQP_USER "procmon"
