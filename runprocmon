@@ -1,0 +1,61 @@
+#!/bin/bash
+
+HN=$(hostname | sed -e 's/\..*//')
+
+ID=
+SUBID=
+
+case $HN in
+	gpweb*)
+		ID='WEB'
+	;;
+	gpint*)
+		ID='INT'
+	;;
+	genepool*)
+		ID='LOGIN'
+	;;
+	*)
+		ID='JGI'
+	;;
+esac
+
+case $HN in
+	gpweb0[12])
+		SUBID='VISTA'
+	;;
+	gpweb0[4567])
+		SUBID='IMG'
+	;;
+	gpweb08)
+		SUBID='GOLD'
+	;;
+	gpweb09|gpweb10)
+		SUBID='GALAXY'
+	;;
+	gpweb1[1-9])
+		SUBID='PORTAL'
+	;;
+	gpweb2[0-5])
+		SUBID='PLANT'
+	;;
+	gpweb26)
+		SUBID='GENERAL'
+	;;
+	*)
+		SUBID='GENERAL'
+	;;
+esac
+
+if [ -z "$ID" ] || [ -z "$SUBID" ]; then
+		echo PROBLEM: bad hostname, $HN
+		exit
+fi
+
+pgrep -u root /usr/sbin/procmon
+if [ $? = 0 ]; then
+	echo procmon already running, bailing
+	exit
+fi
+
+/usr/sbin/procmon -d -p 1 -u procmon -f 30 -F 30 -I $ID -S $SUBID
