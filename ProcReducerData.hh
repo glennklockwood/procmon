@@ -55,6 +55,7 @@ public:
     bool find_expired_processes();
 	void expire_all_processes();
 	unsigned int get_process_count();
+	unsigned int get_process_capacity();
 private:
     bool add_new_process_list();
 

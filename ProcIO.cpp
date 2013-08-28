@@ -750,6 +750,7 @@ ProcHDF5IO::~ProcHDF5IO() {
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
     if (file > 0) status = H5Fclose(file);
+    status = H5close();
 }
 
 unsigned int ProcHDF5IO::read_procdata(procdata* procData, unsigned int id) {

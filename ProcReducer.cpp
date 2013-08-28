@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
         currTimestamp = time(NULL);
         localtime_r(&currTimestamp, &currTm);
 
-        if (currTm.tm_hour != last_hour || outputFile == NULL || resetOutputFileFlag == 2) {
+        if (currTm.tm_hour !=  last_hour || outputFile == NULL || resetOutputFileFlag == 2) {
             /* flush the file buffers and clean up the old references to the old file */
             if (outputFile != NULL) {
                 outputFile->flush();
@@ -289,16 +289,23 @@ int main(int argc, char **argv) {
             outputFile->trim_segments(currTime - config.maxProcessAge);
             cout << "Flush Complete" << endl;
 
-            int processes = 0;
-            cerr << "have " << processLists.size() << " process lists" << endl;
+            int before_processes = 0;
+            int before_process_capacity = 0;
+            int after_processes = 0;
+            int after_process_capacity = 0;
             for (auto iter = processLists.begin(), end = processLists.end(); iter != end; ++iter) {
                 ProcessList *list = iter->second;
-                processes += list->get_process_count();
+                before_processes += list->get_process_count();
+                before_process_capacity += list->get_process_capacity();
+                list->find_expired_processes();
+                after_processes += list->get_process_count();
+                after_process_capacity += list->get_process_capacity();
             }
             time_t nowTime = time(NULL);
             time_t deltaTime = nowTime - currTime;
             cout << "Cleaning finished in " << deltaTime << " seconds" << endl;
-            cout << "End Clean: Presently tracking " << processes << " processes" << endl;
+            cout << "End Clean: Presently tracking " << after_processes << " processes (removed " << (after_processes - before_processes) << ")" << endl;
+            cout << "Capacity for " << after_process_capacity << " processes." << endl;
             lastClean = currTime;
             if (resetOutputFileFlag == 1) {
                 resetOutputFileFlag++;

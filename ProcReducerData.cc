@@ -214,11 +214,13 @@ ProcessRecord * ProcessList::new_process_record() {
     return retPtr;
 }
 
+unsigned int ProcessList::get_process_capacity() {
+    return processLists.size() * PROCESSES_PER_LIST;
+}
+
 unsigned int ProcessList::get_process_count() {
 	unsigned int ret = processLists.size() * PROCESSES_PER_LIST;
-    std::cerr << "have " << processLists.size() * PROCESSES_PER_LIST << " possible processes" << std::endl;
 	ret -= unusedProcessQueue.size();
-    std::cerr << "have " <<  unusedProcessQueue.size() << " unused processes" << std::endl;
 	return ret;
 }
 
