@@ -94,9 +94,6 @@ if [ -z "$ID" ] || [ -z "$SUBID" ]; then
 fi
 
 pgrep -u $PROCUSER -f /usr/sbin/procmon >/dev/null
-if [ $? = 0 ]; then
-	echo procmon already running, bailing
-	exit
-fi
+[ $? = 0 ] && exit
 
 /usr/sbin/procmon -d -p 1 -u $PROCUSER -f 30 -F 30 -I $ID -S $SUBID
