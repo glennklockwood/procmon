@@ -51,13 +51,13 @@ class ProcessList {
 public:
     ProcessList(const time_t &maxAge);
     ProcessRecord *find_process_record(const unsigned int pid);
-    ProcessRecord *new_process_record();
-    bool find_expired_processes();
+    ProcessRecord *new_process_record(ProcessList *spare_deck);
+    bool find_expired_processes(ProcessList *spare_deck);
 	void expire_all_processes();
 	unsigned int get_process_count();
 	unsigned int get_process_capacity();
 private:
-    bool add_new_process_list();
+    bool add_new_process_list(ProcessList *spare_deck);
 
     vector<ProcessRecord*> processLists;
     deque<ProcessRecord*> unusedProcessQueue;

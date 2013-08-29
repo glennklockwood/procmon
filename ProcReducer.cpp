@@ -200,6 +200,7 @@ int main(int argc, char **argv) {
     char buffer[1024];
     unordered_map<std::string, ProcessList*> processLists;
     processLists.reserve(1000);
+    ProcessList* spare_processList = new ProcessList(config.maxProcessAge);
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -271,7 +272,7 @@ int main(int argc, char **argv) {
                 bool newRecord = false;
                 record = currList->find_process_record(pid);
                 if (record == NULL) {
-                    record = currList->new_process_record();
+                    record = currList->new_process_record(spare_processList);
                     newRecord = true;
                 } 
                 if (record == NULL) {
@@ -297,15 +298,16 @@ int main(int argc, char **argv) {
                 ProcessList *list = iter->second;
                 before_processes += list->get_process_count();
                 before_process_capacity += list->get_process_capacity();
-                list->find_expired_processes();
+                list->find_expired_processes(spare_processList);
                 after_processes += list->get_process_count();
                 after_process_capacity += list->get_process_capacity();
             }
             time_t nowTime = time(NULL);
             time_t deltaTime = nowTime - currTime;
             cout << "Cleaning finished in " << deltaTime << " seconds" << endl;
-            cout << "End Clean: Presently tracking " << after_processes << " processes (removed " << (after_processes - before_processes) << ")" << endl;
+            cout << "End Clean: Presently tracking " << after_processes << " processes (removed " << (before_processes - after_processes) << ")" << endl;
             cout << "Capacity for " << after_process_capacity << " processes." << endl;
+            cout << "Reserve capacity: " << spare_processList->get_process_capacity() << endl;
             lastClean = currTime;
             if (resetOutputFileFlag == 1) {
                 resetOutputFileFlag++;
@@ -328,6 +330,9 @@ int main(int argc, char **argv) {
     if (conn != NULL) {
         delete conn;
         conn = NULL;
+    }
+    if (spare_processList != NULL) {
+        delete spare_processList;
     }
     return 0;
 }

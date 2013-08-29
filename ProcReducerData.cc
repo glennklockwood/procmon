@@ -167,15 +167,22 @@ unsigned int ProcessRecord::set_procfd(procfd *procFD, bool newRecord) {
 }
 
 ProcessList::ProcessList(const time_t& _maxAge): maxAge(_maxAge) {
-    add_new_process_list();
+    add_new_process_list(NULL);
 }
 
-bool ProcessList::add_new_process_list() {
-    ProcessRecord *new_list = new ProcessRecord[PROCESSES_PER_LIST];
-    memset(new_list, 0, sizeof(ProcessRecord)*PROCESSES_PER_LIST);
+bool ProcessList::add_new_process_list(ProcessList *spare_deck) {
+    ProcessRecord *new_list = NULL;
+    if (spare_deck != NULL && spare_deck->processLists.size() > 0) {
+        new_list = spare_deck->processLists.back();
+        spare_deck->processLists.pop_back();
+    }
+    if (new_list == NULL) {
+        new_list = new ProcessRecord[PROCESSES_PER_LIST];
+    }
     if (new_list == NULL) {
         return false;
     }
+    memset(new_list, 0, sizeof(ProcessRecord)*PROCESSES_PER_LIST);
     processLists.push_back(new_list);
 
     /* put all new pointers in the unusedProcessQueue vector lowest order
@@ -198,14 +205,14 @@ ProcessRecord * ProcessList::find_process_record(const unsigned int pid) {
     return NULL;
 }
 
-ProcessRecord * ProcessList::new_process_record() {
+ProcessRecord * ProcessList::new_process_record(ProcessList *spare_deck) {
     ProcessRecord *retPtr = NULL;
     if (unusedProcessQueue.size() > 0) {
 		retPtr = unusedProcessQueue[0];
         unusedProcessQueue.pop_front();
     }
     if (retPtr == NULL) {
-        add_new_process_list();
+        add_new_process_list(spare_deck);
         if (unusedProcessQueue.size() > 0) {
 			retPtr = unusedProcessQueue[0];
             unusedProcessQueue.pop_front();
@@ -224,7 +231,7 @@ unsigned int ProcessList::get_process_count() {
 	return ret;
 }
 
-bool ProcessList::find_expired_processes() {
+bool ProcessList::find_expired_processes(ProcessList *spare_deck) {
     int nFound = 0;
     time_t currTime = time(NULL);
     for (auto& list: processLists) {
@@ -238,56 +245,62 @@ bool ProcessList::find_expired_processes() {
             ptr++;
         }
     }
-    return unusedProcessQueue.size() > 0;
 
-	/*
     int nExtraLists = (unusedProcessQueue.size() / PROCESSES_PER_LIST);
     if (nExtraLists > 0) {
+        int nKeepLists = processLists.size() - nExtraLists;
+        if (nKeepLists < 0) {
+            cerr << "ERROR: Invalid nKeepLists value! nKeepLists: " << nKeepLists << "; # lists: " << processLists.size() << endl;
+            abort();
+        }
+
         vector<ProcessRecord*> keepRecords;
         keepRecords.reserve((processLists.size() - nExtraLists)*PROCESSES_PER_LIST);
-        auto rangeStartIter = termMemRange.begin();
-        rangeStartIter += (termMemRange.size() - nExtraLists);
+
         for (auto& record: unusedProcessQueue) {
             bool found = false;
-            for (auto& range = rangeStartIter;
-                 range >= termMemRange.begin() && range != termMemRange.end();
-                 ++range)
-            {
-				ProcessRecord *sPtr = range->first;
-				ProcessRecord *ePtr = range->second;
+            for (int idx = 0; idx < nKeepLists; idx++) {
+                ProcessRecord *sPtr = processLists[idx];
+                ProcessRecord *ePtr = sPtr + PROCESSES_PER_LIST;
                 if (record >= sPtr && record < ePtr) {
-                    found = true;
-                    break;
+                    keepRecords.push_back(record);
                 }
-            }
-            if (!found) {
-                keepRecords.push_back(record);
             }
         }
         // dump everything in the unusedProcessQueue, and re-populate with keepRecords
+        cerr << "Before Clear upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; keepRec: " << keepRecords.size() << endl;
         unusedProcessQueue.clear();
-        copy(keepRecords.begin(), keepRecords.end(), unusedProcessQueue.begin());
+        for (auto& record: keepRecords) {
+            unusedProcessQueue.push_back(record);
+        }
+        cerr << "After Clear upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; keepRec: " << keepRecords.size() << endl;
 
         // copy remaining records in the about-to-be-removed lists to empty records
         while (nExtraLists > 0) {
-            ProcessRecord *ptr = processLists.back();
+            cout << "b: upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; nLists: " << processLists.size() << endl;
+            ProcessRecord *plist = processLists.back();
+            ProcessRecord *ptr = plist;
 			processLists.pop_back();
             ProcessRecord *end = ptr + PROCESSES_PER_LIST;
 
             while (ptr < end) {
                 if (ptr->active) {
-                    ProcessRecord *tgt = unusedProcessQueue[0];
-					unusedProcessQueue.pop_front();
-                    if (tgt != NULL) {
-                        *tgt = *ptr;
+                    cerr << "size of unusedProcessQueue: " << unusedProcessQueue.size() << endl;
+                    if (unusedProcessQueue.size() == 0) {
+                        cerr << "FAILURE!!! to few members in unusedProcessQueue to compact memory image!" << endl;
+                        abort();
                     }
+                    ProcessRecord *tgt = unusedProcessQueue.front();
+					unusedProcessQueue.pop_front();
+                    memcpy(tgt, ptr, sizeof(ProcessRecord));
                 }
                 ++ptr;
             }
+            spare_deck->processLists.push_back(plist);
             nExtraLists--;
         }
+        cout << "a: upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; nLists: " << processLists.size() << "; spare: " << spare_deck->processLists.size()  << endl;
     }
-	*/
     return unusedProcessQueue.size() > 0;
 }
 
