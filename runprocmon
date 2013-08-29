@@ -1,6 +1,10 @@
 #!/bin/bash
 
 HN=$(hostname | sed -e 's/\..*//')
+if [ -z "$HN" ]; then
+	echo PROBLEM: bad hostname, $HN
+	exit
+fi
 
 ID=
 SUBID=
@@ -84,7 +88,7 @@ case $HN in
 esac
 
 if [ -z "$ID" ] || [ -z "$SUBID" ]; then
-		echo PROBLEM: bad hostname, $HN
+		echo PROBLEM: found no ID or SUBID
 		exit
 fi
 
