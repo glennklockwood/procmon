@@ -94,4 +94,4 @@ if [ $? = 0 ]; then
 	exit
 fi
 
-/usr/sbin/procmon -d -p 1 -u procmon -f 30 -F 30 -W 10 -I $ID -S $SUBID
+/usr/sbin/procmon -d -p 1 -u procmon -f 30 -F 30 -I $ID -S $SUBID
