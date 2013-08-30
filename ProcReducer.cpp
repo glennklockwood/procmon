@@ -7,7 +7,12 @@
 #include <unordered_map>
 #include "ProcReducerData.hh"
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <boost/program_options.hpp>
+#define PROCREDUCER_VERSION 2.1
 namespace po = boost::program_options;
 
 /* ProcReducer
@@ -33,6 +38,12 @@ void sighup_handler(int signum) {
      * buffer to get written out
      */
      resetOutputFileFlag = 1;
+}
+
+void version() {
+    cout << "ProcReducer " << PROCREDUCER_VERSION;
+    cout << endl;
+    exit(0);
 }
 
 class proc_t {
@@ -69,6 +80,7 @@ public:
             ("maxage,m",po::value<int>(&(this->maxProcessAge))->default_value(DEFAULT_REDUCER_MAX_PROCESS_AGE), "timeout since last communication from a pid before allowing removal from hash table (cleaning)")
             ("statblock",po::value<int>(&(this->statBlockSize))->default_value(DEFAULT_STAT_BLOCK_SIZE), "number of stat records per block in hdf5 file" )
             ("datablock",po::value<int>(&(this->dataBlockSize))->default_value(DEFAULT_DATA_BLOCK_SIZE), "number of data records per block in hdf5 file" )
+            ("pid,q",po::value<string>(&(this->pidfile))->default_value(""), "pid file to write")
             ("debug", "enter debugging mode")
         ;
         po::options_description mqconfig("AMQP Configuration Options");
@@ -90,6 +102,10 @@ public:
             po::notify(vm);
             if (vm.count("help")) {
                 std::cout << options << std::endl;
+                exit(0);
+            }
+            if (vm.count("version")) {
+                version();
                 exit(0);
             }
             if (vm.count("daemonize")) {
@@ -120,6 +136,8 @@ public:
     string hostname;
     string identifier;
     string subidentifier;
+
+    string pidfile;
 
     string outputHDF5FilenamePrefix;
 
@@ -172,11 +190,100 @@ unsigned int set_process_record(ProcRecordType recordType, void *data, int i, Pr
     return 0;
 }
 
+static void daemonize() {
+	pid_t pid, sid;
+
+	if (getppid() == 1) {
+		return; // already daemonized
+	}
+	pid = fork();
+	if (pid < 0) {
+		exit(1); // failed to fork
+	}
+	if (pid > 0) {
+		exit(0); // this is the parent, so exit
+	}
+	umask(0);
+
+	sid = setsid();
+	if (sid < 0) {
+		exit(1);
+	}
+
+	if ((chdir("/")) < 0) {
+		exit(1);
+	}
+
+	freopen("/dev/null", "r", stdin);
+	freopen("/dev/null", "w", stdout);
+	freopen("/dev/null", "w", stderr);
+}
+
+/* pidfile start-up routine.
+   Should be called after daemonizing, but before any privilege reduction.
+
+   Will check if an existing pid file exists, if it does it will read that
+   pid file, check to see if that pid is still running.
+
+   If the pid isn't running, then the existing pidfile will be unlinked
+  
+   If the pid is running, then exit()
+
+   Finally, the results of getpid() will be written into the pidfile. If the
+   pid file fails to write, then exit()
+*/
+void pidfile(const string& pidfilename) {
+    if (pidfilename.length() == 0) return;
+
+    FILE *pidfile = NULL;
+    char buffer[BUFFER_SIZE];
+    pid_t my_pid = getpid();
+
+    /* try to open existing pidfile */
+    if ((pidfile = fopen(pidfilename.c_str(), "r")) != NULL) {
+
+        /* try to read the pid */
+        int readBytes = fread(buffer, sizeof(char), BUFFER_SIZE, pidfile);
+        fclose(pidfile);
+
+        if (readBytes > 0) {
+            pid_t pid = atoi(buffer);
+
+            if (pid != 0 && pid != my_pid) {
+                struct stat st_stat;
+                snprintf(buffer, BUFFER_SIZE, "/proc/%d/status", pid);
+                if (stat(buffer, &st_stat) == 0) {
+                    /* the process still exists! */
+                    fprintf(stderr, "Process %d is still running, exiting.\n", pid);
+                    exit(0);
+                } else {
+                    unlink(pidfilename.c_str());
+                }
+            }
+        }
+    }
+    if ((pidfile = fopen(pidfilename.c_str(), "w")) != NULL) {
+        fprintf(pidfile, "%d\n", my_pid);
+        fclose(pidfile);
+        return;
+    }
+    fprintf(stderr, "FAILED to write pidfile %s, exiting.", pidfilename.c_str());
+    exit(1);
+}
+
 int main(int argc, char **argv) {
     cleanUpExitFlag = 0;
     resetOutputFileFlag = 0;
 
     ProcReducerConfig config(argc, argv);
+
+	if (config.daemonize) {
+		daemonize();
+	}
+    if (config.pidfile.length() > 0) {
+        pidfile(config.pidfile);
+    }
+
     ProcAMQPIO *conn = new ProcAMQPIO(config.mqServer, config.mqPort, config.mqVHost, config.mqUser, config.mqPassword, config.mqExchangeName, config.mqFrameSize, FILE_MODE_READ);
     conn->set_context(config.hostname, config.identifier, config.subidentifier);
     ProcHDF5IO* outputFile = NULL;

@@ -77,6 +77,7 @@ public:
 #ifdef USE_HDF5
     std::string outputHDF5Filename;
 #endif
+    string pidfile;
 
 #ifdef USE_AMQP
     /* AMQP options */
@@ -121,6 +122,7 @@ public:
 
 		identifier = DEFAULT_IDENTIFIER;
 		subidentifier = DEFAULT_SUBIDENTIFIER;
+        pidfile = "";
 
         /* Setup Context-derived values */
         char buffer[BUFFER_SIZE];
@@ -153,6 +155,7 @@ public:
             {"identifier", required_argument, 0, 'I'},
             {"subidentifier", required_argument, 0, 'S'},
             {"outputtext", required_argument, 0, 'o'},
+            {"pid", required_argument, 0, 'q'},
 #ifdef USE_HDF5
             {"outputhdf5", required_argument, 0, 'O'},
 #endif
@@ -169,7 +172,7 @@ public:
             { 0, 0, 0, 0},
         };
         int c;
-        string getopt_str = "hVvdf:i:F:p:W:g:G:I:S:o:D:";
+        string getopt_str = "hVvdf:i:F:p:W:g:G:I:S:o:q:D:";
 #ifdef USE_AMQP
         getopt_str += "H:P:E:Q:U:Y:R:";
 #endif
@@ -290,6 +293,9 @@ public:
                     outputHDF5Filename = string(optarg);
                     break;
 #endif                   
+                case 'q':
+                    pidfile = string(optarg);
+                    break;
                 case 'D':
                     debug = atoi(optarg);
                     if (debug < 0) {
@@ -390,6 +396,7 @@ public:
 #ifdef USE_HDF5
         printf("  -O [ --outputhdf5 ] string              filename for HDF5 output (optional)\n");
 #endif
+        printf("  -q [ --pid ] string                     filename for optional pid file\n");
         printf("  -D [ --debug ] integer (=0)             debugging level\n");
         printf("\n");
 #ifdef USE_AMQP

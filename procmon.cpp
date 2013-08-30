@@ -51,7 +51,6 @@ inline void fatal_error(const char *error, int err) {
     exit(1);
 }
 
-
 /* global variables - these are global for signal handling, and inter-thread communication */
 int cleanUpFlag = 0;
 int search_procfs_count = 0;
@@ -65,6 +64,7 @@ void sig_handler(int signum) {
 	 */
 	cleanUpFlag = 1;
 }
+
 
 int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
 	char *ptr = NULL;
@@ -879,6 +879,59 @@ static void *reader_thread_start(void *) {
 }
 #endif
 
+/* pidfile start-up routine.
+   Should be called after daemonizing, but before any privilege reduction.
+
+   Will check if an existing pid file exists, if it does it will read that
+   pid file, check to see if that pid is still running.
+
+   If the pid isn't running, then the existing pidfile will be unlinked
+  
+   If the pid is running, then exit()
+
+   Finally, the results of getpid() will be written into the pidfile. If the
+   pid file fails to write, then exit()
+*/
+void pidfile(const string& pidfilename, uid_t owner, gid_t group) {
+    if (pidfilename.length() == 0) return;
+
+    FILE *pidfile = NULL;
+    char buffer[BUFFER_SIZE];
+    pid_t my_pid = getpid();
+
+    /* try to open existing pidfile */
+    if ((pidfile = fopen(pidfilename.c_str(), "r")) != NULL) {
+
+        /* try to read the pid */
+        int readBytes = fread(buffer, sizeof(char), BUFFER_SIZE, pidfile);
+        fclose(pidfile);
+
+        if (readBytes > 0) {
+            pid_t pid = atoi(buffer);
+
+            if (pid != 0 && pid != my_pid) {
+                struct stat st_stat;
+                snprintf(buffer, BUFFER_SIZE, "/proc/%d/status", pid);
+                if (stat(buffer, &st_stat) == 0) {
+                    /* the process still exists! */
+                    fprintf(stderr, "Process %d is still running, exiting.\n", pid);
+                    exit(0);
+                } else {
+                    unlink(pidfilename.c_str());
+                }
+            }
+        }
+    }
+    if ((pidfile = fopen(pidfilename.c_str(), "w")) != NULL) {
+        fprintf(pidfile, "%d\n", my_pid);
+        fclose(pidfile);
+        chown(pidfilename.c_str(), owner, group);
+        return;
+    }
+    fprintf(stderr, "FAILED to write pidfile %s, exiting.", pidfilename.c_str());
+    exit(1);
+}
+
 int main(int argc, char** argv) {
 	int retCode = 0;
 	int i = 0;
@@ -912,6 +965,9 @@ int main(int argc, char** argv) {
 	if (config->daemonize) {
 		daemonize();
 	}
+    if (config->pidfile.length() > 0) {
+        pidfile(config->pidfile);
+    }
 
 #ifdef SECURED
     pthread_t reader_thread;
@@ -1053,6 +1109,9 @@ int main(int argc, char** argv) {
 	}
     for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {
         delete *ptr;
+    }
+    if (config->pidfile.length() > 0) {
+        unlink(config->pidfile.c_str());
     }
     delete config;
     if (all_data.procStat != NULL) free(all_data.procStat);
