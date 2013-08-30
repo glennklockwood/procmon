@@ -41,7 +41,7 @@ Maintainer: Doug Jacobsen <DMJacobsen@lbl.gov>, Matt Dunford <mdunford@lbl.gov>
 
 Package: procmon
 Architecture: amd64
-Depends: \${shlibs:Depends}
+Depends: bash
 Description:
  $DESC
  .

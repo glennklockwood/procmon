@@ -1,9 +1,14 @@
 #!/bin/bash
 
 HN=$(hostname | sed -e 's/\..*//')
+if [ -z "$HN" ]; then
+	echo PROBLEM: bad hostname, $HN
+	exit
+fi
 
 ID=
 SUBID=
+PROCUSER=procmon
 
 case $HN in
 	gpweb*)
@@ -21,42 +26,42 @@ case $HN in
 esac
 
 case $HN in
-    gpint01)
-        SUBID='RND'
-    ;;
-    gpint12)
-        SUBID='RND'
-    ;;
-    gpint0[23])
-        SUBID='VISTA'
-    ;;
-    gpint0[45])
-        SUBID='IMG'
-    ;;
-    gpint0[6])
-        SUBID='GBP'
-    ;;
-    gpint0[789])
-        SUBID='PLANT'
-    ;;
-    gpint1[01])
-        SUBID='PLANT'
-    ;;
-    gpint13)
-        SUBID='FUNGAL'
-    ;;
-    gpint1[456789])
-        SUBID='GENERAL'
-    ;;
-    gpint2[012])
-        SUBID='GENERAL'
-    ;;
-    gpint2[367])
-        SUBID='SDM'
-    ;;
-    gpint2[45])
-        SUBID='RQC'
-    ;;
+	gpint01)
+		SUBID='RND'
+	;;
+	gpint12)
+		SUBID='RND'
+	;;
+	gpint0[23])
+		SUBID='VISTA'
+	;;
+	gpint0[45])
+		SUBID='IMG'
+	;;
+	gpint0[6])
+		SUBID='GBP'
+	;;
+	gpint0[789])
+		SUBID='PLANT'
+	;;
+	gpint1[01])
+		SUBID='PLANT'
+	;;
+	gpint13)
+		SUBID='FUNGAL'
+	;;
+	gpint1[456789])
+		SUBID='GENERAL'
+	;;
+	gpint2[012])
+		SUBID='GENERAL'
+	;;
+	gpint2[367])
+		SUBID='SDM'
+	;;
+	gpint2[45])
+		SUBID='RQC'
+	;;
 	gpweb0[12])
 		SUBID='VISTA'
 	;;
@@ -84,14 +89,11 @@ case $HN in
 esac
 
 if [ -z "$ID" ] || [ -z "$SUBID" ]; then
-		echo PROBLEM: bad hostname, $HN
-		exit
-fi
-
-pgrep -u root /usr/sbin/procmon
-if [ $? = 0 ]; then
-	echo procmon already running, bailing
+	echo PROBLEM: found no ID or SUBID
 	exit
 fi
 
-/usr/sbin/procmon -d -p 1 -u procmon -f 30 -F 30 -W 10 -I $ID -S $SUBID
+pgrep -u $PROCUSER -f /usr/sbin/procmon >/dev/null
+[ $? = 0 ] && exit
+
+/usr/sbin/procmon -d -p 1 -u $PROCUSER -f 30 -F 30 -I $ID -S $SUBID
