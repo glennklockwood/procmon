@@ -752,7 +752,7 @@ static void daemonize() {
 	if (pid > 0) {
 		exit(0); // this is the parent, so exit
 	}
-	umask(0);
+	umask(077);
 
 	sid = setsid();
 	if (sid < 0) {
