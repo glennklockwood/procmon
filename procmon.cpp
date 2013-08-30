@@ -802,28 +802,21 @@ void display_perms_ownership(const char *thread_id) {
     }
 }
 
-void get_uidgid(uid_t *uid, gid_t *gid) {
-    *uid = getuid();
-    *gid = getgid();
-    if (config->target_uid > 0) {
-        *uid = config->target_uid;
-    }
-    if (config->target_gid <= 0) {
-        struct passwd *tgt_user = getpwuid(*uid);
-        if (tgt_user != NULL) {
-            *gid = tgt_user->pw_gid;
-        }
-    } else {
-        *gid = config->target_gid;
-    }
-}
-
-
 bool perform_setuid(const char *id) {
     bool dropped_privs = false;
-    uid_t tgt_uid;
-    gid_t tgt_gid;
-    get_uidgid(&tgt_uid, &tgt_gid);
+    uid_t tgt_uid = getuid();
+    gid_t tgt_gid = getgid();
+    if (config->target_uid > 0) {
+        tgt_uid = config->target_uid;
+    }
+    if (config->target_gid <= 0) {
+        struct passwd *tgt_user = getpwuid(tgt_uid);
+        if (tgt_user != NULL) {
+            tgt_gid = tgt_user->pw_gid;
+        }
+    } else {
+        tgt_gid = config->target_gid;
+    }
 
     if (setgroups(1, &tgt_gid) != 0) {
         fprintf(stderr, "[%s] WARNING: Failed to trim groups.  Will continue.\n", id);
