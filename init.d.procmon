@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# /etc/rc.d/init.d/procmon
+#
+# Process Monitor
+#        
+# chkconfig: 2345 99 1
+# description: Process Monitor
+# processname: procmon
+# pidfile: /var/run/procmon.pid
+
+### BEGIN INIT INFO
+# Provides: procmon
+# Required-Start: $local_fs
+# Required-Stop: $local_fs
+# Should-Start: $network
+# Should-Stop: $network
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: Start procmon
+# Description: Process monitor
+### END INIT INFO
+
+# Source function library.
+. /etc/init.d/functions
+
+prog="procmon"
+
+if [ -f "/etc/sysconfig/$prog" ]; then
+    . "/etc/sysconfig/$prog"
+fi
+
+PIDFILE="/var/run/${prog}.pid"
+RETVAL=0
+RUNPROCMON="${RUNPROCMON_PREFIX:-/usr/bin}/run${prog}"
+
+start() {
+    echo -n "Starting ${prog}: "
+    daemon --pidfile "${PIDFILE}" "${RUNPROCMON}" --pid "${PIDFILE}"
+    RETVAL=$?
+    echo
+    touch /var/lock/subsys/${prog}
+    return $RETVAL
+}
+
+stop() {
+    echo -n "Shutting down ${prog}: "
+    killproc -p $PIDFILE
+    RETVAL=$?
+    echo
+    rm -f /var/lock/subsys/${prog}
+    return $RETVAL
+}
+
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status -p $PIDFILE $prog
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    reload)
+        echo "$1" is not implemented.
+        RETVAL=1
+        ;;
+    force-reload)
+        echo "$1" is not implemented.
+        RETVAL=1
+        ;;
+    condrestart)
+        [ -f /var/lock/subsys/${prog} ] && restart || :
+        ;;
+    *)
+        echo "Usage: $(basename $0) {start|stop|status|reload|force-reload|restart}"
+        RETVAL=1
+        ;;
+esac
+
+exit $RETVAL
+
