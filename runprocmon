@@ -9,6 +9,7 @@ fi
 ID=
 SUBID=
 PROCUSER=procmon
+PIDFILE=/var/run/procmon.pid
 
 case $HN in
 	gpweb*)
@@ -96,4 +97,5 @@ fi
 pgrep -u $PROCUSER -f /usr/sbin/procmon >/dev/null
 [ $? = 0 ] && exit
 
-/usr/sbin/procmon -d -p 1 -u $PROCUSER -f 30 -F 30 -I $ID -S $SUBID
+/usr/sbin/procmon -d -p 1 -u $PROCUSER -W 10 -f 30 -F 30 \
+	-I $ID -S $SUBID --pid $PIDFILE
