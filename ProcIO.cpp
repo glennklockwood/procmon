@@ -520,6 +520,7 @@ bool ProcAMQPIO::_send_message(const char *tag, amqp_bytes_t& message) {
         if (istatus != 0) {
 		    fprintf(stderr, "WARNING: error on message publication: %d\n", istatus);
         }
+        if (message_sent) break;
 	}
     return message_sent;
 }
