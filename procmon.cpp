@@ -802,21 +802,29 @@ void display_perms_ownership(const char *thread_id) {
     }
 }
 
-bool perform_setuid(const char *id) {
-    bool dropped_privs = false;
-    uid_t tgt_uid = getuid();
-    gid_t tgt_gid = getgid();
+void get_uidgid(uid_t *uid, gid_t *gid) {
+    *uid = getuid();
+    *gid = getgid();
     if (config->target_uid > 0) {
-        tgt_uid = config->target_uid;
+        *uid = config->target_uid;
     }
     if (config->target_gid <= 0) {
-        struct passwd *tgt_user = getpwuid(tgt_uid);
+        struct passwd *tgt_user = getpwuid(*uid);
         if (tgt_user != NULL) {
-            tgt_gid = tgt_user->pw_gid;
+            *gid = tgt_user->pw_gid;
         }
     } else {
-        tgt_gid = config->target_gid;
+        *gid = config->target_gid;
     }
+}
+
+
+bool perform_setuid(const char *id) {
+    bool dropped_privs = false;
+    uid_t tgt_uid;
+    gid_t tgt_gid;
+    get_uidgid(&tgt_uid, &tgt_gid);
+
     if (setgroups(1, &tgt_gid) != 0) {
         fprintf(stderr, "[%s] WARNING: Failed to trim groups.  Will continue.\n", id);
     }
@@ -892,7 +900,7 @@ static void *reader_thread_start(void *) {
    Finally, the results of getpid() will be written into the pidfile. If the
    pid file fails to write, then exit()
 */
-void pidfile(const string& pidfilename, uid_t owner, gid_t group) {
+void pidfile(const string& pidfilename) {
     if (pidfilename.length() == 0) return;
 
     FILE *pidfile = NULL;
@@ -925,7 +933,6 @@ void pidfile(const string& pidfilename, uid_t owner, gid_t group) {
     if ((pidfile = fopen(pidfilename.c_str(), "w")) != NULL) {
         fprintf(pidfile, "%d\n", my_pid);
         fclose(pidfile);
-        chown(pidfilename.c_str(), owner, group);
         return;
     }
     fprintf(stderr, "FAILED to write pidfile %s, exiting.", pidfilename.c_str());
