@@ -104,6 +104,7 @@ bool ProcAMQPIO::_amqp_close(bool throw_errors) {
 		amqp_destroy_connection(conn);
         connected = false;
 	}
+    return !connected;
 }
 
 bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
@@ -495,7 +496,6 @@ unsigned int ProcAMQPIO::write_procstat(procstat* start_ptr, int count) {
 
 bool ProcAMQPIO::_send_message(const char *tag, amqp_bytes_t& message) {
 	char routingKey[512];
-    int istatus = 0;
     bool message_sent = false;
 	snprintf(routingKey, 512, "%s.%s.%s.%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str(), tag);
     routingKey[511] = 0;
@@ -767,7 +767,6 @@ unsigned int ProcHDF5IO::read_procfd(procfd* procFD, unsigned int id) {
 }
 
 bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
-    herr_t status;
 	size_t endPos = _hostname.find('.');
 	endPos = endPos == string::npos ? _hostname.size() : endPos;
 	string t_hostname(_hostname, 0, endPos);
@@ -967,7 +966,7 @@ unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, voi
     hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
     herr_t status = 0;
 
-    int rank = H5Sget_simple_extent_ndims(dataspace);
+    //int rank = H5Sget_simple_extent_ndims(dataspace);
     status = H5Sget_simple_extent_dims(dataspace, &nRecords, NULL);
     if (remoteStart < nRecords) {
         targetRecords = count < (nRecords - remoteStart) ? count : (nRecords - remoteStart);
@@ -984,9 +983,7 @@ unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, voi
 }
 
 unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, int count, int chunkSize) {
-    hsize_t chunk_dims = chunkSize;
     hsize_t rank = 1;
-	hsize_t sizeRecords = 1;
     hsize_t maxRecords = 0;
 	hsize_t startRecord = 0;
     hsize_t targetRecords = 0;
@@ -1308,7 +1305,7 @@ unsigned int ProcTextIO::write_procfd(procfd* start_ptr, int cnt) {
         procfd* procFD = &(start_ptr[i]);
         nBytes += fprintf(filePtr, "procfd,%s,%s,%s", hostname.c_str(), identifier.c_str(), subidentifier.c_str());
         nBytes += fprintf(filePtr, ",%d,%d,%lu,%lu,%lu,%lu",procFD->pid,procFD->ppid,procFD->recTime,procFD->recTimeUSec,procFD->startTime,procFD->startTimeUSec);
-        nBytes += fprintf(filePtr, ",%d,%s", strlen(procFD->path), procFD->path);
+        nBytes += fprintf(filePtr, ",%lu,%s", strlen(procFD->path), procFD->path);
         nBytes += fprintf(filePtr, ",%d,%u\n", procFD->fd, procFD->mode);
     }
     return nBytes;

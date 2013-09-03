@@ -60,7 +60,7 @@ using namespace std;
 class ProcIO {
 public:
 	ProcIO();
-	~ProcIO();
+	virtual ~ProcIO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
