@@ -1062,6 +1062,7 @@ int main(int argc, char** argv) {
     if (all_data.procStat != NULL) free(all_data.procStat);
     if (all_data.procData != NULL) free(all_data.procData);
     if (all_data.procFD != NULL) free(all_data.procFD);
+    if (all_data.pids != NULL) free(all_data.pids);
 #ifdef SECURED
     pthread_mutex_destroy(&token_lock);
     pthread_barrier_destroy(&rbarrier);
