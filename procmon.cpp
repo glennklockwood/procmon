@@ -34,12 +34,15 @@
 #include "procmon.hh"
 
 struct all_data_t {
+    int *pids;
     procstat *procStat;
     procdata *procData;
     procfd *procFD;
+    int n_pids;
     int n_procStat;
     int n_procData;
     int n_procFD;
+    int capacity_pids;
     int capacity_procStat;
     int capacity_procData;
     int capacity_procFD;
@@ -159,7 +162,6 @@ int parseProcIO(int pid, procdata* procData, procstat* statData) {
     char *sptr = NULL;
     char *eptr = NULL;
 	char* label = NULL;
-	int idx = 0;
 	int rbytes = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
     char filename[BUFFER_SIZE];
@@ -224,8 +226,6 @@ time_t getBootTime() {
     char *sptr = NULL;
     char *eptr = NULL;
 	char* label;
-	int idx = 0;
-	size_t rbytes = 0;
 	char lbuffer[LBUFFER_SIZE];
 	time_t timestamp;
 	int stage = 0;
@@ -392,7 +392,6 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE];
 	char* label;
-	int idx = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
 	int nextStage = 0;
     int retVal = 0;
@@ -473,31 +472,17 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
 int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pageSize, time_t boottime) {
 	DIR* procDir;
 	struct dirent* dptr;
-	char timebuffer[BUFFER_SIZE];
 	char buffer[BUFFER_SIZE];
-	char lbuffer[LBUFFER_SIZE];
 	FILE* fp;
 	int tgt_pid;
-	size_t rbytes;
-	int *pids = (int*) malloc(sizeof(int)*8192);
-	int allocPids = 8192;
 	int npids = 0;
 	int ntargets = 0;
 	int idx = 0;
 	int nchange = 0;
 	int nNewTargets = ntargets;
 	int nstart = 0;
-	procstat* procStats;
 	struct timeval before;
-	struct timeval after;
-	struct tm datetime;
-	double timeDelta;
 	int foundParent;
-
-	if (pids == NULL) {
-		fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", allocPids, sizeof(int)*allocPids);
-		return -1;
-	}
 
 	if (gettimeofday(&before, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
@@ -510,32 +495,27 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	}
 
 	while( (dptr = readdir(procDir)) != NULL) {
-		procstat statData;
 		tgt_pid = atoi(dptr->d_name);
 		if (tgt_pid <= 0) {
 			continue;
 		}
-		while (npids > allocPids) {
-			int talloc = allocPids*2;
-			pids = (int*) realloc(pids, sizeof(int)*talloc);
-			if (pids == NULL) {
+		if (npids > all_data.capacity_pids || all_data.pids == NULL) {
+			int talloc = npids > 512 ? npids*2 : 512;
+			all_data.pids = (int*) realloc(all_data.pids, sizeof(int)*talloc);
+			if (all_data.pids == NULL) {
 				fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", talloc, sizeof(int)*talloc);
 				return -1;
 			}
-			allocPids = talloc;
+			all_data.capacity_pids = talloc;
 		}
-		pids[npids++] = tgt_pid;
+		all_data.pids[npids++] = tgt_pid;
 	}
 	closedir(procDir);
 
-	procStats = (procstat*) malloc(sizeof(procstat) * npids);
+    procstat procStats[npids];
 	memset(procStats, 0, sizeof(procstat)*npids);
-	if (procStats == NULL) {
-		fprintf(stderr, "FAILED to allocate memory for proc stat data for %d pids (%lu bytes)\n", npids, sizeof(procstat)*npids);
-		return -1;
-	}
 	for (idx = 0; idx < npids; idx++) {
-		tgt_pid = pids[idx];	
+		tgt_pid = all_data.pids[idx];	
 		procStats[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procStats[idx]), NULL, 0);
 	}
 
@@ -546,14 +526,14 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	 * state field.
 	 * store interesting pids in the pids array, and their procstat indices in the
 	 * indices array */
-	int indices[allocPids];
-	pids[0] = ppid;
+	int indices[npids];
+	all_data.pids[0] = ppid;
 	foundParent = 0;
     ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
 		if (procStats[idx].pid == ppid || procStats[idx].state > 0) {
 			procStats[idx].state = 1;
-			pids[ntargets] = procStats[idx].pid;
+			all_data.pids[ntargets] = procStats[idx].pid;
 			indices[ntargets++] = idx;
 		}
 		if (procStats[idx].pid == ppid) {
@@ -575,8 +555,8 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		nNewTargets = ntargets;
 		for (idx = 0; idx < npids; idx++) {
 			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
-				if (procStats[idx].ppid == pids[innerIdx] && procStats[idx].state == 0) {
-					pids[nNewTargets] = procStats[idx].pid;
+				if (procStats[idx].ppid == all_data.pids[innerIdx] && procStats[idx].state == 0) {
+					all_data.pids[nNewTargets] = procStats[idx].pid;
 					procStats[idx].state = 1;
 					indices[nNewTargets] = idx;
 					nNewTargets++;
@@ -588,62 +568,30 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		ntargets = nNewTargets;
 	} while (nchange > 0);
 
-	/* fill in missing data for all processes of interest */
-	if (gettimeofday(&after, NULL) != 0) {
-		fprintf(stderr, "FAILED to get time (before)\n");
-		return -4;
-	}
-
-	timeDelta = (after.tv_sec - before.tv_sec) + (double)((after.tv_usec - before.tv_usec))*1e-06;
-	localtime_r(&before.tv_sec, &datetime);
-	strftime(buffer, BUFFER_SIZE, "%Y-%m-%d %H:%M:%S", &datetime);
-	snprintf(timebuffer, BUFFER_SIZE, "%s.%03u,%f", buffer, before.tv_usec/1000, timeDelta);
-
     if (ntargets > 0) {
-        if (all_data.procStat == NULL) {
-            all_data.procStat = (procstat *) malloc(sizeof(procstat) * ntargets * 2);
-            all_data.capacity_procStat = ntargets * 2;
-            if (all_data.procStat == NULL) {
-                fprintf(stderr, "Failed to allocate memory; exiting...\n");
-                exit(1);
-            }
-        } else if (ntargets < all_data.capacity_procStat) {
+        if (ntargets > all_data.capacity_procStat) {
             all_data.procStat = (procstat *) realloc(all_data.procStat, sizeof(procstat) * ntargets * 2);
-            all_data.capacity_procStat = ntargets * 2;
             if (all_data.procStat == NULL) {
                 fprintf(stderr, "Failed to allocate memory; exiting...\n");
                 exit(1);
             }
+            all_data.capacity_procStat = ntargets * 2;
         }
-        if (all_data.procData == NULL) {
-            all_data.procData = (procdata *) malloc(sizeof(procdata) * ntargets * 2);
-            all_data.capacity_procData = ntargets * 2;
-            if (all_data.procData == NULL) {
-                fprintf(stderr, "Failed to allocate memory; exiting...\n");
-                exit(1);
-            }
-        } else if (ntargets < all_data.capacity_procData) {
+        if (ntargets > all_data.capacity_procData) {
             all_data.procData = (procdata *) realloc(all_data.procData, sizeof(procdata) * ntargets * 2);
-            all_data.capacity_procData = ntargets * 2;
             if (all_data.procData == NULL) {
                 fprintf(stderr, "Failed to allocate memory; exiting...\n");
                 exit(1);
             }
+            all_data.capacity_procData = ntargets * 2;
         }
-        if (all_data.procFD == NULL) {
-            all_data.procFD = (procfd *) malloc(sizeof(procfd) * ntargets * 2 * maxfd + 1);
-            all_data.capacity_procFD = ntargets * 2 * maxfd + 1;
-            if (all_data.procFD == NULL) {
-                fprintf(stderr, "Failed to allocate memory; exiting...\n");
-                exit(1);
-            }
-        } else if (ntargets < all_data.capacity_procFD) {
+        if (ntargets > all_data.capacity_procFD) {
             all_data.procFD = (procfd *) realloc(all_data.procFD, sizeof(procfd) * ntargets * 2 * maxfd + 1);
-            all_data.capacity_procFD = ntargets * 2 * maxfd + 1;
             if (all_data.procFD == NULL) {
                 fprintf(stderr, "Failed to allocate memory; exiting...\n");
                 exit(1);
             }
+            all_data.capacity_procFD = ntargets * 2 * maxfd + 1;
         }
 
         bzero(all_data.procStat, sizeof(procstat) * ntargets);
@@ -651,17 +599,23 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
     }
     int fdidx = 0;
 
+    /* copy data from procStats to all_data.procStat, but in order by idx */
+    for (idx = 0; idx < ntargets; idx++) {
+        memcpy(&(all_data.procStat[idx]), &(procStats[indices[idx]]), sizeof(procstat));
+    }
+
+
 	/* for each pid, capture:
 	 *   io data, stat values, exe, cwd
 	 */
 	for (idx = 0; idx < ntargets; idx++) {
 		ssize_t rbytes = 0;
-        double temp_time = 0;
-		procstat* statData = &(procStats[indices[idx]]);
+        tgt_pid = all_data.pids[idx];
+		procstat* statData = &(all_data.procStat[idx]);
         procdata* temp_procData = &(all_data.procData[idx]); 
 
 		/* read stat */
-		parseProcStat(pids[idx], statData, temp_procData, boottime, clockTicksPerSec);
+		parseProcStat(tgt_pid, statData, temp_procData, boottime, clockTicksPerSec);
 
         /* populate time records */
         temp_procData->recTime = before.tv_sec;
@@ -677,10 +631,10 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
         statData->recTimeUSec = before.tv_usec;
 		
 		/* read io */
-		parseProcIO(pids[idx], temp_procData, statData);
+		parseProcIO(tgt_pid, temp_procData, statData);
 
 		/* read statm */
-		parseProcStatM(pids[idx], temp_procData, statData);
+		parseProcStatM(tgt_pid, temp_procData, statData);
 
 		/* fix the units of each field */
 		statData->vmpeak *= 1024; // convert from kb to bytes
@@ -692,19 +646,19 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		statData->m_text *= pageSize;
 		statData->m_data *= pageSize;
 
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", pids[idx]);
+		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", tgt_pid);
 		if ((rbytes = readlink(buffer, temp_procData->exePath, BUFFER_SIZE)) <= 0) {
 			snprintf(temp_procData->exePath, BUFFER_SIZE, "Unknown");
 		} else {
 			temp_procData->exePath[rbytes] = 0;
 		}
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/cwd", pids[idx]);
+		snprintf(buffer, BUFFER_SIZE, "/proc/%d/cwd", tgt_pid);
 		if ((rbytes = readlink(buffer, temp_procData->cwdPath, BUFFER_SIZE)) <= 0) {
 			snprintf(temp_procData->cwdPath, BUFFER_SIZE, "Unknown");
 		} else {
 			temp_procData->cwdPath[rbytes] = 0;
 		}
-        snprintf(buffer, BUFFER_SIZE, "/proc/%d/cmdline", pids[idx]);
+        snprintf(buffer, BUFFER_SIZE, "/proc/%d/cmdline", tgt_pid);
         fp = fopen(buffer, "r");
         if (fp != NULL) {
             rbytes = fread(temp_procData->cmdArgs, sizeof(char), BUFFER_SIZE, fp);
@@ -722,9 +676,8 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
             temp_procData->cmdArgBytes = 0;
         }
         if (maxfd > 2) {
-            parse_fds(pids[idx], maxfd, all_data.procFD, &fdidx, statData);
+            parse_fds(tgt_pid, maxfd, all_data.procFD, &fdidx, statData);
         }
-        memcpy(&(all_data.procStat[idx]), statData, sizeof(procstat));
 	}
 
     /* save data in global space */
@@ -732,9 +685,6 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
     all_data.n_procData = ntargets;
     all_data.n_procFD = fdidx;
     search_procfs_count = ntargets;
-
-	free(pids);
-	free(procStats);
 
 	return ntargets;
 }
@@ -934,12 +884,7 @@ void pidfile(const string& pidfilename) {
 
 int main(int argc, char** argv) {
 	int retCode = 0;
-	int i = 0;
 	struct timeval startTime;
-	time_t boottime;
-    char outputFilename[BUFFER_SIZE];
-    char hostname[BUFFER_SIZE];
-    char identifier[BUFFER_SIZE];
     config = new ProcmonConfig(argc, argv);
     if (getuid() == 0) {
 #ifdef SECURED
@@ -1043,7 +988,6 @@ int main(int argc, char** argv) {
 
 	for ( ; ; ) {
 		struct timeval cycleTime;
-        int err = 0;
 		gettimeofday(&cycleTime, NULL);
         retCode = 0;
 
@@ -1054,6 +998,7 @@ int main(int argc, char** argv) {
         search_procfs_count = 0;
 
 #ifdef SECURED
+        int err = 0;
         if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Writer failed to unlock token.", err);
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Writer failed to lock token.", err);
