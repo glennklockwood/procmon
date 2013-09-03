@@ -232,7 +232,6 @@ unsigned int ProcessList::get_process_count() {
 }
 
 bool ProcessList::find_expired_processes(ProcessList *spare_deck) {
-    int nFound = 0;
     time_t currTime = time(NULL);
     for (auto& list: processLists) {
         ProcessRecord *ptr = list;
@@ -258,7 +257,6 @@ bool ProcessList::find_expired_processes(ProcessList *spare_deck) {
         keepRecords.reserve((processLists.size() - nExtraLists)*PROCESSES_PER_LIST);
 
         for (auto& record: unusedProcessQueue) {
-            bool found = false;
             for (int idx = 0; idx < nKeepLists; idx++) {
                 ProcessRecord *sPtr = processLists[idx];
                 ProcessRecord *ePtr = sPtr + PROCESSES_PER_LIST;
