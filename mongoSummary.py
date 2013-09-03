@@ -20,11 +20,23 @@ collection = db[collection_label]
 
 summary_labels = ['execProject', 'execUser', 'executables', 'projects',
     'scriptProject', 'scriptUser', 'scripts', 'users' ]
-
+summ_index = {
+    'executables' : ['exePath'],
+    'execUser' : ['username', 'exePath'],
+    'execProject' : ['project', 'exePath'],
+    'scripts' : ['scripts', 'exePath', 'execName'],
+    'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
+    'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
+    'projects' : ['project'],
+    'users' : ['username']
+}
 
 for summary_label in summary_labels:
     print summary_label
-    df = pandas.read_hdf(summary_file, summary_label).reset_index()
+    df = pandas.read_hdf(summary_file, summary_label)
+    if len(summ_index[summary_label]) > 1 and df.shape[0] > 0 and type(df.index) is not pandas.core.index.MultiIndex:
+            df.index = pandas.MultiIndex.from_tuples(df.index, names=summ_index[summary_label])
+    df = df.reset_index()
 
     d = [ 
         dict([
@@ -48,3 +60,9 @@ for summary_label in summary_labels:
     collcount = collection.find({'date':date, 'type':summary_label}).count()
     if collcount != len(d):
         print "WARNING: not all records inserted to database! (db: %d, h5: %d)" % (collcount, len(d))
+
+#users = db.firehose.distinct("username")
+#projects = db.firehose.distinct("project")
+#collection = db['summary']
+#collection.find_and_modify(query={"type":"users"}, update={"type":"users", "obj":users})
+#collection.find_and_modify(query={"type":"projects"}, update={"type":"projects", "obj":projects})
