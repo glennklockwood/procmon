@@ -380,6 +380,9 @@ def identify_users(processes):
     return user_hash
 
 def integrate_job_data(processes, qqacct_data):
+    if qqacct_data is None:
+        processes['project'] = 'None'
+        return processes
     qqacct_data.job = qqacct_data.job.astype('str')
     qqacct_data.task[qqacct_data.task == 0] = 1
     qqacct_data.task = qqacct_data.task.astype('str')
@@ -601,6 +604,8 @@ def main(args):
                 nLevel=0
                 if type(summary.index) is pandas.core.index.MultiIndex:
                     nLevel = range(len(summary.index.levels))
+                else:
+                    print "%s: got different type: %s" % (key, str(type(summary.index)))
                 summary = summary.groupby(level=nLevel).sum()
                 summary.to_hdf(summary_save_file,key)
 
