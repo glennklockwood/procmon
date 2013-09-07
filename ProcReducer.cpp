@@ -12,7 +12,7 @@
 #include <unistd.h>
 
 #include <boost/program_options.hpp>
-#define PROCREDUCER_VERSION 2.1
+#define PROCREDUCER_VERSION 2.2
 namespace po = boost::program_options;
 
 /* ProcReducer
@@ -110,6 +110,8 @@ public:
             }
             if (vm.count("daemonize")) {
                 daemonize = true;
+            } else {
+                daemonize = false;
             }
             if (vm.count("debug")) {
                 debug = true;
@@ -145,6 +147,7 @@ public:
     int maxProcessAge;
     int dataBlockSize;
     int statBlockSize;
+    int fdBlockSize;
 
 };
 
