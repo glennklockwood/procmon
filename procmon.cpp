@@ -585,7 +585,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
             }
             all_data.capacity_procData = ntargets * 2;
         }
-        if (ntargets > all_data.capacity_procFD) {
+        if (ntargets*maxfd > all_data.capacity_procFD) {
             all_data.procFD = (procfd *) realloc(all_data.procFD, sizeof(procfd) * ntargets * 2 * maxfd + 1);
             if (all_data.procFD == NULL) {
                 fprintf(stderr, "Failed to allocate memory; exiting...\n");
@@ -596,6 +596,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 
         bzero(all_data.procStat, sizeof(procstat) * ntargets);
         bzero(all_data.procData, sizeof(procdata) * ntargets);
+        bzero(all_data.procFD, sizeof(procfd) * ntargets * maxfd);
     }
     int fdidx = 0;
 
@@ -675,7 +676,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
             snprintf(temp_procData->cmdArgs, BUFFER_SIZE, "Unknown");
             temp_procData->cmdArgBytes = 0;
         }
-        if (maxfd > 2) {
+        if (maxfd > 0) {
             parse_fds(tgt_pid, maxfd, all_data.procFD, &fdidx, statData);
         }
 	}
