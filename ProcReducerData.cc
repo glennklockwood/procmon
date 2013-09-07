@@ -9,6 +9,41 @@ ProcessRecord::ProcessRecord() {
     expire();
 }
 
+int procdatabad(const procdata *a) {
+    if (a->pid <= 0 || a->pid > 1000000) return 1;
+    if (a->ppid < 0 || a->ppid > 1000000) return 2;
+    if (a->startTime < 1347019475 || a->startTime > time(NULL)) return 3;
+    if (a->recTime < 1347019475 || a->recTime > time(NULL)) return 4;
+    size_t len = strlen(a->exePath);
+    if (len >= BUFFER_SIZE) return 5;
+    for (int i = 0; i < len; i++) {
+        if (a->exePath[i] > 127) return 6;
+    }
+    return 0;
+}
+
+int procstatbad(const procstat *a) {
+    if (a->pid <= 0 || a->pid > 1000000) return 1;
+    if (a->ppid < 0 || a->ppid > 1000000) return 2;
+    if (a->startTime < 1347019475 || a->startTime > time(NULL)) return 3;
+    if (a->recTime < 1347019475 || a->recTime > time(NULL)) return 4;
+    return 0;
+}
+
+int procfdbad(const procfd *a) {
+    if (a->pid <= 0 || a->pid > 1000000) return 1;
+    if (a->ppid < 0 || a->ppid > 1000000) return 2;
+    if (a->startTime < 1347019475 || a->startTime > time(NULL)) return 3;
+    if (a->recTime < 1347019475 || a->recTime > time(NULL)) return 4;
+    size_t len = strlen(a->path);
+    if (len >= BUFFER_SIZE) return 5;
+    for (int i = 0; i < len; i++) {
+        if (a->path[i] > 127) return 6;
+    }
+    if (a->fd > 500) return 7;
+    return 0;
+}
+
 int procdatacmp(const procdata& a, const procdata& b) {
 	if (a.pid != b.pid) return 1;
 	if (a.ppid != b.ppid) return 2;
@@ -266,16 +301,13 @@ bool ProcessList::find_expired_processes(ProcessList *spare_deck) {
             }
         }
         // dump everything in the unusedProcessQueue, and re-populate with keepRecords
-        cerr << "Before Clear upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; keepRec: " << keepRecords.size() << endl;
         unusedProcessQueue.clear();
         for (auto& record: keepRecords) {
             unusedProcessQueue.push_back(record);
         }
-        cerr << "After Clear upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; keepRec: " << keepRecords.size() << endl;
 
         // copy remaining records in the about-to-be-removed lists to empty records
         while (nExtraLists > 0) {
-            cout << "b: upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; nLists: " << processLists.size() << endl;
             ProcessRecord *plist = processLists.back();
             ProcessRecord *ptr = plist;
 			processLists.pop_back();
@@ -297,7 +329,6 @@ bool ProcessList::find_expired_processes(ProcessList *spare_deck) {
             spare_deck->processLists.push_back(plist);
             nExtraLists--;
         }
-        cout << "a: upQ: " << unusedProcessQueue.size() << "; nExtra: " << nExtraLists << "; nLists: " << processLists.size() << "; spare: " << spare_deck->processLists.size()  << endl;
     }
     return unusedProcessQueue.size() > 0;
 }

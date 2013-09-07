@@ -10,6 +10,14 @@
 
 using namespace std;
 
+int procstatbad(const procstat *a);
+int procdatabad(const procdata *a);
+int procfdbad(const procfd *a);
+
+int procstatcmp(const procstat& a, const procstat& b);
+int procdatacmp(const procdata& a, const procdata& b);
+int procfdcmp(const procfd& a, const procfd& b);
+
 typedef struct _SingleProcessRecord {
     bool statSet;
     bool dataSet;
