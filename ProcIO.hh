@@ -18,6 +18,7 @@
 #include <exception>
 #include <string>
 #include <map>
+#include <vector>
 
 #include "config.h"
 
@@ -52,7 +53,8 @@ typedef enum _ProcRecordType {
     TYPE_PROCDATA = 0,
     TYPE_PROCSTAT = 1,
     TYPE_PROCFD = 2,
-    TYPE_INVALID = 3,
+    TYPE_PROCOBS = 3,
+    TYPE_INVALID = 4,
 } ProcRecordType;
 
 using namespace std;
@@ -99,41 +101,49 @@ class hdf5Ref {
 	friend class ProcHDF5IO;
 
 public:
-	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize);
+	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obBlockSize);
 	~hdf5Ref();
 
 private:
-	unsigned int open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute);
+	unsigned int open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute, unsigned int zip_level);
 	hid_t group;
 	hid_t procstatDS;
 	hid_t procdataDS;
     hid_t procfdDS;
+    hid_t procobsDS;
 	hid_t procstatSizeID;
 	hid_t procdataSizeID;
     hid_t procfdSizeID;
+    hid_t procobsSizeID;
 	unsigned int procstatSize;
 	unsigned int procdataSize;
     unsigned int procfdSize;
+    unsigned int procobsSize;
 	time_t lastUpdate;
 };
 
 class ProcHDF5IO : public ProcIO {
 public:
-    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE, unsigned int fdBlockSize=DEFAULT_FD_BLOCK_SIZE);
+    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE, unsigned int fdBlockSize=DEFAULT_FD_BLOCK_SIZE, unsigned int obsBlockSize=DEFAULT_OBS_BLOCK_SIZE);
     ~ProcHDF5IO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, unsigned int start_id, int count);
+    virtual unsigned int write_procobs(procobs* start_ptr, unsigned int start_id, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
     unsigned int read_procfd(procfd* procFD, unsigned int id);
+    unsigned int read_procobs(procobs* procObs, unsigned int id);
     unsigned int read_procdata(procdata* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procstat(procstat* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procfd(procfd* start_ptr, unsigned int start_id, unsigned int count);
+    unsigned int read_procobs(procobs* start_ptr, unsigned int start_id, unsigned int count);
 	unsigned int get_nprocdata();
 	unsigned int get_nprocstat();
 	unsigned int get_nprocfd();
+	unsigned int get_nprocobs();
+    bool get_hosts(vector<string>& hosts);
 	void flush();
 	void trim_segments(time_t cutoff);
 private:
@@ -156,10 +166,12 @@ private:
     hid_t type_procdata;
     hid_t type_procstat;
     hid_t type_procfd;
+    hid_t type_procobs;
 
 	unsigned int dataBlockSize;
 	unsigned int statBlockSize;
 	unsigned int fdBlockSize;
+	unsigned int obsBlockSize;
 };
 #endif
 
@@ -172,6 +184,7 @@ public:
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, int count);
+    bool set_queue_name(const string& queue_name);
     ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec);
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
@@ -205,6 +218,7 @@ private:
 	amqp_socket_t* socket;
 	amqp_rpc_reply_t status;
 	bool queueConnected;
+    string queue_name;
 
 	string frameHostname;
 	string frameIdentifier;

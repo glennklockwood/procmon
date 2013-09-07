@@ -5,6 +5,8 @@
 #include <string.h>
 #include <strings.h>
 #include <iostream>
+#include <vector>
+#include <string>
 
 using namespace std;
 
@@ -226,16 +228,14 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
                     recType = TYPE_PROCFD;
                 }
                 size_t alloc_size = (size_t) (required_size * 1.2);
-                if (*pool_size == 0) {
-                    *data = malloc(alloc_size);
-                    *pool_size = alloc_size;
-                } else if (*pool_size < required_size) {
+                if (*data == NULL || *pool_size < required_size) {
                     *data = realloc(*data, alloc_size);
                     *pool_size = alloc_size;
                 }
 				if (*data == NULL) {
 					throw ProcIOException("failed to allocate memory for " + to_string(nRecords) + " " + frameMessageType + " records");
 				}
+                bzero(*data, required_size);
 				if (recType == TYPE_PROCSTAT) {
 					_read_procstat((procstat*) *data, nRecords, sPtr, body_received - (sPtr - message_buffer));
 					*nRec = nRecords;
@@ -572,6 +572,16 @@ bool ProcAMQPIO::set_context(const string& _hostname, const string& _identifier,
 	return true;
 }
 
+bool ProcAMQPIO::set_queue_name(const string& _queue_name) {
+	if (mode == FILE_MODE_READ && !contextSet) {
+        queue_name = _queue_name;
+        cerr << "setting plannned queue name to " << queue_name << endl;
+        return true;
+    }
+    return false;
+}
+
+
 bool ProcAMQPIO::get_frame_context(string& _hostname, string& _identifier, string& _subidentifier) {
 	_hostname = frameHostname;
 	_identifier = frameIdentifier;
@@ -604,11 +614,17 @@ bool ProcAMQPIO::_set_frame_context(const string& routingKey) {
 }
 
 bool ProcAMQPIO::_amqp_bind_context() {
-	amqp_queue_declare_ok_t* queue_reply = amqp_queue_declare(conn, 1, amqp_empty_bytes, 0, 0, 0, 1, amqp_empty_table);
+    amqp_bytes_t queue_name_bytes = amqp_empty_bytes;
+    if (queue_name.length() > 0) {
+        queue_name_bytes = amqp_cstring_bytes(queue_name.c_str());
+        cerr << "picked up queue_name: " << queue_name << endl;
+    }
+	amqp_queue_declare_ok_t* queue_reply = amqp_queue_declare(conn, 1, queue_name_bytes, 0, 0, 0, 1, amqp_empty_table);
 	_amqp_eval_status(amqp_get_rpc_reply(conn));
 	if (amqpError) {
 		throw ProcIOException("Failed AMQP queue declare on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
 	}
+
 	amqp_bytes_t queue = amqp_bytes_malloc_dup(queue_reply->queue);
     if (queue.bytes == NULL) {
         throw ProcIOException("Failed AMQP queue declare: out of memory!");
@@ -631,17 +647,20 @@ bool ProcAMQPIO::_amqp_bind_context() {
 #endif
 
 #ifdef USE_HDF5
-hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize) {
+hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obsBlockSize) {
 	group = -1;
 	procstatDS = -1;
 	procdataDS = -1;
     procfdDS = -1;
+    procobsDS = -1;
 	procstatSizeID = -1;
 	procdataSizeID = -1;
     procfdSizeID = -1;
+    procobsSizeID = -1;
 	procstatSize = 0;
 	procdataSize = 0;
     procfdSize = 0;
+    procobsSize = 0;
 
     if (H5Lexists(file, hostname.c_str(), H5P_DEFAULT) == 1) {
         group = H5Gopen2(file, hostname.c_str(), H5P_DEFAULT);
@@ -652,12 +671,21 @@ hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t typ
        	throw ProcIOException("Failed to access hostname group: " + hostname);
     }
 
-	procstatSize = open_dataset("procstat", type_procstat, statBlockSize, &procstatDS, &procstatSizeID);
-	procdataSize = open_dataset("procdata", type_procdata, dataBlockSize, &procdataDS, &procdataSizeID);
-    procfdSize = open_dataset("procfd", type_procfd, fdBlockSize, &procfdDS, &procfdSizeID);
+    if (H5Lexists(group, "procstat", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
+	    procstatSize = open_dataset("procstat", type_procstat, statBlockSize, &procstatDS, &procstatSizeID, 0);
+    }
+    if (H5Lexists(group, "procdata", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
+	    procdataSize = open_dataset("procdata", type_procdata, dataBlockSize, &procdataDS, &procdataSizeID, 0);
+    }
+    if (H5Lexists(group, "procfd", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
+        procfdSize = open_dataset("procfd", type_procfd, fdBlockSize, &procfdDS, &procfdSizeID, 9);
+    }
+    if (H5Lexists(group, "procobs", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
+        procobsSize = open_dataset("procobs", type_procobs, fdBlockSize, &procobsDS, &procobsSizeID, 9);
+    }
 }
 
-unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute) {
+unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute, unsigned int zip_level) {
 	unsigned int size = 0;
 
 	if (group < 0) {
@@ -678,6 +706,9 @@ unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize
     	hsize_t chunk_dims = chunkSize;
 
         param = H5Pcreate(H5P_DATASET_CREATE);
+        if (zip_level > 0) {
+            H5Pset_deflate(param, zip_level);
+        }
         H5Pset_chunk(param, rank, &chunk_dims);
         *dataset = H5Dcreate(group, dsName, type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
         H5Pclose(param);
@@ -700,6 +731,9 @@ hdf5Ref::~hdf5Ref() {
     if (procfdSizeID >= 0) {
         H5Aclose(procfdSizeID);
     }
+    if (procobsSizeID >= 0) {
+        H5Aclose(procobsSizeID);
+    }
 	if (procstatDS >= 0) {
 		H5Dclose(procstatDS);
 	}
@@ -709,6 +743,9 @@ hdf5Ref::~hdf5Ref() {
     if (procfdDS >= 0) {
         H5Dclose(procfdDS);
     }
+    if (procobsDS >= 0) {
+        H5Dclose(procobsDS);
+    }
 	if (group >= 0) {
 		H5Gclose(group);
 	}
@@ -716,10 +753,10 @@ hdf5Ref::~hdf5Ref() {
 
 ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode, 
 	unsigned int _statBlockSize, unsigned int _dataBlockSize,
-    unsigned int _fdBlockSize): 
+    unsigned int _fdBlockSize, unsigned int _obsBlockSize): 
 	
 	filename(_filename),mode(_mode),statBlockSize(_statBlockSize),
-	dataBlockSize(_dataBlockSize),fdBlockSize(_fdBlockSize)
+	dataBlockSize(_dataBlockSize),fdBlockSize(_fdBlockSize),obsBlockSize(_obsBlockSize)
 {
 	file = -1;
 	strType_exeBuffer = -1;
@@ -728,6 +765,7 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
 	type_procdata = -1;
 	type_procstat = -1;
     type_procfd = -1;
+    type_procobs = -1;
 
 	if (mode == FILE_MODE_WRITE) {
     	file = H5Fopen(filename.c_str(), H5F_ACC_CREAT | H5F_ACC_RDWR, H5P_DEFAULT);
@@ -748,10 +786,11 @@ ProcHDF5IO::~ProcHDF5IO() {
     if (type_procdata > 0) status = H5Tclose(type_procdata);
     if (type_procstat > 0) status = H5Tclose(type_procstat);
     if (type_procfd > 0) status = H5Tclose(type_procfd);
+    if (type_procobs > 0) status = H5Tclose(type_procobs);
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
     if (file > 0) status = H5Fclose(file);
-    status = H5close();
+    //status = H5close();
 }
 
 unsigned int ProcHDF5IO::read_procdata(procdata* procData, unsigned int id) {
@@ -764,6 +803,10 @@ unsigned int ProcHDF5IO::read_procstat(procstat* procStat, unsigned int id) {
 
 unsigned int ProcHDF5IO::read_procfd(procfd* procFD, unsigned int id) {
     return read_procfd(procFD, id, 1);
+}
+
+unsigned int ProcHDF5IO::read_procobs(procobs* procObs, unsigned int id) {
+    return read_procobs(procObs, id, 1);
 }
 
 bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
@@ -784,7 +827,7 @@ bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier,
 	auto refIter = openRefs.find(key);
 	if (refIter == openRefs.end()) {
 		/* need to create new hdf5Ref */
-		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, type_procfd, t_hostname, mode, statBlockSize, dataBlockSize, fdBlockSize);
+		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, type_procfd, type_procobs, t_hostname, mode, statBlockSize, dataBlockSize, fdBlockSize, obsBlockSize);
 		auto added = openRefs.insert({key,ref});
 		if (added.second) refIter = added.first;
 	}
@@ -892,7 +935,7 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_procstat, "m_data", HOFFSET(procstat, m_data), H5T_NATIVE_ULONG);
 
     type_procfd = H5Tcreate(H5T_COMPOUND, sizeof(procfd));
-    if (type_procdata < 0) throw ProcIOException("Failed to create type_procdata");
+    if (type_procfd < 0) throw ProcIOException("Failed to create type_procfd");
 	H5Tinsert(type_procfd, "identifier", HOFFSET(procfd, identifier), strType_idBuffer);
 	H5Tinsert(type_procfd, "subidentifier", HOFFSET(procfd, subidentifier), strType_idBuffer);
     H5Tinsert(type_procfd, "pid", HOFFSET(procfd, pid), H5T_NATIVE_UINT);
@@ -904,6 +947,16 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_procfd, "path", HOFFSET(procfd, path), strType_buffer);
     H5Tinsert(type_procfd, "fd", HOFFSET(procfd, fd), H5T_NATIVE_UINT);
     H5Tinsert(type_procfd, "mode", HOFFSET(procfd, mode), H5T_NATIVE_UINT);
+
+    type_procobs = H5Tcreate(H5T_COMPOUND, sizeof(procobs));
+    if (type_procobs < 0) throw ProcIOException("Failed to create type_procobs");
+	H5Tinsert(type_procobs, "identifier", HOFFSET(procobs, identifier), strType_idBuffer);
+	H5Tinsert(type_procobs, "subidentifier", HOFFSET(procobs, subidentifier), strType_idBuffer);
+    H5Tinsert(type_procobs, "pid", HOFFSET(procobs, pid), H5T_NATIVE_UINT);
+    H5Tinsert(type_procobs, "recTime", HOFFSET(procobs, recTime), H5T_NATIVE_ULONG);
+    H5Tinsert(type_procobs, "recTimeUSec", HOFFSET(procobs, recTimeUSec), H5T_NATIVE_ULONG);
+    H5Tinsert(type_procobs, "startTime", HOFFSET(procobs, startTime), H5T_NATIVE_ULONG);
+    H5Tinsert(type_procobs, "startTimeUSec", HOFFSET(procobs, startTimeUSec), H5T_NATIVE_ULONG);
 }
 
 unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int start_id, int count) {
@@ -930,6 +983,16 @@ unsigned int ProcHDF5IO::write_procfd(procfd* start_pointer, unsigned int start_
     return write_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count, fdBlockSize);
 }
 
+unsigned int ProcHDF5IO::write_procobs(procobs* start_pointer, unsigned int start_id, int count) {
+    /*  COMMENTING OUT BECAUSE THESE RECORDS WILL ALREADY HAVE IDENT AND SUBIDENT
+	for (int i = 0; i < count; i++) {
+		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	}
+    */
+    return write_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count, obsBlockSize);
+}
+
 unsigned int ProcHDF5IO::read_procstat(procstat* start_pointer, unsigned int start_id, unsigned int count) {
     return read_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count);
 }
@@ -940,6 +1003,10 @@ unsigned int ProcHDF5IO::read_procdata(procdata* start_pointer, unsigned int sta
 
 unsigned int ProcHDF5IO::read_procfd(procfd* start_pointer, unsigned int start_id, unsigned int count) {
     return read_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count);
+}
+
+unsigned int ProcHDF5IO::read_procobs(procobs* start_pointer, unsigned int start_id, unsigned int count) {
+    return read_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count);
 }
 
 unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count) {
@@ -961,6 +1028,8 @@ unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, voi
        ds = hdf5Segment->procdataDS;
     } else if (recordType == TYPE_PROCFD) {
        ds = hdf5Segment->procfdDS;
+    } else if (recordType == TYPE_PROCOBS) {
+       ds = hdf5Segment->procobsDS;
     }
     hid_t dataspace = H5Dget_space(ds);
     hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
@@ -1008,6 +1077,10 @@ unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, vo
        ds = hdf5Segment->procfdDS;
        size_attribute = hdf5Segment->procfdSizeID;
        nRecords = &(hdf5Segment->procfdSize);
+    } else if (recordType == TYPE_PROCOBS) {
+       ds = hdf5Segment->procobsDS;
+       size_attribute = hdf5Segment->procobsSizeID;
+       nRecords = &(hdf5Segment->procobsSize);
     }
     hid_t filespace;
     herr_t status;
@@ -1074,6 +1147,23 @@ unsigned int ProcHDF5IO::get_nprocdata() {
 unsigned int ProcHDF5IO::get_nprocfd() {
 	if (hdf5Segment == nullptr) return 0;
 	return hdf5Segment->procfdSize;
+}
+
+unsigned int ProcHDF5IO::get_nprocobs() {
+	if (hdf5Segment == nullptr) return 0;
+	return hdf5Segment->procobsSize;
+}
+
+herr_t op_func(hid_t loc_id, const char *name, const H5L_info_t *info, void *op_data) {
+    vector<string> *hosts = (vector<string> *) op_data;
+    hosts->push_back(string(name));
+    return 0;
+}
+
+bool ProcHDF5IO::get_hosts(vector<string>& hosts) {
+    herr_t status;
+    status = H5Literate(this->file, H5_INDEX_NAME, H5_ITER_NATIVE, NULL, op_func, (void*) &hosts);
+    return status > 0;
 }
 
 #endif
