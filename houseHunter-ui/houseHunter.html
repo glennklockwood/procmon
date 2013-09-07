@@ -1,5 +1,10 @@
 <html><title>genepool procmon HouseHunter</title>
 <head>
+<meta http-equiv="cache-control" content="max-age=0" />
+<meta http-equiv="cache-control" content="no-cache" />
+<meta http-equiv="expires" content="0" />
+<meta http-equiv="expires" content="Tue, 01 Jan 1980 1:00:00 GMT" />
+<meta http-equiv="pragma" content="no-cache" />
 <style type="text/css">
 * {
     font-family: monospace;
@@ -19,12 +24,6 @@
     vertical-align: middle;
     font-size: 2.7em;
 }
-.busyIndicator {
-    background-image:url('ajax-loader.gif');
-    visibility: hidden;
-    width: 100%;
-    height: 100%;
-}
 </style>
 <link rel="stylesheet" type="text/css" href="jquery-ui-1.10.3/themes/smoothness/jquery-ui.min.css" />
 <link rel="stylesheet" type="text/css" href="DataTables-1.9.4/media/css/jquery.dataTables.css" />
@@ -40,7 +39,11 @@ var script_table_obj;
 var usersummary_table_obj;
 var projectsummary_table_obj;
 
-function load_exec_data() {
+function loading_div() {
+    return '<div style="width:100%"><br /><center><h3>Loading...</h3></center></br><center><img src="ajax-loader.gif" /></center></div>'
+}
+
+function update_summary() {
     user = $("#select_user").val()
     project = $("#select_project").val()
     date_val = $("#datepicker").val()
@@ -74,16 +77,17 @@ function load_exec_data() {
         $("#projectsummary_table_div").hide();
         $("#usersummary_table_div").show();
         $("#projectsummary_chart").hide();
+        $("#usersummary_chart").html(loading_div());
+        $("#projectsummary_chart").hide();
         initialize_chart('user');
-        $("#usersummary_chart").show();
     }
     if (project != "Any") {
         projectsummary_table_obj.fnDraw();
         $("#usersummary_table_div").hide();
         $("#projectsummary_table_div").show();
-        initialize_chart('project');
-        $("#projectsummary_chart").show();
         $("#usersummary_chart").hide();
+        $("#projectsummary_chart").html(loading_div());
+        initialize_chart('project');
     }
 }
 function initialize_chart(chart_type) {
@@ -204,6 +208,7 @@ function initialize_chart(chart_type) {
             }
         }
         $('#'+container).highcharts(options);
+        $('#'+container).show();
     });
 }
 
@@ -222,9 +227,7 @@ $(function() {
     });
     $( "#tabs" ).tabs();
 });
-function update_summary() {
-    load_exec_data();
-}
+
 function change_menu_selection() {
     id = this.id;
     if (id != "select_user" && id != "select_project") {
@@ -255,10 +258,10 @@ function reset_selection(id, data) {
 $(document).ready(function() {
     var collection = $("#select_collection").val();
     $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_users=1', function(data) {
-        reset_selection('#select_user', data);
+        reset_selection('#select_user', data.users);
     });
     $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_projects=1', function(data) {
-        reset_selection('#select_project', data);
+        reset_selection('#select_project', data.projects);
     });
     $("#select_user").change(change_menu_selection);
     $("#select_project").change(change_menu_selection);
