@@ -98,6 +98,17 @@ typedef struct _procfd {
 	unsigned int mode;
 } procfd;
 
+typedef struct _procobs {
+    char identifier[IDENTIFIER_SIZE];
+    char subidentifier[IDENTIFIER_SIZE];
+    unsigned int pid;
+    unsigned long recTime;
+    unsigned long recTimeUSec;
+    unsigned long startTime;
+    unsigned long startTimeUSec;
+} procobs;
+
+
 
 
 #endif
