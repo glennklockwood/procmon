@@ -230,10 +230,12 @@ int main(int argc, char **argv) {
         bzero(data, data_size);
         procstat *ps_ptr = (procstat *)data;
         procstat *ps_sort[n_procstat];
+        procstat *ps_keep[n_procstat];
         procstat **ps_pptr = ps_sort;
         unsigned int nReadPS = 0;
         for (auto iter = local_inputs.begin(); iter != local_inputs.end(); ++iter) {
             ReducerInput *input = *iter;
+            input->file->set_context(hostname, identifier, subidentifier);
             int local_n_procstat = input->file->get_nprocstat();
             unsigned int l_nReadPS = input->file->read_procstat(ps_ptr, 0, local_n_procstat);
             for (int i = 0; i < local_n_procstat; i++) {
@@ -247,7 +249,8 @@ int main(int argc, char **argv) {
         qsort(ps_sort, n_procstat, sizeof(procstat *), cmp_procstat_rec);
 
 
-        /* reduce the data and write it out */
+        /* reduce the data */
+        ps_pptr = ps_keep;
         unsigned int nWritePS = 0;
         unsigned int nBadPS = 0;
         for (int i = 0; i < nReadPS; i++) {
@@ -269,32 +272,56 @@ int main(int argc, char **argv) {
             procObs->startTime = procStat->startTime;
             procObs->startTimeUSec = procStat->startTimeUSec;
 
-            ProcessRecord *rec = p_list.find_process_record(procStat->pid);
-            unsigned int recId = 0;
-            bool newRecord = false;
-            if (rec == NULL) {
-                rec = p_list.new_process_record(&spare_deck);
-                newRecord = true;
+            /* find the most recent record we've examined with this pid */
+            procstat **rec = NULL;
+            for (procstat **ptr = ps_pptr - 1; ptr >= ps_keep; ptr--) {
+                if ((*ptr)->pid == procStat->pid) {
+                    rec = ptr;
+                    break;
+                }
             }
-            recId = rec->set_procstat(procStat, newRecord);
-            if (recId == 0) nWritePS++;
-            outputFile->set_context(hostname, string(procStat->identifier), string(procStat->subidentifier));
-            rec->set_procstat_id(
-                outputFile->write_procstat(procStat, recId, 1)
-            );
+            /* if we haven't seen this pid before, or if the record differs
+               then add this record to the keep list */
+            if (rec == NULL || procstatcmp(*procStat, **rec) != 0) {
+                *ps_pptr++ = procStat;
+            } else if (rec != NULL) {
+                *rec = procStat;
+            }
         }
+        int nKeepPS = ps_pptr - ps_keep;
+        procstat *ps_buff = new procstat[nKeepPS];
+        bzero(ps_buff, sizeof(procstat)*nKeepPS);
+        for (procstat **ptr = ps_keep; ptr < ps_pptr; ptr++) {
+            memcpy(&(ps_buff[ptr-ps_keep]), *ptr, sizeof(procstat));
+        }
+        /* write out all of the procstat records at once */
+        if (nKeepPS > 0) {
+            outputFile->set_context(hostname, "Any", "Any");
+            outputFile->set_override_context(true);
+            outputFile->write_procstat(ps_buff, 0, nKeepPS);
+            outputFile->set_override_context(false);
+            nWritePS = nKeepPS;
+        }
+        delete ps_buff;
 
         /* write out all the observations */
+        outputFile->set_context(hostname, "Any", "Any");
+        outputFile->set_override_context(true);
         outputFile->write_procobs(observations, 0, nReadPS);
+        outputFile->set_override_context(false);
+
+        delete observations;
 
         /* read all the procdata records */
         bzero(data, data_size);
         procdata *pd_ptr = (procdata *)data;
         procdata *pd_sort[n_procdata];
+        procdata *pd_keep[n_procdata];
         procdata **pd_pptr = pd_sort;
         unsigned int nReadPD = 0;
         for (auto iter = local_inputs.begin(); iter != local_inputs.end(); ++iter) {
             ReducerInput *input = *iter;
+            input->file->set_context(hostname, identifier, subidentifier);
             int local_n_procdata = input->file->get_nprocdata();
             unsigned int l_nReadPD = input->file->read_procdata(pd_ptr, 0, local_n_procdata);
             for (int i = 0; i < local_n_procdata; i++) {
@@ -307,7 +334,8 @@ int main(int argc, char **argv) {
         /* sort the procdata records by observation time */
         qsort(pd_sort, n_procdata, sizeof(procdata *), cmp_procdata_rec);
 
-        /* reduce the data and write it out */
+        /* reduce the data */
+        pd_pptr = pd_keep;
         unsigned int nWritePD = 0;
         unsigned int nBadPD = 0;
         for (int i = 0; i < nReadPD; i++) {
@@ -320,29 +348,48 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            ProcessRecord *rec = p_list.find_process_record(procData->pid);
-            unsigned int recId = 0;
-            bool newRecord = false;
-            if (rec == NULL) {
-                rec = p_list.new_process_record(&spare_deck);
-                newRecord = true;
+            /* find the most recent record we've examined with this pid */
+            procdata **rec = NULL;
+            for (procdata **ptr = pd_pptr - 1; ptr >= pd_keep; ptr--) {
+                if ((*ptr)->pid == procData->pid) {
+                    rec = ptr;
+                    break;
+                }
             }
-            recId = rec->set_procdata(procData, newRecord);
-            if (recId == 0) nWritePD++;
-            outputFile->set_context(hostname, string(procData->identifier), string(procData->subidentifier));
-            rec->set_procdata_id(
-                outputFile->write_procdata(procData, recId, 1)
-            );
+            /* if we haven't seen this pid before, or if the record differs
+               then add this record to the keep list */
+            if (rec == NULL || procdatacmp(*procData, **rec) != 0) {
+                *pd_pptr++ = procData;
+            } else if (rec != NULL) {
+                *rec = procData;
+            }
         }
+        int nKeepPD = pd_pptr - pd_keep;
+        procdata *pd_buff = new procdata[nKeepPD];
+        bzero(pd_buff, sizeof(procdata)*nKeepPD);
+        for (procdata **ptr = pd_keep; ptr < pd_pptr; ptr++) {
+            memcpy(&(pd_buff[ptr-pd_keep]), *ptr, sizeof(procdata));
+        }
+        /* write out all of the procdata records at once */
+        if (nKeepPD > 0) {
+            outputFile->set_context(hostname, "Any", "Any");
+            outputFile->set_override_context(true);
+            outputFile->write_procdata(pd_buff, 0, nKeepPD);
+            outputFile->set_override_context(false);
+            nWritePD = nKeepPD;
+        }
+        delete pd_buff;
 
         /* read all the procfd records */
         bzero(data, data_size);
         procfd *fd_ptr = (procfd *)data;
         procfd *fd_sort[n_procfd];
+        procfd *fd_keep[n_procfd];
         procfd **fd_pptr = fd_sort;
         unsigned int nReadFD = 0;
         for (auto iter = local_inputs.begin(); iter != local_inputs.end(); ++iter) {
             ReducerInput *input = *iter;
+            input->file->set_context(hostname, identifier, subidentifier);
             int local_n_procfd = input->file->get_nprocfd();
             unsigned int l_nReadFD = input->file->read_procfd(fd_ptr, 0, local_n_procfd);
             for (int i = 0; i < local_n_procfd; i++) {
@@ -355,7 +402,8 @@ int main(int argc, char **argv) {
         /* sort the procfd records by observation time */
         qsort(fd_sort, n_procfd, sizeof(procfd *), cmp_procfd_rec);
 
-        /* reduce the data and write it out */
+        /* reduce the data */
+        fd_pptr = fd_keep;
         unsigned int nWriteFD = 0;
         unsigned int nBadFD = 0;
         for (int i = 0; i < nReadFD; i++) {
@@ -368,25 +416,38 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            ProcessRecord *rec = p_list.find_process_record(procFD->pid);
-            unsigned int recId = 0;
-            bool newRecord = false;
-            if (rec == NULL) {
-                rec = p_list.new_process_record(&spare_deck);
-                newRecord = true;
+            /* find the most recent record we've examined with this pid */
+            procfd **rec = NULL;
+            for (procfd **ptr = fd_pptr - 1; ptr >= fd_keep; ptr--) {
+                if ((*ptr)->pid == procFD->pid && (*ptr)->fd == procFD->fd) {
+                    rec = ptr;
+                    break;
+                }
             }
-            try {
-            recId = rec->set_procfd(procFD, newRecord);
-            if (recId == 0) nWriteFD++;
-            outputFile->set_context(hostname, string(procFD->identifier), string(procFD->subidentifier));
-            rec->set_procfd_id(
-                outputFile->write_procfd(procFD, recId, 1),
-                procFD
-            );
-            } catch (ReducerInvalidFDException &e) {
-                cerr << "Caught (and ignored) invalid FD exception: " << e.what() << endl;
+            /* if we haven't seen this pid before, or if the record differs
+               then add this record to the keep list */
+            if (rec == NULL || procfdcmp(*procFD, **rec) != 0) {
+                *fd_pptr++ = procFD;
+            } else if (rec != NULL) {
+                *rec = procFD;
             }
         }
+        int nKeepFD = fd_pptr - fd_keep;
+        procfd *fd_buff = new procfd[nKeepFD];
+        bzero(fd_buff, sizeof(procfd)*nKeepFD);
+        for (procfd **ptr = fd_keep; ptr < fd_pptr; ptr++) {
+            memcpy(&(fd_buff[ptr-fd_keep]), *ptr, sizeof(procfd));
+        }
+        /* write out all of the procfd records at once */
+        if (nKeepFD > 0) {
+            outputFile->set_context(hostname, "Any", "Any");
+            outputFile->set_override_context(true);
+            outputFile->write_procfd(fd_buff, 0, nKeepFD);
+            outputFile->set_override_context(false);
+            nWriteFD = nKeepFD;
+        }
+        delete fd_buff;
+
         cout << *ptr << "," << n_procstat << "(" << nReadPS << "," << nWritePS << ", BAD:" << nBadPS << "),";
         cout << "," << n_procdata << "(" << nReadPD << "," << nWritePD << ", BAD:" << nBadPD << "),";
         cout << "," << n_procfd << "(" << nReadFD << "," << nWriteFD << ", BAD:" << nBadFD << "),";
