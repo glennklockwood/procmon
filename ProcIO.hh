@@ -143,6 +143,7 @@ public:
 	unsigned int get_nprocstat();
 	unsigned int get_nprocfd();
 	unsigned int get_nprocobs();
+    void set_override_context(bool);
     bool get_hosts(vector<string>& hosts);
 	void flush();
 	void trim_segments(time_t cutoff);
@@ -172,6 +173,7 @@ private:
 	unsigned int statBlockSize;
 	unsigned int fdBlockSize;
 	unsigned int obsBlockSize;
+    bool override_context;
 };
 #endif
 

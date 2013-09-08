@@ -766,6 +766,7 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
 	type_procstat = -1;
     type_procfd = -1;
     type_procobs = -1;
+    override_context = false;
 
 	if (mode == FILE_MODE_WRITE) {
     	file = H5Fopen(filename.c_str(), H5F_ACC_CREAT | H5F_ACC_RDWR, H5P_DEFAULT);
@@ -791,6 +792,10 @@ ProcHDF5IO::~ProcHDF5IO() {
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
     if (file > 0) status = H5Fclose(file);
     //status = H5close();
+}
+
+void ProcHDF5IO::set_override_context(bool val) {
+    override_context = val;
 }
 
 unsigned int ProcHDF5IO::read_procdata(procdata* procData, unsigned int id) {
@@ -960,36 +965,42 @@ void ProcHDF5IO::initialize_types() {
 }
 
 unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int start_id, int count) {
-	for (int i = 0; i < count; i++) {
-		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	}
+    if (!override_context) {
+	    for (int i = 0; i < count; i++) {
+		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	    }
+    }
     return write_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count, statBlockSize);
 }
 
 unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int start_id, int count) {
-	for (int i = 0; i < count; i++) {
-		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	}
+    if (!override_context) {
+	    for (int i = 0; i < count; i++) {
+		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	    }
+    }
     return write_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count, dataBlockSize);
 }
 
 unsigned int ProcHDF5IO::write_procfd(procfd* start_pointer, unsigned int start_id, int count) {
-	for (int i = 0; i < count; i++) {
-		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	}
+    if (!override_context) {
+	    for (int i = 0; i < count; i++) {
+		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	    }
+    }
     return write_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count, fdBlockSize);
 }
 
 unsigned int ProcHDF5IO::write_procobs(procobs* start_pointer, unsigned int start_id, int count) {
-    /*  COMMENTING OUT BECAUSE THESE RECORDS WILL ALREADY HAVE IDENT AND SUBIDENT
-	for (int i = 0; i < count; i++) {
-		snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	}
-    */
+    if (!override_context) {
+	    for (int i = 0; i < count; i++) {
+		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	    }
+    }
     return write_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count, obsBlockSize);
 }
 
