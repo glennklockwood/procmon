@@ -35,14 +35,17 @@
 
 struct all_data_t {
     int *pids;
+    procstat *tmp_procStat;
     procstat *procStat;
     procdata *procData;
     procfd *procFD;
     int n_pids;
+    int n_tmp_procStat;
     int n_procStat;
     int n_procData;
     int n_procFD;
     int capacity_pids;
+    int capacity_tmp_procStat;
     int capacity_procStat;
     int capacity_procData;
     int capacity_procFD;
@@ -512,13 +515,22 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	}
 	closedir(procDir);
 
-    procstat procStats[npids];
+    if (npids > all_data.capacity_tmp_procStat || all_data.tmp_procStat == NULL) {
+        int talloc = npids > 512 ? npids*2 : 512;
+        all_data.tmp_procStat = (procstat*) realloc(all_data.tmp_procStat, sizeof(procstat)*talloc);
+        if (all_data.tmp_procStat == NULL) {
+            fprintf(stderr, "FAILED to allocate memory for initial procstat cache for %d pids (%lu bytes)\n", talloc, sizeof(procstat)*talloc);
+            return -1;
+        }
+        all_data.capacity_tmp_procStat = talloc;
+    }
+    procstat *procStats = all_data.tmp_procStat;
 	memset(procStats, 0, sizeof(procstat)*npids);
+
 	for (idx = 0; idx < npids; idx++) {
 		tgt_pid = all_data.pids[idx];	
 		procStats[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procStats[idx]), NULL, 0);
 	}
-
 
 	/* === Discover processes of interest === 
 	 * Phase 1:  find target parent process, and all the processes with the target
@@ -676,7 +688,16 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
             snprintf(temp_procData->cmdArgs, BUFFER_SIZE, "Unknown");
             temp_procData->cmdArgBytes = 0;
         }
-        if (maxfd > 0) {
+
+        /* if fd tracking is enabled and there is enough room to store any more
+           fd information, then parse it!
+        */
+        int n_fd = all_data.capacity_procFD - fdidx;
+        if (maxfd < n_fd) {
+            n_fd = maxfd;
+        }
+
+        if (n_fd > 0) {
             parse_fds(tgt_pid, maxfd, all_data.procFD, &fdidx, statData);
         }
 	}
