@@ -11,7 +11,7 @@
 #include <pthread.h>
 
 #include <boost/program_options.hpp>
-#define PROCMUXER_VERSION 2.2
+#define PROCMUXER_VERSION 2.3
 namespace po = boost::program_options;
 
 /* ProcMuxer

@@ -329,7 +329,7 @@ int parse_fds(int pid, int maxfd, procfd *all_procfd, int *p_idx, procstat *stat
     struct stat link;
     int start_idx = *p_idx;
     int rbytes = 0;
-    for (int fd = 3; fd < maxfd; fd++) {
+    for (int fd = 3; fd < maxfd+3; fd++) {
 		snprintf(buffer, BUFFER_SIZE, "/proc/%d/fd/%d", pid, fd);
         if (lstat(buffer, &link) != 0) {
             break;
@@ -598,17 +598,20 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
             all_data.capacity_procData = ntargets * 2;
         }
         if (ntargets*maxfd > all_data.capacity_procFD) {
-            all_data.procFD = (procfd *) realloc(all_data.procFD, sizeof(procfd) * ntargets * 2 * maxfd + 1);
+            int talloc = ntargets * 2 * maxfd;
+            all_data.procFD = (procfd *) realloc(all_data.procFD, sizeof(procfd) * talloc);
             if (all_data.procFD == NULL) {
                 fprintf(stderr, "Failed to allocate memory; exiting...\n");
                 exit(1);
             }
-            all_data.capacity_procFD = ntargets * 2 * maxfd + 1;
+            all_data.capacity_procFD = talloc;
         }
 
         bzero(all_data.procStat, sizeof(procstat) * ntargets);
         bzero(all_data.procData, sizeof(procdata) * ntargets);
-        bzero(all_data.procFD, sizeof(procfd) * ntargets * maxfd);
+        if (maxfd > 0) {
+            bzero(all_data.procFD, sizeof(procfd) * ntargets * maxfd);
+        }
     }
     int fdidx = 0;
 
@@ -698,7 +701,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
         }
 
         if (n_fd > 0) {
-            parse_fds(tgt_pid, maxfd, all_data.procFD, &fdidx, statData);
+            parse_fds(tgt_pid, n_fd, all_data.procFD, &fdidx, statData);
         }
 	}
 
