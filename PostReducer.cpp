@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include <boost/program_options.hpp>
-#define PROCREDUCER_VERSION 2.3
+#define POSTREDUCER_VERSION "2.3"
 namespace po = boost::program_options;
 
 /* ProcReducer
@@ -20,7 +20,7 @@ namespace po = boost::program_options;
 */
 
 void version() {
-    cout << "PostReducer " << PROCREDUCER_VERSION;
+    cout << "PostReducer " << POSTREDUCER_VERSION;
     cout << endl;
     exit(0);
 }
@@ -159,9 +159,29 @@ int main(int argc, char **argv) {
     vector<ReducerInput*> inputs;
     vector<vector<string> > input_hosts;
     vector<string> all_hosts;
+    char buffer[BUFFER_SIZE];
+    char *ptr = buffer;
+    unsigned long start_time = 0;
+    unsigned long stop_time = 0;
+    unsigned long n_writes = 0;
 
     for (unsigned int idx = 0; idx < config.input_filenames.size(); idx++) {
         ReducerInput *l_input = new ReducerInput(config.input_filenames[idx]);;
+        unsigned long t_start = 0;
+        unsigned long t_stop = 0;
+        unsigned long t_n_writes = 0;
+        l_input->file->metadata_get_uint("recording_start", &t_start);
+        if (start_time == 0 || t_start < start_time) {
+            start_time = t_start;
+        }
+        l_input->file->metadata_get_uint("recording_stop", &t_stop);
+        if (stop_time == 0 || t_stop > stop_time) {
+            stop_time = t_stop;
+        }
+        l_input->file->metadata_get_uint("n_writes", &t_n_writes);
+        n_writes += t_n_writes;
+
+        ptr += snprintf(ptr, BUFFER_SIZE - (ptr - buffer), "%s%s", idx > 0 ? "," : "", config.input_filenames[idx].c_str());
         for (vector<string>::iterator host = l_input->hosts.begin(), end = l_input->hosts.end(); host != end; ++host) {
             vector<string>::iterator found_host = find(all_hosts.begin(), all_hosts.end(), *host);
             if (found_host == all_hosts.end()) {
@@ -172,6 +192,22 @@ int main(int argc, char **argv) {
     }
     ProcHDF5IO* outputFile = new ProcHDF5IO(config.output_filename, FILE_MODE_WRITE);
     ProcHDF5IO* bad_outputFile = new ProcHDF5IO(config.bad_output_filename, FILE_MODE_WRITE);
+    outputFile->metadata_set_string("source", buffer);
+    bad_outputFile->metadata_set_string("source", buffer);
+    outputFile->metadata_set_string("writer", "PostReducer");
+    bad_outputFile->metadata_set_string("writer", "PostReducer");
+    outputFile->metadata_set_string("writer_version", POSTREDUCER_VERSION);
+    bad_outputFile->metadata_set_string("writer_version", POSTREDUCER_VERSION);
+    gethostname(buffer, BUFFER_SIZE);
+    buffer[BUFFER_SIZE-1] = 0;
+    outputFile->metadata_set_string("writer_host", buffer);
+    bad_outputFile->metadata_set_string("writer_host", buffer);
+    outputFile->metadata_set_uint("recording_start", start_time);
+    bad_outputFile->metadata_set_uint("recording_start", start_time);
+    outputFile->metadata_set_uint("recording_stop", stop_time);
+    bad_outputFile->metadata_set_uint("recording_stop", stop_time);
+    outputFile->metadata_set_uint("n_writes", n_writes);
+    bad_outputFile->metadata_set_uint("n_writes", n_writes);
 
     string hostname, identifier, subidentifier;
 
@@ -181,7 +217,6 @@ int main(int argc, char **argv) {
     size_t data_size = 0;
     ProcessList spare_deck(0);
 
-    char buffer[1024];
     int host_num = 0;
     for (auto ptr = all_hosts.begin(), end = all_hosts.end(); ptr != end; ++ptr) {
         vector<ReducerInput*> local_inputs;
@@ -247,7 +282,6 @@ int main(int argc, char **argv) {
 
         /* sort the procstat records by observation time */
         qsort(ps_sort, n_procstat, sizeof(procstat *), cmp_procstat_rec);
-
 
         /* reduce the data */
         ps_pptr = ps_keep;

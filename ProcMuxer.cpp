@@ -11,7 +11,7 @@
 #include <pthread.h>
 
 #include <boost/program_options.hpp>
-#define PROCMUXER_VERSION 2.3
+#define PROCMUXER_VERSION "2.3"
 namespace po = boost::program_options;
 
 /* ProcMuxer
@@ -71,10 +71,11 @@ public:
             ("identifier,I",po::value<std::string>(&(this->identifier))->default_value(DEFAULT_REDUCER_IDENTIFIER), "identifier for tagging data")
             ("subidentifier,S",po::value<std::string>(&(this->subidentifier))->default_value(DEFAULT_REDUCER_SUBIDENTIFIER), "secondary identifier for tagging data")
             ("outputhdf5prefix,O",po::value<std::string>(&(this->outputHDF5FilenamePrefix))->default_value(DEFAULT_REDUCER_OUTPUT_PREFIX), "prefix for hdf5 output filename [final names will be prefix.YYYYMMDDhhmmss.h5 (required)")
+            ("pidfile,p",po::value<std::string>(&(this->pidfile))->default_value(""), "pid file")
             ("cleanfreq,c",po::value<int>(&(this->cleanFreq))->default_value(DEFAULT_REDUCER_CLEAN_FREQUENCY), "time between process hash table cleaning runs")
             ("maxage,m",po::value<int>(&(this->maxProcessAge))->default_value(DEFAULT_REDUCER_MAX_PROCESS_AGE), "timeout since last communication from a pid before allowing removal from hash table (cleaning)")
-            ("maxwrites,w",po::value<unsigned int>(&(this->maxFileWrites))->default_value(DEFAULT_REDUCER_MAX_FILE_WRITES), "maximum writes for a single file before resetting")
-            ("totalwrites,t",po::value<unsigned int>(&(this->maxTotalWrites))->default_value(DEFAULT_REDUCER_MAX_TOTAL_WRITES), "total writes before exiting")
+            ("maxwrites,w",po::value<unsigned long>(&(this->max_file_writes))->default_value(DEFAULT_REDUCER_MAX_FILE_WRITES), "maximum writes for a single file before resetting")
+            ("totalwrites,t",po::value<unsigned long>(&(this->max_total_writes))->default_value(DEFAULT_REDUCER_MAX_TOTAL_WRITES), "total writes before exiting")
             //("maxmem,M",po::value<string>(tempMem)->default_vaulue(DEFAULT_REDUCER_MAX_MEMORY), "maximum vmem consumption before exiting")
             ("statblock",po::value<int>(&(this->statBlockSize))->default_value(DEFAULT_STAT_BLOCK_SIZE), "number of stat records per block in hdf5 file" )
             ("datablock",po::value<int>(&(this->dataBlockSize))->default_value(DEFAULT_DATA_BLOCK_SIZE), "number of data records per block in hdf5 file" )
@@ -132,8 +133,8 @@ public:
     string mqPassword;
     unsigned int mqPort;
     unsigned int mqFrameSize;
-    unsigned int maxFileWrites;
-    unsigned int maxTotalWrites;
+    unsigned long max_file_writes;
+    unsigned long max_total_writes;
     unsigned long maxMem;
     bool debug;
     bool daemonize;
@@ -238,242 +239,6 @@ void pidfile(const string& pidfilename) {
     exit(1);
 }
 
-static bool control_amqp_status(amqp_rpc_reply_t status) {
-    string amqpErrorMessage;
-    switch (status.reply_type) {
-        case AMQP_RESPONSE_NORMAL:
-            return false;
-            break;
-        case AMQP_RESPONSE_NONE:
-            amqpErrorMessage = "missing RPC reply type (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ")";
-            break;
-        case AMQP_RESPONSE_LIBRARY_EXCEPTION:
-            amqpErrorMessage = string(amqp_error_string2(status.library_error)) + " (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + to_string( (unsigned int) status.library_error) + ")";
-            break;
-        case AMQP_RESPONSE_SERVER_EXCEPTION: {
-            switch (status.reply.id) {
-                case AMQP_CONNECTION_CLOSE_METHOD: {
-                    amqp_connection_close_t *m = (amqp_connection_close_t *) status.reply.decoded;
-                    amqpErrorMessage = "server connection error " + to_string((int) m->reply_code) + ", message: " +  string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
-                    break;
-                }
-                case AMQP_CHANNEL_CLOSE_METHOD: {
-                    amqp_channel_close_t *m = (amqp_channel_close_t *) status.reply.decoded;
-                    amqpErrorMessage = "server channel error " + to_string((int) m->reply_code) + ", message: " +  string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
-                    break;
-                }
-                default:
-                    amqpErrorMessage = "unknown server error, method id " + to_string((int)status.reply.id);
-                    break;
-            }
-            break;
-        }
-    }
-    cerr << amqpErrorMessage << endl;
-    return true;
-}
-
-static bool control_amqp_open(amqp_connection_state_t *conn) {
-    *conn = amqp_new_connection();
-    amqp_socket_t *socket = amqp_tcp_socket_new(*conn);
-    int istatus = amqp_socket_open(socket, config->mqServer.c_str(), config->mqPort);
-    if (istatus != 0) {
-        cerr << "Failed AMQP connection to " << config->mqServer << ":" << config->mqPort << endl;
-        return false;
-    }
-    if (control_amqp_status(amqp_login(*conn, config->mqVHost.c_str(), 0, config->mqFrameSize, 0, AMQP_SASL_METHOD_PLAIN, config->mqUser.c_str(), config->mqPassword.c_str()))) {
-        cerr << "Failed AMQP login." << endl;
-        return false;
-    }
-    amqp_channel_open(*conn, 1);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed AMQP open channel." << endl;
-        return false;
-    }
-    amqp_channel_open(*conn, 2);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed AMQP open channel 2." << endl;
-        return false;
-    }
-    amqp_exchange_declare(*conn, 1, amqp_cstring_bytes("ProcMan_Control"), amqp_cstring_bytes("topic"), 0, 0, amqp_empty_table);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed ProcMan_Control exchange declaration" << endl;
-        return false;
-    }
-    amqp_exchange_declare(*conn, 2, amqp_cstring_bytes("ProcMuxer_Control"), amqp_cstring_bytes("topic"), 0, 0, amqp_empty_table);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed ProcMuxer_Control exchange declaration" << endl;
-        return false;
-    }
-    amqp_queue_declare_ok_t* queue_reply = amqp_queue_declare(*conn, 1, amqp_empty_bytes, 0, 0, 1, 1, amqp_empty_table);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed ProcMan_Control queue declaration" << endl;
-        return false;
-    }
-    amqp_bytes_t queue = amqp_bytes_malloc_dup(queue_reply->queue);
-    if (queue.bytes == NULL) {
-        cerr << "Failed AMQP queue declare: out of memory!" << endl;
-        return false;
-    }
-    amqp_queue_bind(*conn, 1, queue, amqp_cstring_bytes("ProcMan_Control"), amqp_cstring_bytes("*.*.*"), amqp_empty_table);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed ProcMan_Control queue bind" << endl;
-        amqp_bytes_free(queue);
-        return false;
-    }
-    amqp_basic_consume(*conn, 1, queue, amqp_empty_bytes, 0, 1, 0, amqp_empty_table);
-    if (control_amqp_status(amqp_get_rpc_reply(*conn))) {
-        cerr << "Failed ProcMan_Control queue consume" << endl;
-        amqp_bytes_free(queue);
-        return false;
-    }
-    amqp_bytes_free(queue);
-    return true;
-}
-
-static void control_amqp_close(amqp_connection_state_t *conn) {
-    if (control_amqp_status(amqp_channel_close(*conn, 1, AMQP_REPLY_SUCCESS))) {
-        string message = "AMQP channel close failed";
-        cerr << message << endl;
-    }
-    if (control_amqp_status(amqp_channel_close(*conn, 2, AMQP_REPLY_SUCCESS))) {
-        string message = "AMQP channel2 close failed";
-        cerr << message << endl;
-    }
-    if (control_amqp_status(amqp_connection_close(*conn, AMQP_REPLY_SUCCESS))) {
-        string message = "AMQP connection close failed";
-        cerr << message << endl;
-    }
-    amqp_destroy_connection(*conn);
-}
-
-static bool control_amqp_read_message(amqp_connection_state_t *conn, string& group, int& id, string& messageType, string& message) {
-    for ( ; ; ) {
-        amqp_frame_t frame;
-        int result;
-        size_t body_received;
-        size_t body_target;
-        amqp_maybe_release_buffers(*conn);
-        result = amqp_simple_wait_frame(*conn, &frame);
-        if (result < 0) { break; }
-
-        if (frame.frame_type != AMQP_FRAME_METHOD) {
-            continue;
-        }
-        if (frame.payload.method.id != AMQP_BASIC_DELIVER_METHOD) {
-            continue;
-        }
-        amqp_basic_deliver_t* d = (amqp_basic_deliver_t *) frame.payload.method.decoded;
-        string routingKey((char*)d->routing_key.bytes, 0, (int) d->routing_key.len);
-        result = amqp_simple_wait_frame(*conn, &frame);
-        if (result < 0) {
-            continue;
-        }
-
-        if (frame.frame_type != AMQP_FRAME_HEADER) {
-            continue;
-        }
-        //amqp_basic_properties_t* p = (amqp_basic_properties_t *) frame.payload.properties.decoded;
-
-        body_target = frame.payload.properties.body_size;
-        char message_buffer[body_target+1];
-        char* ptr = message_buffer;
-        body_received = 0;
-
-        while (body_received < body_target) {
-            result = amqp_simple_wait_frame(*conn, &frame);
-            if (result < 0) {
-                break;
-            }
-            if (frame.frame_type != AMQP_FRAME_BODY) {
-                break;
-            }
-            body_received += frame.payload.body_fragment.len;
-            memcpy(ptr, frame.payload.body_fragment.bytes, frame.payload.body_fragment.len);
-            ptr += frame.payload.body_fragment.len;
-            *ptr = 0;
-        }
-
-        if (body_received == body_target) {
-            // got full message successfully!
-            size_t endPos = routingKey.find('.');
-            group.assign(routingKey, 0, endPos);
-            size_t endPos2 = routingKey.find('.', endPos+1);
-            string temp;
-            temp.assign(routingKey, endPos+1, endPos2);
-            id = atoi(temp.c_str());
-            messageType.assign(routingKey, endPos2+1, string::npos);
-            message = string(message_buffer);
-            return true;
-        }
-        break;
-    }
-    return false;
-}
-
-static bool control_send_message(amqp_connection_state_t *conn, const char *tag, char *_message) {
-    char routingKey[512];
-    bool message_sent = false;
-    snprintf(routingKey, 512, "%s.%d.%s", config->group.c_str(), config->my_id, tag);
-    routingKey[511] = 0;
-    amqp_bytes_t message;
-    message.bytes = _message;
-    message.len = strlen(_message);
-    for (int count = 0; count <= 1; count++) {
-        int istatus = amqp_basic_publish(*conn, 2, amqp_cstring_bytes("ProcMuxer_Control"), amqp_cstring_bytes(routingKey), 0, 0, NULL, message);
-        switch (istatus) {
-            case 0:
-                message_sent = true;
-                break;
-            case AMQP_STATUS_SOCKET_ERROR:
-            case AMQP_STATUS_CONNECTION_CLOSED:
-                /* deconstruct existing connection (if it exists), and rebuild */
-                control_amqp_close(conn); //close the connection without acting on errors
-                control_amqp_open(conn);
-                break;
-        }
-        if (istatus != 0) {
-            fprintf(stderr, "WARNING: error on message publication: %d\n", istatus);
-        }
-        if (message_sent) break;
-    }
-    return message_sent;
-}
-
-static void *control_thread_start(void *) {
-    amqp_connection_state_t conn;
-    char buffer[BUFFER_SIZE];
-    if (!control_amqp_open(&conn)) {
-        cerr << "Failed to open initial connection, bailing." << endl;
-        exit(1);
-    }
-
-    while (cleanUpExitFlag == 0) {
-        string group;
-        string messageType;
-        int id = 0;
-        string message;
-        if (control_amqp_read_message(&conn, group, id, messageType, message)) {
-            if (group != "Any" && group != config->group) {
-                continue; //this message is not for me
-            }
-            if (id != 0 && id != config->my_id) {
-                continue; //this message is not for me
-            }
-            if (message == "ping") {
-                gethostname(buffer, BUFFER_SIZE);
-                buffer[BUFFER_SIZE-1] = 0;
-                control_send_message(&conn, "pong", buffer);
-            } else if (message == "get_prefix") {
-                snprintf(buffer, BUFFER_SIZE, "%s", config->outputHDF5FilenamePrefix.c_str());
-                control_send_message(&conn, "prefix", buffer);
-            }
-        }
-    }
-
-    control_amqp_close(&conn);
-}
-
 int main(int argc, char **argv) {
     cleanUpExitFlag = 0;
     resetOutputFileFlag = 0;
@@ -484,14 +249,10 @@ int main(int argc, char **argv) {
 	if (config->daemonize) {
 		daemonize();
 	}
-
-    pthread_t control_thread;
-    int retCode = pthread_create(&control_thread, NULL, control_thread_start, NULL);
-    if (retCode != 0) {
-        errno = retCode;
-        perror("Failed to start control thread, bailing out.");
-        exit(1);
+    if (config->pidfile.size() > 0) {
+        pidfile(config->pidfile);
     }
+
     queue_name = string("ProcMuxer_") + config->group;
 
 
@@ -515,6 +276,8 @@ int main(int argc, char **argv) {
     int count = 0;
     void* data = NULL;
     size_t data_size = 0;
+    unsigned long n_writes = 0;
+    unsigned long file_n_writes = 0;
 
     signal(SIGINT, sig_handler);
     signal(SIGTERM, sig_handler);
@@ -530,15 +293,28 @@ int main(int argc, char **argv) {
         if (currTm.tm_hour !=  last_hour || outputFile == NULL || resetOutputFileFlag == 2) {
             /* flush the file buffers and clean up the old references to the old file */
             if (outputFile != NULL) {
+                outputFile->metadata_set_uint("recording_stop", currTimestamp);
+                outputFile->metadata_set_uint("n_writes", file_n_writes);
                 outputFile->flush();
                 delete outputFile;
                 outputFile = NULL;
             }
+            n_writes += file_n_writes;
+            file_n_writes = 0;
 
             /* use the current date and time as the suffix for this file */
             strftime(buffer, BUFFER_SIZE, "%Y%m%d%H%M%S", &currTm);
             outputFilename = config->outputHDF5FilenamePrefix + "." + string(buffer) + ".h5";
             outputFile = new ProcHDF5IO(outputFilename, FILE_MODE_WRITE);
+            outputFile->metadata_set_string("writer", "ProcMuxer");
+            outputFile->metadata_set_string("writer_version", PROCMUXER_VERSION);
+            gethostname(buffer, BUFFER_SIZE);
+            buffer[BUFFER_SIZE-1] = 0;
+            outputFile->metadata_set_string("writer_host", buffer);
+            snprintf(buffer, BUFFER_SIZE, "amqp://%s@%s:%d/%s", config->mqUser.c_str(), config->mqServer.c_str(), config->mqPort, config->mqVHost.c_str());
+            outputFile->metadata_set_string("source", buffer);
+            outputFile->metadata_set_uint("recording_start", currTimestamp);
+
             resetOutputFileFlag = 0;
         }
         last_hour = currTm.tm_hour;
@@ -555,17 +331,26 @@ int main(int argc, char **argv) {
         if (recordType == TYPE_PROCDATA) {
             procdata *ptr = (procdata *) data;
             outputFile->write_procdata(ptr, 0, nRecords);
+            file_n_writes++;
             message_type = "procdata";
         } else if (recordType == TYPE_PROCSTAT) {
             procstat *ptr = (procstat *) data;
             outputFile->write_procstat(ptr, 0, nRecords);
+            file_n_writes++;
             message_type = "procstat";
         } else if (recordType == TYPE_PROCFD) {
             procfd *ptr = (procfd *) data;
             outputFile->write_procfd(ptr, 0, nRecords);
+            file_n_writes++;
             message_type = "procfd";
         }
         cerr << "Received message: " << hostname << "." << identifier << "." << subidentifier << "." << message_type << endl;
+
+        /* check if # of writes to this file has exceeded max,
+           if so, flush changes to disk and start writing a new file */
+        if (file_n_writes > config->max_file_writes) {
+            resetOutputFileFlag = 1;
+        }
 
         time_t currTime = time(NULL);
         if (currTime - lastClean > config->cleanFreq || cleanUpExitFlag != 0 || resetOutputFileFlag == 1) {
@@ -587,10 +372,15 @@ int main(int argc, char **argv) {
                 resetOutputFileFlag++;
             }
         }
+        if (config->max_total_writes > 0 && n_writes + file_n_writes >= config->max_total_writes) {
+            cleanUpExitFlag = 1;
+        }
     }
     free(data);
 
     if (outputFile != NULL) {
+        outputFile->metadata_set_uint("recording_stop", time(NULL));
+        outputFile->metadata_set_uint("n_writes", file_n_writes);
         outputFile->flush();
         delete outputFile;
         outputFile = NULL;

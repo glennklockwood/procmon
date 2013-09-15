@@ -73,6 +73,25 @@ int main(int argc, char **argv) {
 
     ProcHDF5IO* inputFile = new ProcHDF5IO(config.input_filename, FILE_MODE_READ);
 
+    unsigned long long_data;
+    char *str_ptr;
+    const char *string_identifiers[] = {
+        "writer", "writer_version", "writer_host", "source",
+    };
+    const char *int_identifiers[] = {
+        "recording_start","recording_stop","n_writes",
+    };
+    cout << "{" << endl;
+    for (int i = 0; i < 4; i++) {
+        inputFile->metadata_get_string(string_identifiers[i], &str_ptr);
+        cout << "'" << string_identifiers[i] << "':'" << str_ptr << "'," << endl;
+        free(str_ptr);
+    }
+    for (int i = 0; i < 3; i++) {
+        inputFile->metadata_get_uint(int_identifiers[i], &long_data);
+        cout << "'" << int_identifiers[i] << "':" << long_data << "," << endl;
+    }
+
     string hostname, identifier, subidentifier;
 
     int saveCnt = 0;
@@ -81,6 +100,7 @@ int main(int argc, char **argv) {
     char buffer[1024];
     vector<string> hosts;
     inputFile->get_hosts(hosts);
+    cout << "'hosts':[" << endl;
     for (auto ptr = hosts.begin(), end = hosts.end(); ptr != end; ++ptr) {
         hostname = *ptr;
         identifier = "any";
@@ -89,9 +109,17 @@ int main(int argc, char **argv) {
         int n_procdata = inputFile->get_nprocdata();
         int n_procstat = inputFile->get_nprocstat();
         int n_procfd = inputFile->get_nprocfd();
+        int n_procobs = inputFile->get_nprocobs();
 
-        printf("%s,%d,%d,%d\n", hostname.c_str(), n_procstat, n_procdata, n_procfd);
+        cout << "'" << hostname << "': {" << endl;
+        cout << "  'nprocdata':" << n_procdata << "," << endl;
+        cout << "  'nprocstat':" << n_procstat << "," << endl;
+        cout << "  'nprocfd':" << n_procfd << "," << endl;
+        cout << "  'nprocobs':" << n_procobs << "," << endl;
+        cout << "}," << endl;
     }
+    cout << "]," << endl;
+    cout << "}" << endl;
 
     delete inputFile;
 
