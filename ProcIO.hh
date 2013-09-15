@@ -143,6 +143,12 @@ public:
 	unsigned int get_nprocstat();
 	unsigned int get_nprocfd();
 	unsigned int get_nprocobs();
+
+    bool metadata_set_string(const char*, const char*);
+    bool metadata_set_uint(const char*, unsigned long);
+    bool metadata_get_string(const char*, char**);
+    bool metadata_get_uint(const char*, unsigned long*);
+
     void set_override_context(bool);
     bool get_hosts(vector<string>& hosts);
 	void flush();
@@ -155,6 +161,7 @@ private:
     string filename;
     ProcIOFileMode mode;
     hid_t file;
+    hid_t root;
 	map<string,hdf5Ref*> openRefs;
 	hdf5Ref* hdf5Segment;
 
@@ -162,6 +169,7 @@ private:
     hid_t strType_exeBuffer;
     hid_t strType_buffer;
 	hid_t strType_idBuffer;
+    hid_t strType_variable;
 
     /* identifiers for complex types */
     hid_t type_procdata;
@@ -190,7 +198,7 @@ public:
     ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec);
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
-	bool _amqp_open();
+    bool _amqp_open();
     bool _amqp_close(bool);
     bool _amqp_bind_context();
 	bool _amqp_eval_status(amqp_rpc_reply_t _status);

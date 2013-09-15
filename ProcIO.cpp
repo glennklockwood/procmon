@@ -695,10 +695,11 @@ unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize
     if (H5Lexists(group, dsName, H5P_DEFAULT) == 1) {
         *dataset = H5Dopen2(group, dsName, H5P_DEFAULT);
 		*attribute = H5Aopen(*dataset, "nRecords", H5P_DEFAULT);
-		H5Aread(*attribute, H5T_NATIVE_UINT, &size);
+        hid_t attr_type = H5Aget_type(*attribute);
+		H5Aread(*attribute, attr_type, &size);
+        H5Tclose(attr_type);
     } else {
         hid_t param;
-		hid_t a_id;
 		hsize_t rank = 1;
         hsize_t initial_dims = chunkSize;
         hsize_t maximal_dims = H5S_UNLIMITED;
@@ -714,9 +715,10 @@ unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize
         H5Pclose(param);
         H5Sclose(dataspace);
 
-		a_id = H5Screate(H5S_SCALAR);
+        hid_t a_id = H5Screate(H5S_SCALAR);
 		*attribute = H5Acreate2(*dataset, "nRecords", H5T_NATIVE_UINT, a_id, H5P_DEFAULT, H5P_DEFAULT);
 		H5Awrite(*attribute, H5T_NATIVE_UINT, &size);
+        H5Sclose(a_id);
     }
 	return size;
 }
@@ -762,6 +764,7 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
 	strType_exeBuffer = -1;
 	strType_buffer = -1;
 	strType_idBuffer = -1;
+    strType_variable = -1;
 	type_procdata = -1;
 	type_procstat = -1;
     type_procfd = -1;
@@ -776,6 +779,8 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
 	if (file < 0) {
 		throw ProcIOException("Failed to open HDF5 file: " + filename);
 	}
+    root = H5Gopen2(file, "/", H5P_DEFAULT);
+    if (root < 0) throw ProcIOException("Failed to open root group in file: " + filename);
     initialize_types();
 }
 	
@@ -790,6 +795,8 @@ ProcHDF5IO::~ProcHDF5IO() {
     if (type_procobs > 0) status = H5Tclose(type_procobs);
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
+    if (strType_variable > 0) status = H5Tclose(strType_variable);
+    if (root > 0) status = H5Gclose(root);
     if (file > 0) status = H5Fclose(file);
     //status = H5close();
 }
@@ -870,6 +877,12 @@ void ProcHDF5IO::initialize_types() {
 	if (status < 0) {
 		throw ProcIOException("Failed to set strType_idBuffer size");
 	}
+
+    strType_variable = H5Tcopy(H5T_C_S1);
+    status = H5Tset_size(strType_variable, H5T_VARIABLE);
+    if (status < 0) {
+        throw ProcIOException("Failed to set strType_variable size");
+    }
 
     type_procdata = H5Tcreate(H5T_COMPOUND, sizeof(procdata));
     if (type_procdata < 0) throw ProcIOException("Failed to create type_procdata");
@@ -1102,9 +1115,10 @@ unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, vo
 
 	if (hdf5Segment == nullptr) return 0;
 	hdf5Segment->lastUpdate = time(NULL);
-    hid_t dataspace = H5Dget_space(ds);
 
+    hid_t dataspace = H5Dget_space(ds);
     status = H5Sget_simple_extent_dims(dataspace, &maxRecords, NULL);
+    H5Sclose(dataspace);
 
 	if (append) startRecord = *nRecords;
     targetRecords = startRecord + count > maxRecords ? startRecord + count : maxRecords;
@@ -1174,6 +1188,71 @@ herr_t op_func(hid_t loc_id, const char *name, const H5L_info_t *info, void *op_
 bool ProcHDF5IO::get_hosts(vector<string>& hosts) {
     herr_t status;
     status = H5Literate(this->file, H5_INDEX_NAME, H5_ITER_NATIVE, NULL, op_func, (void*) &hosts);
+    return status > 0;
+}
+
+/* metadata_set_string
+   writes string-type metadata into the root group of the HDF5 file */
+bool ProcHDF5IO::metadata_set_string(const char *ident, const char *value) {
+    hid_t attr = -1;
+    hid_t ds = H5Screate(H5S_SCALAR);
+    herr_t status;
+    /* first create the attribute if it doesn't exist */
+    if (H5Aexists(root, ident) == 0) {
+        attr = H5Acreate2(root, ident, strType_variable, ds, H5P_DEFAULT, H5P_DEFAULT);
+    } else {
+		attr = H5Aopen(root, ident, H5P_DEFAULT);
+    }
+    status = H5Awrite(attr, strType_variable, &value);
+    H5Aclose(attr);
+    H5Sclose(ds);
+    return status >= 0;
+}
+
+bool ProcHDF5IO::metadata_set_uint(const char *ident, unsigned long value) {
+    hid_t attr = -1;
+    hid_t ds = H5Screate(H5S_SCALAR);
+    herr_t status;
+    if (H5Aexists(root, ident) == 0) {
+        attr = H5Acreate2(root, ident, H5T_NATIVE_ULONG, ds, H5P_DEFAULT, H5P_DEFAULT);
+    } else {
+        attr = H5Aopen(root, ident, H5P_DEFAULT);
+    }
+    status = H5Awrite(attr, H5T_NATIVE_ULONG, &value);
+    H5Aclose(attr);
+    H5Sclose(ds);
+    return status >= 0;
+}
+
+bool ProcHDF5IO::metadata_get_string(const char *ident, char **value) {
+    hid_t attr = -1;
+    hid_t type = -1;
+    herr_t status;
+
+    if (H5Aexists(root, ident) == 0) {
+        return false;
+    }
+    attr = H5Aopen(root, ident, H5P_DEFAULT);
+    type = H5Aget_type(attr);
+    status = H5Aread(attr, type, value);
+    H5Tclose(type);
+    H5Aclose(attr);
+    return status > 0;
+}
+
+bool ProcHDF5IO::metadata_get_uint(const char *ident, unsigned long *value) {
+    hid_t attr = -1;
+    hid_t type = -1;
+    herr_t status;
+
+    if (H5Aexists(root, ident) == 0) {
+        return false;
+    }
+    attr = H5Aopen(root, ident, H5P_DEFAULT);
+    type = H5Aget_type(attr);
+    status = H5Aread(attr, type, value);
+    H5Tclose(type);
+    H5Aclose(attr);
     return status > 0;
 }
 
