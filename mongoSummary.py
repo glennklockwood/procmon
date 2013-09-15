@@ -18,20 +18,21 @@ db = client.procmon
 db.authenticate('procmon', 'nomcorp')
 collection = db[collection_label]
 
-summary_labels = ['execProject', 'execUser', 'executables', 'projects',
-    'scriptProject', 'scriptUser', 'scripts', 'users' ]
 summ_index = {
     'executables' : ['exePath'],
     'execUser' : ['username', 'exePath'],
     'execProject' : ['project', 'exePath'],
+    'execHost' : ['host','exePath'],
     'scripts' : ['scripts', 'exePath', 'execName'],
     'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
     'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
+    'scriptHost' : ['host','scripts','exePath','execName'],
     'projects' : ['project'],
-    'users' : ['username']
+    'users' : ['username'],
+    'hosts' : ['host'],
 }
 
-for summary_label in summary_labels:
+for summary_label in summ_index.keys():
     print summary_label
     df = pandas.read_hdf(summary_file, summary_label)
     if len(summ_index[summary_label]) > 1 and df.shape[0] > 0 and type(df.index) is not pandas.core.index.MultiIndex:
@@ -56,13 +57,28 @@ for summary_label in summary_labels:
     for v in d:
         v['date'] = date
         v['type'] = summary_label
-        collection.insert(v)
+        ok = True
+        for field in v:
+            if isinstance(v[field], str):
+                try:
+                    v[field] = v[field].decode('utf-8')
+                except:
+                    ok = False
+        if not ok:
+            continue
+        try:
+            collection.insert(v)
+        except:
+            print "failed to insert: ", v
+            sys.exit(1)
     collcount = collection.find({'date':date, 'type':summary_label}).count()
     if collcount != len(d):
         print "WARNING: not all records inserted to database! (db: %d, h5: %d)" % (collcount, len(d))
 
-#users = db.firehose.distinct("username")
-#projects = db.firehose.distinct("project")
-#collection = db['summary']
-#collection.find_and_modify(query={"type":"users"}, update={"type":"users", "obj":users})
-#collection.find_and_modify(query={"type":"projects"}, update={"type":"projects", "obj":projects})
+users = db.firehose.distinct("username")
+projects = db.firehose.distinct("project")
+hosts = db.firehose.distinct("host_ps")
+collection = db['summary']
+collection.find_and_modify(query={"type":"users"}, update={"type":"users", "obj":users})
+collection.find_and_modify(query={"type":"projects"}, update={"type":"projects", "obj":projects})
+collection.find_and_modify(query={"type":"hosts"}, update={"type":"hosts", "obj":hosts})
