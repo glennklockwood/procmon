@@ -16,6 +16,7 @@ import numpy
 import h5py
 import sys
 import os
+import traceback
 import pandas
 from datetime import date,datetime,timedelta,time
 import re
@@ -42,20 +43,31 @@ def get_host_processes(hostname, fd, query):
     The pandas DataFrame contains the most recent recorded record for
     each unique process.
     """
+    global rank
     hostgroup = None
     procdata = None
     procstat = None
     try:
+        ## read the nRecords attribute to get the number of properly written
+        ## records
         hostgroup = fd[hostname]
-        procdata = pandas.DataFrame(hostgroup['procdata'][...])
+        nprocdata = hostgroup['procdata'].attrs['nRecords']
+        nprocstat = hostgroup['procstat'].attrs['nRecords']
+        procdata = pandas.DataFrame(hostgroup['procdata'][0:nprocdata])
         procdata['key_startTime'] = procdata['startTime']
         procdata = procdata.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
         procdata['host'] = hostname
-        procstat = pandas.DataFrame(hostgroup['procstat'][...])
+        procstat = pandas.DataFrame(hostgroup['procstat'][0:nprocstat])
         procstat['key_startTime'] = procstat['startTime']
         procstat = procstat.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
+        procstat['host'] = hostname
+
     except:
-        sys.stderr.write('unable to retrieve data for %s; skipping\n' % hostname)
+        sys.stderr.write('[%d] unable to retrieve data for %s; skipping\n' % (rank, hostname))
+        traceback.print_exc(file=sys.stderr)
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
+        
     
     t_data = None
 
@@ -74,7 +86,8 @@ def get_host_processes(hostname, fd, query):
             pd = processes.groupby(level=[0,1]).first()
             ps = procstat.ix[pd.index].groupby(level=[0,1]).first()
             t_data = pd.join(ps, rsuffix='_ps')
-            t_data = t_data.set_index('host', append=True)
+            t_data['key_host'] = t_data['host']
+            t_data = t_data.set_index('key_host', append=True)
     return t_data
     
 def merge_host_data(existing_hostdata, new_hostdata):
@@ -145,7 +158,7 @@ def get_job_data(start, end, qqacct_file):
 def find_script(args):
     """Identify scripts passed to interpreters by returning first value that doesn't start with a dash."""
     for arg in args:
-        if arg[0] != "-":
+        if type(arg) is str and len(arg) > 0 and arg[0] != "-":
             return arg
     return None
 
@@ -351,16 +364,16 @@ def get_processes(filenames, query):
                     print "[%d] %s\n" % (rank, string)
         
     print "[%d] finished merging data" % rank
-
-    ## clean up paths to make equivalent and understandable
-    processes.exePath = processes.exePath.str.replace("^/chos","",case=False)
-    processes.exePath = processes.exePath.str.replace("^/house/tooldirs/jgitools/Linux_x86_64","/jgi/tools",case=False)
-    processes.exePath = processes.exePath.str.replace("^/syscom/os/deb6gp","",case=False)
-    processes.exePath = processes.exePath.str.replace("^/tlphoebe/genepool","/usr/syscom",case=False)
-    processes.cwdPath = processes.cwdPath.str.replace("^/chos","",case=False)
-    processes.cwdPath = processes.cwdPath.str.replace("^/house/tooldirs/jgitools/Linux_x86_64","/jgi/tools",case=False)
-    processes.cwdPath = processes.cwdPath.str.replace("^/syscom/os/deb6gp","",case=False)
-    processes.cwdPath = processes.cwdPath.str.replace("^/tlphoebe/genepool","/usr/syscom",case=False)
+    if processes is not None and not processes.empty:
+        ## clean up paths to make equivalent and understandable
+        processes.exePath = processes.exePath.str.replace("^/chos","",case=False)
+        processes.exePath = processes.exePath.str.replace("^/house/tooldirs/jgitools/Linux_x86_64","/jgi/tools",case=False)
+        processes.exePath = processes.exePath.str.replace("^/syscom/os/deb6gp","",case=False)
+        processes.exePath = processes.exePath.str.replace("^/tlphoebe/genepool","/usr/syscom",case=False)
+        processes.cwdPath = processes.cwdPath.str.replace("^/chos","",case=False)
+        processes.cwdPath = processes.cwdPath.str.replace("^/house/tooldirs/jgitools/Linux_x86_64","/jgi/tools",case=False)
+        processes.cwdPath = processes.cwdPath.str.replace("^/syscom/os/deb6gp","",case=False)
+        processes.cwdPath = processes.cwdPath.str.replace("^/tlphoebe/genepool","/usr/syscom",case=False)
 
     return (status,processes)
 
@@ -560,20 +573,25 @@ def main(args):
     qqacct_data = comm.bcast(qqacct_data, root=0)
     print "getting process data (may take a long time):"
     (h_status, processes) = get_processes(filenames, query)
-    identify_scripts(processes)
-    identify_users(processes)
-    processes = integrate_job_data(processes, qqacct_data)
-    summ_index = {
-        'executables' : ['exePath'],
-        'execUser' : ['username', 'exePath'],
-        'execProject' : ['project', 'exePath'],
-        'scripts' : ['scripts', 'exePath', 'execName'],
-        'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
-        'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
-        'projects' : ['project'],
-        'users' : ['username']
-    }
-    summaries = summarize_data(processes, summ_index)
+    summaries = None
+    if processes is not None and not processes.empty:
+        identify_scripts(processes)
+        identify_users(processes)
+        processes = integrate_job_data(processes, qqacct_data)
+        summ_index = {
+            'executables' : ['exePath'],
+            'execUser' : ['username', 'exePath'],
+            'execProject' : ['project', 'exePath'],
+            'execHost' : ['host','exePath'],
+            'scripts' : ['scripts', 'exePath', 'execName'],
+            'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
+            'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
+            'scriptHost' : ['host','scripts','exePath','execName'],
+            'projects' : ['project'],
+            'users' : ['username'],
+            'hosts' : ['host'],
+        }
+        summaries = summarize_data(processes, summ_index)
     all_summaries = comm.gather(summaries, root=0)
     if rank == 0:
         summ_list = {}
@@ -614,7 +632,7 @@ def main(args):
     
     if save_all_processes:
         all_processes = None
-        print "[%d] about to send %s processes" % (rank, processes.shape)
+        print "[%d] about to send %s processes" % (rank, processes.shape if processes is not None else "None")
         try:
             all_processes = comm.gather(processes, root=0)
         except:
