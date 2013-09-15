@@ -12,8 +12,8 @@ ProcessRecord::ProcessRecord() {
 int procdatabad(const procdata *a) {
     if (a->pid <= 0 || a->pid > 1000000) return 1;
     if (a->ppid < 0 || a->ppid > 1000000) return 2;
-    if (a->startTime < 1347019475 || a->startTime > time(NULL)) return 3;
-    if (a->recTime < 1347019475 || a->recTime > time(NULL)) return 4;
+    if (a->startTime == 0 || a->startTime > time(NULL)) return 3;
+    if (a->recTime == 0 || a->recTime > time(NULL)) return 4;
     size_t len = strlen(a->exePath);
     if (len >= BUFFER_SIZE) return 5;
     for (int i = 0; i < len; i++) {
@@ -25,16 +25,16 @@ int procdatabad(const procdata *a) {
 int procstatbad(const procstat *a) {
     if (a->pid <= 0 || a->pid > 1000000) return 1;
     if (a->ppid < 0 || a->ppid > 1000000) return 2;
-    if (a->startTime < 1347019475 || a->startTime > time(NULL)) return 3;
-    if (a->recTime < 1347019475 || a->recTime > time(NULL)) return 4;
+    if (a->startTime == 0 || a->startTime > time(NULL)) return 3;
+    if (a->recTime == 0 || a->recTime > time(NULL)) return 4;
     return 0;
 }
 
 int procfdbad(const procfd *a) {
     if (a->pid <= 0 || a->pid > 1000000) return 1;
     if (a->ppid < 0 || a->ppid > 1000000) return 2;
-    if (a->startTime < 1347019475 || a->startTime > time(NULL)) return 3;
-    if (a->recTime < 1347019475 || a->recTime > time(NULL)) return 4;
+    if (a->startTime == 0 || a->startTime > time(NULL)) return 3;
+    if (a->recTime == 0 || a->recTime > time(NULL)) return 4;
     size_t len = strlen(a->path);
     if (len >= BUFFER_SIZE) return 5;
     for (int i = 0; i < len; i++) {
