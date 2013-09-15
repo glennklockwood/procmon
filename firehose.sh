@@ -20,12 +20,12 @@ module load PrgEnv-gnu/4.7
 module load python/2.7.4
 module load hdf5/1.8.11
 module load uge
-module load openmpi/1.6.4
+module load openmpi/1.6.5
 
 ## start the houseHunter virtualenv
 . $HOME/houseHunter/bin/activate
 
-export _LD_LIBRARY_PATH=$LD_LIBRARY_PATH
+#export _LD_LIBRARY_PATH=$LD_LIBRARY_PATH
 
 PROCMON_SCRIPTS=$HOME/genepool/procmon
 PROCMON_SOURCE=/global/projectb/shared/data/genepool/procmon
@@ -56,6 +56,6 @@ echo qqacct -S "$STARTDATE" -E "$ENDDATE" -q "last_good_end_time >= $STARTDATETI
 qqacct -S "$STARTDATE" -E "$ENDDATE" -q "last_good_end_time >= $STARTDATETIME && last_good_end_time < $ENDDATETIME" -c "user,project,job_number,task_number,hostname,h_rt,end-start,memory(ppn*h_vmem),memory(maxvmem),ppn,failed,exit_status" -t : -o $QQACCT_FILE
 
 ## run the procFinder with houseHunter options
-time mpirun --bind-to-socket python $PROCFINDER --start $STARTFMT --end $ENDFMT --save-prefix $SAVEPREFIX --qqacct-data $QQACCT_FILE exePath '.*'
+time mpirun --bind-to-socket `which python` $PROCFINDER --start $STARTFMT --end $ENDFMT --save-prefix $SAVEPREFIX --qqacct-data $QQACCT_FILE exePath '.*'
 
 qsub $PROCMON_SCRIPTS/firehose_deposit.sh $STARTDATE $ENDDATE
