@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include <boost/program_options.hpp>
-#define POSTREDUCER_VERSION "2.3"
+#define POSTREDUCER_VERSION "2.4"
 namespace po = boost::program_options;
 
 /* ProcReducer
