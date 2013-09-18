@@ -77,7 +77,7 @@ for summary_label in summ_index.keys():
 
 users = db.firehose.distinct("username")
 projects = db.firehose.distinct("project")
-hosts = db.firehose.distinct("host_ps")
+hosts = db.firehose.distinct("host")
 collection = db['summary']
 collection.find_and_modify(query={"type":"users"}, update={"type":"users", "obj":users})
 collection.find_and_modify(query={"type":"projects"}, update={"type":"projects", "obj":projects})

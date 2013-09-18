@@ -445,7 +445,7 @@ def summarize_data(processes, summaries = {
     return ret
 
 def usage(ret):
-    print "procFinder.py [--h5-path <path=/global/projectb/shared/data/genepool/procmon>] [--start YYYYMMDDHHMMSS] [--end YYYYMMDDHHMMSS] [--prefix <h5prefix=procmon_genepool>] [--save-all-processes] --qqacct-data <filename> --save-prefix <save_filename_prefix> <col> <regex> [<col> <regex> ...]"
+    print "procFinder.py [--h5-path <path=/global/projectb/statistics/procmon/genepool>] [--start YYYYMMDDHHMMSS] [--end YYYYMMDDHHMMSS] [--prefix <h5prefix=procmon_genepool>] [--save-all-processes] --qqacct-data <filename> --save-prefix <save_filename_prefix> <col> <regex> [<col> <regex> ...]"
     print "  Start time defaults to yesterday at Midnight (inclusive)"
     print "  End time defaults to today at Midnight (non-inclusive)"
     print "  Therefore, the default is to process all the files from yesterday!"
@@ -459,7 +459,7 @@ def main(args):
     yesterday = date.today() - timedelta(days=1)
     start_time = datetime.combine(yesterday, time(0,0,0))
     end_time = datetime.combine(date.today(), time(0,0,0))
-    h5_path = "/global/projectb/shared/data/genepool/procmon"
+    h5_path = "/global/projectb/statistics/procmon/genepool"
     h5_prefix = "procmon_genepool"
     save_all_processes = False
     qqacct_file = None

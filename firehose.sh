@@ -28,7 +28,7 @@ module load openmpi/1.6.5
 #export _LD_LIBRARY_PATH=$LD_LIBRARY_PATH
 
 PROCMON_SCRIPTS=$HOME/genepool/procmon
-PROCMON_SOURCE=/global/projectb/shared/data/genepool/procmon
+PROCMON_SOURCE=/global/projectb/statistics/procmon/genepool
 PROCFINDER=$PROCMON_SCRIPTS/procFinder.py
 MONGOSUMMARY=$PROCMON_SCRIPTS/mongoSummary.py
 STARTDATE=`date -d yesterday +"%Y-%m-%d"`
