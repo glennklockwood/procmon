@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include <boost/program_options.hpp>
-#define PROCREDUCER_VERSION 2.3
+#define CHECKH5_VERSION 2.5
 namespace po = boost::program_options;
 
 /* ProcReducer
@@ -20,7 +20,7 @@ namespace po = boost::program_options;
 */
 
 void version() {
-    cout << "PostReducer " << PROCREDUCER_VERSION;
+    cout << "CheckH5 " << CHECKH5_VERSION;
     cout << endl;
     exit(0);
 }
@@ -84,12 +84,12 @@ int main(int argc, char **argv) {
     cout << "{" << endl;
     for (int i = 0; i < 4; i++) {
         inputFile->metadata_get_string(string_identifiers[i], &str_ptr);
-        cout << "'" << string_identifiers[i] << "':'" << str_ptr << "'," << endl;
+        cout << "\"" << string_identifiers[i] << "\":\"" << str_ptr << "\"," << endl;
         free(str_ptr);
     }
     for (int i = 0; i < 3; i++) {
         inputFile->metadata_get_uint(int_identifiers[i], &long_data);
-        cout << "'" << int_identifiers[i] << "':" << long_data << "," << endl;
+        cout << "\"" << int_identifiers[i] << "\":" << long_data << "," << endl;
     }
 
     string hostname, identifier, subidentifier;
@@ -100,7 +100,7 @@ int main(int argc, char **argv) {
     char buffer[1024];
     vector<string> hosts;
     inputFile->get_hosts(hosts);
-    cout << "'hosts':[" << endl;
+    cout << "\"hosts\":{" << endl;
     for (auto ptr = hosts.begin(), end = hosts.end(); ptr != end; ++ptr) {
         hostname = *ptr;
         identifier = "any";
@@ -111,14 +111,16 @@ int main(int argc, char **argv) {
         int n_procfd = inputFile->get_nprocfd();
         int n_procobs = inputFile->get_nprocobs();
 
-        cout << "'" << hostname << "': {" << endl;
-        cout << "  'nprocdata':" << n_procdata << "," << endl;
-        cout << "  'nprocstat':" << n_procstat << "," << endl;
-        cout << "  'nprocfd':" << n_procfd << "," << endl;
-        cout << "  'nprocobs':" << n_procobs << "," << endl;
-        cout << "}," << endl;
+        cout << "\"" << hostname << "\": {" << endl;
+        cout << "  \"nprocdata\":" << n_procdata << "," << endl;
+        cout << "  \"nprocstat\":" << n_procstat << "," << endl;
+        cout << "  \"nprocfd\":" << n_procfd << "," << endl;
+        cout << "  \"nprocobs\":" << n_procobs << endl;
+        cout << "}";
+        if (ptr + 1 != hosts.end()) cout << ",";
+        cout << endl;
     }
-    cout << "]," << endl;
+    cout << "}" << endl;
     cout << "}" << endl;
 
     delete inputFile;
