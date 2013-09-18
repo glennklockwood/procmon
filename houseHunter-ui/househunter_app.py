@@ -97,8 +97,8 @@ def parse_datatable_query(query, columns):
     print ret
     return ret
 
-def run_details_query(collection, qtype, user, project, date, queryHash):
-    coll = mongo.db.houseHunter
+def run_details_query(collection, qtype, user, project, host, date, queryHash):
+    coll = mongo.db[collection]
     if date is None:
         return {}
     
@@ -124,6 +124,12 @@ def run_details_query(collection, qtype, user, project, date, queryHash):
         else:
             ttype = 'execProject'
         query['project'] = project
+    if host is not None:
+        if qtype == 'script':
+            ttype = 'scriptHost'
+        else:
+            ttype = 'execHost'
+        query['host'] = host
     query['type'] = ttype
     cursor = coll.find(query).sort(qdata['sort'])
     nRec = cursor.count()
@@ -139,7 +145,7 @@ def run_details_query(collection, qtype, user, project, date, queryHash):
         retval['sEcho'] = int(queryHash['sEcho'])
     return retval
 
-def run_summ_query(collection, qtype, user, project, date, queryHash):
+def run_summ_query(collection, qtype, user, project, host, date, queryHash):
     if date is None:
         return {}
 
@@ -149,10 +155,16 @@ def run_summ_query(collection, qtype, user, project, date, queryHash):
         exeType = 'execUser'
         scriptType = 'scriptUser'
         keyVal = 'username'
-    else:
+    elif qtype == 'project':
         exeType = 'execProject'
         scriptType = 'scriptProject'
         keyVal = 'project'
+    elif qtype == 'host':
+        exeType = 'execHost'
+        scriptType = 'scriptHost'
+        keyVal = 'host'
+    else:
+        return {}
     reducer = bson.code.Code("""
         function(curr, result) {
             if (curr.type == "%s") {
@@ -172,6 +184,8 @@ def run_summ_query(collection, qtype, user, project, date, queryHash):
         condition['username'] = user
     if project is not None:
         condition['project'] = project
+    if host is not None:
+        condition['host'] = host
     cursor = coll.group(key = {keyVal:1}, condition = condition, initial = {"exe":0, "script":0}, reduce=reducer)
     nRec = len(cursor)
     cursor = sorted(cursor, key=lambda x:x[qdata['sort'][0][0]])
@@ -190,7 +204,7 @@ def run_summ_query(collection, qtype, user, project, date, queryHash):
     return retval
 
 def time_summary(collection, qtype, ident, qdate):
-    if qtype not in ('user','project',) or ident is None or qdate is None:
+    if qtype not in ('user','project','host',None,) or qdate is None:
         return {}
     coll = mongo.db[collection]
     latest_date = datetime.date.today() - datetime.timedelta(1)
@@ -202,9 +216,14 @@ def time_summary(collection, qtype, ident, qdate):
         start_date = earliest_date
     if end_date > latest_date:
         end_date = latest_date
-    (exeType,scriptType,qcol) = ('execUser','scriptUser','username')
+    (exeType,scriptType,qcol) = ('executables','scripts',None)
+    if qtype == 'user':
+        (exeType,scriptType,qcol) = ('execUser','scriptUser','username')
     if qtype == 'project':
         (exeType,scriptType,qcol) = ('execProject','scriptProject','project')
+    if qtype == 'host':
+        (exeType,scriptType,qcol) = ('execHost','scriptHost','host')
+
     reducer = bson.code.Code("""
         function(curr, result) {
             if (curr.type == "%s") {
@@ -215,10 +234,11 @@ def time_summary(collection, qtype, ident, qdate):
         }
         """ % exeType)
     condition = {
-        qcol: ident,
         'date': {'$gte':start_date.strftime("%Y%m%d"), '$lte':end_date.strftime("%Y%m%d")},
         'type': {'$in': [exeType, scriptType] },
     }
+    if qcol is not None:
+        condition[qcol] = ident
     records = coll.group(key={'date':1}, condition=condition, initial={'exe':0,'script':0}, reduce=reducer)
     ret = {
         'dates': [x.strftime('%Y%m%d') for x in date_range(start_date, end_date)],
@@ -257,20 +277,30 @@ def get_projectlist():
             projects.append(project)
     return projects
 
-def get_summary(collection, date=None, user=None, project=None):
+def get_hostlist():
+    t_hosts = mongo.db.summary.find({'type':'hosts'})[0]['obj']
+    hosts = ['Any']
+    for host in t_hosts:
+        if host is not None and len(host) > 0:
+            hosts.append(host)
+    return hosts
+
+def get_summary(collection, date=None, user=None, project=None, host=None):
     if date is None:
         return {}
     if collection is None:
         return {}
     coll = mongo.db[collection]
     types = []
-    if project is None and user is None:
-        types = ['users','projects','executables','scripts']
+    if project is None and user is None and host is None:
+        types = ['users','projects','executables','scripts','hosts']
     elif user is not None:
         types = ['users','execUser','scriptUser']
     elif project is not None:
         types = ['projects', 'execProject', 'scriptProject']
-    ret_val = {'exec_count':'N/A', 'projects_count': 'N/A', 'users_count':'N/A', 'scripts_count':'N/A'}
+    elif host is not None:
+        types = ['hosts', 'execHost', 'scriptHost']
+    ret_val = {'exec_count':'N/A', 'projects_count': 'N/A', 'users_count':'N/A', 'scripts_count':'N/A', 'hosts_count':'N/A'}
     for ttype in types:
         label = ttype
         if ttype.find('exec') >= 0:
@@ -283,6 +313,8 @@ def get_summary(collection, date=None, user=None, project=None):
             query['username'] = user
         if project is not None:
             query['project'] = project
+        if host is not None:
+            query['host'] = host
         ret_val[label] = coll.find(query).count()
     return ret_val    
 
@@ -299,18 +331,21 @@ def serve_query():
     
     date = query_hash['date'] if 'date' in query_hash else None
     user = query_hash['user'] if 'user' in query_hash else None
+    host = query_hash['host'] if 'host' in query_hash else None
     project = query_hash['project'] if 'project' in query_hash else None
     if user == "Any":
         user = None
     if project == "Any":
         project = None
+    if host == "Any":
+        host = None
     collection = query_hash['collection'] if 'collection' in query_hash else None
 
     if collection not in ('houseHunter','firehose',):
         return jsonify({})
 
     if 'get_summary' in query_hash:
-        return jsonify(get_summary(collection, date, user, project))
+        return jsonify(get_summary(collection, date, user, project, host))
 
     if 'get_users' in query_hash:
         userlist = get_userlist()
@@ -320,20 +355,32 @@ def serve_query():
         projectlist = get_projectlist()
         return jsonify({"projects":projectlist})
 
+    if 'get_hosts' in query_hash:
+        hostlist = get_hostlist()
+        return jsonify({"hosts":hostlist})
+
     if 'get_user_detailed_summary' in query_hash:
-        return jsonify(run_summ_query(collection, 'user', user, project, date, query_hash))
+        return jsonify(run_summ_query(collection, 'user', user, project, host, date, query_hash))
     if 'get_project_detailed_summary' in query_hash:
-        return jsonify(run_summ_query(collection, 'project', user, project, date, query_hash))
+        return jsonify(run_summ_query(collection, 'project', user, project, host, date, query_hash))
+    if 'get_host_detailed_summary' in query_hash:
+        return jsonify(run_summ_query(collection, 'host', user, project, host, date, query_hash))
     if 'get_exec' in query_hash:
-        return jsonify(run_details_query(collection, 'exec', user, project, date, query_hash))
+        return jsonify(run_details_query(collection, 'exec', user, project, host, date, query_hash))
     if 'get_script' in query_hash:
-        return jsonify(run_details_query(collection, 'script', user, project, date, query_hash))
+        return jsonify(run_details_query(collection, 'script', user, project, host, date, query_hash))
     if 'get_time_summary' in query_hash:
-        qtype = 'user'
-        ident = user
+        qtype = None
+        ident = None
+        if user is not None:
+            qtype = 'user'
+            ident = user
         if project is not None:
             qtype = 'project'
             ident = project
+        if host is not None:
+            qtype = 'host'
+            ident = host
         return jsonify(time_summary(collection, qtype, ident, date))
 
     return jsonify({})

@@ -9,12 +9,14 @@
 * {
     font-family: monospace;
 }
+.menuBox {
+    float: left;
+}
 .dataBox {
     margin: 10px;
-    width: 150px;
-    height: 100px;
-    float: left;
     background-color:#b0e0e6;
+    vertical-align: middle;
+    text-align: center;
 }
 .dataBox p {
     vertical-align: middle;
@@ -38,17 +40,19 @@ var exec_table_obj;
 var script_table_obj;
 var usersummary_table_obj;
 var projectsummary_table_obj;
+var hostsummary_table_obj;
 
 function loading_div() {
     return '<div style="width:100%"><br /><center><h3>Loading...</h3></center></br><center><img src="ajax-loader.gif" /></center></div>'
 }
 
 function update_summary() {
-    user = $("#select_user").val()
-    project = $("#select_project").val()
+    user = $("#select_user").val();
+    project = $("#select_project").val();
+    host = $("#select_host").val();
     date_val = $("#datepicker").val()
     collection = $("#select_collection").val()
-    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_summary=1&user=' + user + '&project=' + project + '&date=' + date_val, function(data) {
+    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_summary=1&user=' + user + '&project=' + project + '&host=' + host + '&date=' + date_val, function(data) {
         if ("users_count" in data) {
             $("#data_nusers").html(data.users_count);
         }
@@ -61,37 +65,40 @@ function update_summary() {
         if ("scripts_count" in data) {
             $("#data_nscripts").html(data.scripts_count);
         }
+        if ("hosts_count" in data) {
+            $("#data_nhosts").html(data.hosts_count);
+        }
     });
     exec_table_obj.fnDraw();
     script_table_obj.fnDraw();
-    if (user == "Any" && project == "Any") {
-        usersummary_table_obj.fnDraw();
-        projectsummary_table_obj.fnDraw();
-        $("#projectsummary_table_div").show();
-        $("#usersummary_table_div").show();
-        $("#usersummary_chart").hide();
-        $("#projectsummary_chart").hide();
+    usersummary_table_obj.fnDraw();
+    projectsummary_table_obj.fnDraw();
+    hostsummary_table_obj.fnDraw();
+    $("#usersummary_chart").hide();
+    $("#hostsummary_chart").hide();
+    $("#projectsummary_chart").hide();
+    $("#globalsummary_chart").hide();
+    if (user == "Any" && project == "Any" && host == "Any") {
+        initialize_chart('global');
     }
     if (user != "Any") {
-        usersummary_table_obj.fnDraw();
-        $("#projectsummary_table_div").hide();
-        $("#usersummary_table_div").show();
-        $("#projectsummary_chart").hide();
         $("#usersummary_chart").html(loading_div());
-        $("#projectsummary_chart").hide();
         initialize_chart('user');
     }
     if (project != "Any") {
-        projectsummary_table_obj.fnDraw();
-        $("#usersummary_table_div").hide();
-        $("#projectsummary_table_div").show();
-        $("#usersummary_chart").hide();
         $("#projectsummary_chart").html(loading_div());
         initialize_chart('project');
     }
+    if (host != "Any") {
+        $("#hostsummary_chart").html(loading_div());
+        initialize_chart('host');
+    }
 }
 function initialize_chart(chart_type) {
-    var query = $("#select_" + chart_type).val();
+    var query = "Everything";
+    if (chart_type != "global") {
+        query = $("#select_" + chart_type).val();
+    }
     var container = chart_type + 'summary_chart';
     var date_val = $("#datepicker").val();
     var collection = $("#select_collection").val();
@@ -230,21 +237,23 @@ $(function() {
 
 function change_menu_selection() {
     id = this.id;
-    if (id != "select_user" && id != "select_project") {
+    if (id != "select_user" && id != "select_project" && id != "select_host") {
         return;
     }
-    otherid = "select_user";
-    if (id == "select_user") {
-        otherid = "select_project";
-    }
-    $('#'+otherid).unbind('change', change_menu_selection);
-    $('#'+otherid).val('Any');
-    $('#'+otherid).bind('change', change_menu_selection);
+    selections = ['select_user','select_project','select_host'];
+    $.each(selections, function() {
+        if (this != id) {
+        $('#'+this).unbind('change', change_menu_selection);
+        $('#'+this).val('Any');
+        $('#'+this).bind('change', change_menu_selection);
+        }
+    });
     update_summary();
 }
 
 function reset_all() {
-    $('#select_user').val('Any')
+    $('#select_user').val('Any');
+    $('#select_host').val('Any');
     $('#select_project').val('Any').change()
 }
 
@@ -263,8 +272,12 @@ $(document).ready(function() {
     $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_projects=1', function(data) {
         reset_selection('#select_project', data.projects);
     });
+    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_hosts=1', function(data) {
+        reset_selection('#select_host', data.hosts);
+    });
     $("#select_user").change(change_menu_selection);
     $("#select_project").change(change_menu_selection);
+    $("#select_host").change(change_menu_selection);
     $("#datepicker").datepicker('setDate', 'defaultDate');
     $("#datepicker").bind('change', update_summary);
     exec_table_obj = $('#exec_table').dataTable( {
@@ -276,11 +289,13 @@ $(document).ready(function() {
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
+            host = $("#select_host").val();
             date_val = $("#datepicker").val();
             collection = $("#select_collection").val();
             aoData.push( {"name": "get_exec", "value": 1} );
             aoData.push( {"name": "user", "value": user} );
             aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "host", "value": host} );
             aoData.push( {"name": "date", "value": date_val} );
             aoData.push( {"name": "collection", "value": collection} );
         },
@@ -300,11 +315,13 @@ $(document).ready(function() {
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
+            host = $("#select_host").val();
             date_val = $("#datepicker").val();
             collection = $("#select_collection").val();
             aoData.push( {"name": "get_script", "value": 1} );
             aoData.push( {"name": "user", "value": user} );
             aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "host", "value": host} );
             aoData.push( {"name": "date", "value": date_val} );
             aoData.push( {"name": "collection", "value": collection} );
         },
@@ -324,11 +341,13 @@ $(document).ready(function() {
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
+            host = $("#select_host").val();
             date_val = $("#datepicker").val();
             collection = $("#select_collection").val();
             aoData.push( {"name": "get_user_detailed_summary", "value": 1} );
             aoData.push( {"name": "user", "value": user} );
             aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "host", "value": host} );
             aoData.push( {"name": "date", "value": date_val} );
             aoData.push( {"name": "collection", "value": collection} );
         },
@@ -336,7 +355,7 @@ $(document).ready(function() {
         "aoColumnDefs": [ {
             "aTargets": [ 0 ],
             "mRender": function (data, type, full) {
-                return '<a href="#" onclick="$(\'#select_user\').val(\'' + data + '\').change(); return false;">' + data + '</a>';
+                return '<a href="#" onclick="$(\'#select_user\').val(\'' + data + '\').change(); $(\'#tabs\').tabs(\'option\', \'active\', 0); return false;">' + data + '</a>';
             },
         }],
     } ); 
@@ -349,11 +368,13 @@ $(document).ready(function() {
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
+            host = $("#select_host").val();
             date_val = $("#datepicker").val();
             collection = $("#select_collection").val();
             aoData.push( {"name": "get_project_detailed_summary", "value": 1} );
             aoData.push( {"name": "user", "value": user} );
             aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "host", "value": host} );
             aoData.push( {"name": "date", "value": date_val} );
             aoData.push( {"name": "collection", "value": collection} );
         },
@@ -361,7 +382,34 @@ $(document).ready(function() {
         "aoColumnDefs": [ {
             "aTargets": [ 0 ],
             "mRender": function (data, type, full) {
-                return '<a href="#" onclick="$(\'#select_project\').val(\'' + data + '\').change(); return false;">' + data + '</a>';
+                return '<a href="#" onclick="$(\'#select_project\').val(\'' + data + '\').change(); $(\'#tabs\').tabs(\'option\', \'active\', 0);  return false;">' + data + '</a>';
+            },
+        }],
+    } ); 
+    hostsummary_table_obj = $('#hostsummary_table').dataTable( {
+        "bProcessing": true,
+        "bServerSide": true,
+        "bFilter": false,
+        "iDisplayLength": 25,
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/get_mongo_data",
+        "fnServerParams": function ( aoData ) {
+            user = $("#select_user").val();
+            project = $("#select_project").val();
+            host = $("#select_host").val();
+            date_val = $("#datepicker").val();
+            collection = $("#select_collection").val();
+            aoData.push( {"name": "get_host_detailed_summary", "value": 1} );
+            aoData.push( {"name": "user", "value": user} );
+            aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "host", "value": host} );
+            aoData.push( {"name": "date", "value": date_val} );
+            aoData.push( {"name": "collection", "value": collection} );
+        },
+        "aaSorting": [[1, "desc"]],
+        "aoColumnDefs": [ {
+            "aTargets": [ 0 ],
+            "mRender": function (data, type, full) {
+                return '<a href="#" onclick="$(\'#select_host\').val(\'' + data + '\').change(); $(\'#tabs\').tabs(\'option\', \'active\', 0);  return false;">' + data + '</a>';
             },
         }],
     } ); 
@@ -373,32 +421,29 @@ $(".dataBox").corner("30px");
 </script>
 </head>
 <body>
-<div id='menubar'>
+
+<div id='menubar' class='menuBox'>
     <form>
-        <strong>Date:</strong>&nbsp;<input type='text' name='date' id='datepicker' size='12' />&nbsp;&nbsp;
-        <strong>User:</strong>&nbsp;<select name='user' id='select_user'><option value="Any">Any</option></select>&nbsp;&nbsp;
-        <strong>Project:</strong>&nbsp;<select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
+        <strong>Date:</strong><input type='text' name='date' id='datepicker' size='12' />&nbsp;&nbsp;
+        <strong>User:</strong><select name='user' id='select_user'><option value="Any">Any</option></select>&nbsp;&nbsp;
+        <strong>Project:</strong><select name='project' id='select_project'><option value="Any">Any</option></select>&nbsp;&nbsp;
+        <strong>Host:</strong><select name='host' id='select_host'><option value="Any">Any</option></select>&nbsp;&nbsp;
+        <strong>Data:</strong><select name='collection' id='select_collection' onchange='update_summary();return false;'><option value="houseHunter">houseHunter</option><option value="firehose">firehose</option></select></td>
         <button name='reset' onclick='reset_all();return false;'>Reset</button>&nbsp;&nbsp;
-        <strong>Data:</strong>&nbsp;<select name='collection' id='select_collection' onchange='update_summary();return false;'><option value="houseHunter">houseHunter</option><option value="firehose">firehose</option></select>&nbsp;&nbsp;
-        <strong><a href='#' onclick='$("#about_dialog").dialog("open"); return false;'>About</a></strong>&nbsp;&nbsp;
+        <strong><a href='#' onclick='$("#about_dialog").dialog("open"); return false;'>About houseHunter</a></strong>
     </form>
 </div>
-
-<div id="summary_stats" style="height:160px; width:100%;">
-    <div class="dataBox"><p><span id="data_nusers" class="datum">...</span><br />Users</p></div>
-    <div class="dataBox"><p><span id="data_nprojects" class="datum">...</span><br />Projects</p></div>
-    <div class="dataBox"><p><span id="data_nexe" class="datum">...</span><br />Executables</p></div>
-    <div class="dataBox"><p><span id="data_nscripts" class="datum">...</span><br />Scripts</p></div>
-</div>
+<div style="clear:both"></div>
 <div id="tabs">
 <ul>
     <li><a href="#summary_tab">Summary</a></li>
     <li><a href="#exec_table_div">Executables</a></li>
     <li><a href="#script_table_div">Scripts</a></li>
+    <li><a href="#user_idx_div">User Index</a></li>
+    <li><a href="#project_idx_div">Project Index</a></li>
+    <li><a href="#host_idx_div">Host Index</a></li>
 </ul>
-<div id="summary_tab">
-    <div style="width:49%;float:left">
-        <div id="usersummary_table_div">
+<div id="user_idx_div">
         <table id="usersummary_table">
             <thead>
                 <th>User</th>
@@ -407,12 +452,9 @@ $(".dataBox").corner("30px");
             </thead>
             <tbody></tbody>
         </table>
-        </div>
-        <div id="projectsummary_chart" style='display: none'></div>
-    </div>
-    <div style="width:49%;float:right">
-        <div id="projectsummary_table_div">
-        <table id="projectsummary_table">
+</div>
+<div id="project_idx_div">
+    <table id="projectsummary_table">
             <thead>
                 <th>Project</th>
                 <th>N Executables</th>
@@ -421,9 +463,34 @@ $(".dataBox").corner("30px");
             <tbody></tbody>
         </table>
         </div>
-        <div id="usersummary_chart" style='display: none'></div>
-    </div>
-    <div style="clear:both"></div>
+<div id="host_idx_div">
+    <table id="hostsummary_table">
+            <thead>
+                <th>Host</th>
+                <th>N Executables</th>
+                <th>N Scripts</th>
+            </thead>
+            <tbody></tbody>
+        </table>
+        </div>
+<div id="summary_tab">
+<div class='menuBox'>
+    <div id="globalsummary_chart" style='display: none'></div>
+    <div id="projectsummary_chart" style='display: none'></div>
+    <div id="usersummary_chart" style='display: none'></div>
+    <div id="hostsummary_chart" style='display: none'></div>
+</div>
+<div class='menuBox'>
+    <div class='dataBox'>
+    <span class="datum" id="data_nusers">...</span><br/>Users<br /><br />
+    <span class="datum" id="data_nprojects">...</span><br />Projects<br /><br />
+    <span class="datum" id="data_nhosts">...</span><br />Hosts<br /><br />
+    <span class="datum" id="data_nexe">...</span><br />Executables<br /><br />
+    <span class="datum" id="data_nscripts">...</span><br />Scripts<br /><br />
+</div>
+    </table>
+</div>
+<div style="clear:both"></div>
 </div>
 <div id="about_dialog" title="About HouseHunter" style="display: none">
     <h3>About the houseHunter</h3>
