@@ -93,4 +93,4 @@ ProcIO.procmon.o: ProcIO.cpp config.h ProcIO.hh
 	$(CXX) -c $(PROCMON_CFLAGS) -o $@ -c ProcIO.cpp
 
 clean:
-	$(RM) *.o procmon ProcReducer config.h
+	$(RM) *.o procmon ProcReducer CheckH5 PostReducer ProcMuxer config.h
