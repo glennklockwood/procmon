@@ -1,0 +1,9 @@
+.container {
+    padding: 20px;
+    margin: 20px;
+}
+
+#target .msg {
+    color: hsl(40, 90%, 48%);
+    font-size: 20pt;
+}

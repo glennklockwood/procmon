@@ -1,0 +1,82 @@
+<html>
+    <head>
+    <title>WebSockets</title>
+    <script src="/static/jquery-1.9.1.js"></script>
+    <script src="/static/main.js"></script>
+    <script src="/static/socket.io.min.js"></script>
+    <script src="/static/jquery-ui.min.js"></script>
+    <script src="/static/jquery.dataTables.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="/static/main.css" />
+    <link rel="stylesheet" type="text/css" href="/static/jquery-ui.min.css" />
+    <link rel="stylesheet" type="text/css" href="/static/jquery.dataTables.css" />
+    <script>
+    var socket;
+    var data_table_obj;
+    var local_data = {};
+    function do_setup() {
+        identifier = $("#identifier").val()
+        subidentifier = $("#subidentifier").val()
+        if (identifier == "") { identifier = "*"; }
+        if (subidentifier == "") { subidentifier = "*"; }
+        if (identifier == "*" && subidentifier == "*") {
+            alert("Must specify valid values.");
+            return false;
+        }
+        socket.emit('setup', '{"identifier":"' + identifier + '","subidentifier":"' + subidentifier + '"}')
+    }
+
+    $(document).ready(function() {
+        data_table_obj = $('#datatable').dataTable();
+        socket = io.connect('/livetop');
+        socket.on('connect', function() {
+            console.log("socket connected");
+            $("#setup").removeAttr('disabled').removeClass( 'ui-state-disabled' );
+        });
+        socket.on('disconnect', function() {
+            console.log("socket disconnected");
+        });
+        socket.on('proc', function(json_data) {
+            var data = eval('(' + json_data + ')');
+            host = data["host"]
+            console.log("Got process data: ", data);
+            local_data[host] = data['data']
+
+            var data_array = new Array();
+            for (var host in local_data) {
+                hostdata = local_data[host];
+                for (var idx in hostdata) {
+                    row = hostdata[idx];
+                    lrow = [row['pid'], host, row['cmdArgs'], row['cpu_rate'], row['cpu'], row['vsize'], row['io_readBytes'], row['io_writeBytes']]
+                    data_array.push(lrow);
+                };
+            };
+            data_table_obj.fnClearTable()
+            data_table_obj.fnAddData(data_array);
+        });
+    });
+    </script>
+    </head>
+
+    <body>
+        <div id="menu">
+        <strong>Identifier</strong>&nbsp;<input type="text" id="identifier" value = "" />&nbsp;&nbsp;
+        <strong>Subidentifier</strong>&nbsp;<input type="text" id="subidentifier" value="" />&nbsp;&nbsp;
+        <input type="button" onclick="do_setup(); return false;" id="setup" disabled value="Setup" />
+        </div>
+        <div class="container">
+            <table id="datatable">
+                <thead>
+                    <th>pid</th>
+                    <th>host</th>
+                    <th>Command</th>
+                    <th>CPU%</th>
+                    <th>CPU (s)</th>
+                    <th>vmem</th>
+                    <th>IO Read</th>
+                    <th>IO Write</th>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </body>
+</html>
