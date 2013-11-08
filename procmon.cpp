@@ -714,6 +714,18 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	return ntargets;
 }
 
+static void craylock() {
+    int fd = open("/tmp/procmon", O_CREAT);
+    int lock;
+    if (fd < 0) {
+        exit(0);
+    }
+    lock = flock(fd, LOCK_EX | LOCK_NB);
+    if (lock < 0) {
+        exit(0);
+    }
+}
+
 static void daemonize() {
 	pid_t pid, sid;
 
@@ -932,6 +944,9 @@ int main(int argc, char** argv) {
 	signal(SIGUSR1, sig_handler);
 	signal(SIGUSR2, sig_handler);
 
+    if (config->craylock) {
+        craylock();
+    }
 	if (config->daemonize) {
 		daemonize();
 	}

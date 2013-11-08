@@ -30,6 +30,14 @@ ifdef GENEPOOL
 	CFLAGS += "-DUSE_CONFIG_H=1"
 endif
 
+ifdef HOPPER
+	USE_PROCMON_AMQP=1
+	USE_REDUCER_AMQP=1
+	USE_REDUCER_HDF5=1
+	CONFIG="cp config_hopper.h config.h"
+	CFLAGS += "-DUSE_CONFIG_H=1"
+endif
+
 ifdef TEST
 	USE_AMQP=1
 	USE_PROCMON_AMQP=1

@@ -55,6 +55,7 @@ public:
     int initialPhase;
     bool daemonize;
     bool verbose;
+    bool craylock;
 	int debug;
     int maxfd;
 #ifdef SECURED
@@ -102,6 +103,7 @@ public:
         pageSize = 0;
         daemonize = false;
         verbose = false;
+        craylock = false;
 		debug = 0;
         outputFlags = DEFAULT_OUTPUT_FLAGS;
         tgtGid = 0;
@@ -169,10 +171,11 @@ public:
             {"mqpassword", required_argument, 0, 'Y'},
             {"mqframe", required_argument, 0, 'R'},
 #endif
+            {"craylock", required_argument, 0, 'c'},
             { 0, 0, 0, 0},
         };
         int c;
-        string getopt_str = "hVvdf:i:F:p:W:g:G:I:S:o:q:D:";
+        string getopt_str = "chVvdf:i:F:p:W:g:G:I:S:o:q:D:";
 #ifdef USE_AMQP
         getopt_str += "H:P:E:Q:U:Y:R:";
 #endif
@@ -194,6 +197,7 @@ public:
             switch (c) {
                 case 'h': usage(0); break;
                 case 'V': version(); break; 
+                case 'c': craylock = true; break;
                 case 'v': verbose = true; break;
                 case 'd': daemonize = true; break;
                 case 'f':
@@ -370,6 +374,7 @@ public:
         printf("  -v [ --verbose ]   Print extra information\n");
         printf("\n");
         printf("Configuration Options:\n");
+        printf("  -c [ --craylock ]                       Create and lock /tmp/procmon; exit if no lock\n");
         printf("  -d [ --daemonize ]                      Daemonize the procmon process\n");
 #ifdef SECURED
         printf("  -u [ --user ] string/integer            username/uid to setuid\n");
