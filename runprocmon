@@ -33,6 +33,36 @@ case $HN in
 	gpint12)
 		SUBID='RND'
 	;;
+	gpint10[01])
+		SUBID='RND'
+	;;
+	gpint10[234])
+		SUBID='PLANT'
+	;;
+	gpint105)
+		SUBID='IMG'
+	;;
+	gpint106)
+		SUBID='GBP'
+	;;
+	gpint107)
+		SUBID='SDM'
+	;;
+	gpint108)
+		SUBID='RQC'
+	;;
+	gpint109)
+		SUBID='ASSEMBLY'
+	;;
+	gpint110)
+		SUBID='ASSEMBLY'
+	;;
+	gpint111)
+		SUBID='VISTA'
+	;;
+	gpint112)
+		SUBID='GENERAL'
+	;;
 	gpint0[23])
 		SUBID='VISTA'
 	;;
