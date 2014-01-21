@@ -1,0 +1,10 @@
+#!/bin/bash -l
+
+module purge
+module load PrgEnv-gnu/4.6
+module load python
+module load hdf5/1.8.11
+module load jamo
+module load uge
+
+python catjob.py "$@"
