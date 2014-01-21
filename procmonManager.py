@@ -47,7 +47,7 @@ Subject: MESSAGE FROM PROCMON: %s
     try:
         smtp_message = smtplib.SMTP('localhost')
         smtp_message.sendmail(email_originator, email_list, message)
-    except SMTPException:
+    except smtplib.SMTPException:
         print "Error: failed to send email!"
 
 def get_exception():
