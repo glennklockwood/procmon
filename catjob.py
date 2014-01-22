@@ -55,8 +55,10 @@ class JobRecord:
             self.end = datetime.fromtimestamp(int(end))
             self.job = int(job)
             self.task = int(task)
+            self.display_task = task
             if self.task == 0:
                 self.task = 1
+                self.display_task = ""
             mendelibMatch = re.match(r'([A-Za-z0-9\-\_]+?)-ib\.nersc\.gov', host)
             otherMatch = re.match(r'([A-Za-z0-9\-\_]+?)\.nersc\.gov', host)
             if mendelibMatch is not None:
@@ -81,7 +83,7 @@ class JobRecord:
 
     def __repr__(self):
         """Format JobRecord as a string."""
-        return "%s.%s (%s - %s) By %s/%s@%s" % (self.job, self.task, self.start.strftime("%Y-%m-%d %H:%M:%S"), self.end.strftime("%Y-%m-%d %H:%M:%S"), self.user, self.project, self.host)
+        return "%s%s (%s - %s) By %s/%s@%s" % (self.job, ".%s" % self.display_task if self.display_task != "" else "", self.start.strftime("%Y-%m-%d %H:%M:%S"), self.end.strftime("%Y-%m-%d %H:%M:%S"), self.user, self.project, self.host)
     
     def get_h5files(self):
         """Calculate h5 filenames."""
@@ -99,11 +101,7 @@ class JobRecord:
             if existing_records is None:
                 existing_records = new_records
             else:
-                existing_records_count = existing_records.shape[0]
-                replaceList = existing_records.index.isin(new_records.index)
-                if len(replaceList) > 0 and len(existing_records.index[replaceList]) > 0:
-                    the_replacement_records = new_records.ix[existing_records.index[replaceList]]
-                    existing_records.ix[replaceList] = the_replacement_records
+                existing_records.update(new_records)
                 addList = numpy.invert(new_records.index.isin(existing_records.index))
                 if len(addList) > 0:
                     newdata = new_records.ix[addList]
@@ -192,6 +190,12 @@ class JobRecord:
         return process_tree
 
     def __print_pstree(self, curr, level):
+        global enable_color
+        red_color = "\x1b[31;1m"
+        normal_color = "\x1b[0m"
+        if not enable_color:
+            red_color = ""
+            normal_color = ""
         prefix = ""
         if level > 0:
             prefix = " " * level
@@ -201,15 +205,19 @@ class JobRecord:
             if ps is None:
                 print "missing ps data!"
                 continue
-            startSec = ps.timeoffset.min()
+            startSec = pd['startTime'] - self.earliestStart
             startPct = (startSec / self.duration)*100 
             ps =  ps.sort('duration', ascending=0).reset_index()
             psLatest = ps.ix[0]
             durationPct = (psLatest['duration'] / self.duration)*100
-            print "%s+-- \x1b[31;1m%s %s\x1b[0m (pid: %d) Start: %1.1fs (%1.2f%%);  Duration: %1.1fs (%s%1.2f%%%s); MaxThreads: %d" % (prefix, pd['execName'], pd['exePath'], pd['pid'], startSec, startPct, psLatest['duration'], "\x1b[31;1m" if durationPct >= 5 else "", durationPct, "\x1b[0m" if durationPct >= 5 else "", ps.numThreads.max())
+            print "%s+-- %s%s %s%s (pid: %d) Start: %1.1fs (%1.2f%%);  Duration: %1.1fs (%s%1.2f%%%s); MaxThreads: %d" % (prefix, red_color, pd['execName'], pd['exePath'], normal_color, pd['pid'], startSec, startPct, psLatest['duration'], red_color if durationPct >= 5 else "", durationPct, normal_color if durationPct >= 5 else "", ps.numThreads.max())
             print "%s \--- CPU Time: %fs; Max CPU %%: %1.2f%%;  Mean CPU %%: %1.2f%%" % (prefix, (psLatest['utime']+psLatest['stime'])/ticksPerSec, ps.runningCPURate.max()*100, psLatest['overallCPURate']*100)
-            print "%s |--- Virtual Memory Peak: %s; Resident Memory Peak %s" % (prefix, formatBytes(psLatest['vmpeak']), formatBytes(psLatest['rsspeak']))
+            print "%s |--- Virtual Memory Peak: %s; Resident Memory Peak: %s" % (prefix, formatBytes(psLatest['vmpeak']), formatBytes(psLatest['rsspeak']))
             print "%s |--- IO read(): %s; IO write(): %s; FS Read*: %s; FS Write*: %s; Time Blocked on IO: %1.2fs (%1.2f%%)" % (prefix, formatBytes(psLatest['io_rchar']), formatBytes(psLatest['io_wchar']), formatBytes(psLatest['io_readBytes']), formatBytes(psLatest['io_writeBytes']), psLatest['blockedIO'], psLatest['blockedIOPct']*100)
+            if show_cmdline_args:
+                print "%s |--- CmdLine: %s" % (prefix, pd['cmdArgs'].replace("|", " "))
+            if show_cwd:
+                print "%s |--- cwdPath: %s" % (prefix, pd['cwdPath'])
             self.__print_pstree(node[1], level+1)
 
     def print_job(self):
@@ -283,8 +291,6 @@ class ProcmonH5Cache:
                 newrec['data'] = None
                 self.localcache.append(newrec)
 
-
-
 def get_qqacct_data(args, h5cache):
     qqacct_args = ['qqacct']
     qqacct_args.extend(args)
@@ -301,8 +307,57 @@ def get_qqacct_data(args, h5cache):
         sys.stderr.write('Failed to run qqacct!')
         return None
 
+def get_qs_data(args, h5cache):
+    qs_args = ['qs', '--style','dmj']
+    qs_args.extend(args)
+
+def usage():
+    print "catjob <arguments> <query>"
+    print "Arguments:"
+    print "  --no-color    Do not use ANSI coloring"
+    print "  --args        Display command-line arguments (up to 1024 characters)"
+    print "  --cwd         Disploy working directories" 
+    print "  --help        Display this help message"
+    print "Query:"
+    print "   All remaining arguments will be passed to qqacct;  see qqacct manpage"
+    print "   for more details."
+    sys.exit(0)
+
 h5cache = ProcmonH5Cache('/global/projectb/statistics/procmon/genepool', 'genepool')
-jobs = get_qqacct_data(sys.argv[1:], h5cache)
+args = []
+idx = 1
+enable_qqacct = True
+enable_qs = False
+enable_color = True
+show_cmdline_args = False
+show_cwd = False
+while idx < len(sys.argv):
+    if sys.argv[idx] == "--qs":
+        enable_qs = True
+        enable_qqacct = False
+    elif sys.argv[idx] == "--no-color":
+        enable_color = False
+    elif sys.argv[idx] == "--args":
+        show_cmdline_args = True
+    elif sys.argv[idx] == "--cwd":
+        show_cwd = True
+    elif sys.argv[idx] == "--help":
+        usage()
+    else:
+        args.append(sys.argv[idx])
+    idx += 1
+
+if len(args) == 0:
+    print "ERROR: no arguments to pass to qqacct"
+    print "catjob needs a valid qqacct query!"
+    sys.exit(1)
+
+jobs = []
+if enable_qqacct:
+    jobs = get_qqacct_data(args, h5cache)
+elif enable_qs:
+    jobs = get_qs_data(args, h5cache)
+
 h5files = {}
 for job in jobs:
     for h5file in job.get_h5files():
