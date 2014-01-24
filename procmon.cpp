@@ -18,6 +18,7 @@
 #include <string.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/file.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <math.h>
