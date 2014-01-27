@@ -47,6 +47,7 @@ ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHos
 {
 	connected = false;
 	amqpError = false;
+    memset(&conn, 0, sizeof(amqp_connection_state_t));
     try {
 	    _amqp_open();
     } catch (const ProcIOException &e) {

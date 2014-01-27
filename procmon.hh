@@ -128,6 +128,7 @@ public:
 
         /* Setup Context-derived values */
         char buffer[BUFFER_SIZE];
+        bzero(buffer, BUFFER_SIZE);
         if (gethostname(buffer, BUFFER_SIZE) != 0) {
             snprintf(buffer, BUFFER_SIZE, "Unknown");
         }

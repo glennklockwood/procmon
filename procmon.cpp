@@ -229,7 +229,7 @@ time_t getBootTime() {
 	char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	char* label;
+	char* label = NULL;
 	char lbuffer[LBUFFER_SIZE];
 	time_t timestamp;
 	int stage = 0;
@@ -503,9 +503,9 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		if (tgt_pid <= 0) {
 			continue;
 		}
-		if (npids > all_data.capacity_pids || all_data.pids == NULL) {
-			int talloc = npids > 512 ? npids*2 : 512;
-			all_data.pids = (int*) realloc(all_data.pids, sizeof(int)*talloc);
+		if (npids >= all_data.capacity_pids || all_data.pids == NULL) {
+			int talloc = npids > 511 ? npids*2 : 512;
+            all_data.pids = (int*) realloc(all_data.pids, sizeof(int)*talloc);
 			if (all_data.pids == NULL) {
 				fprintf(stderr, "FAILED to allocate memory for procid cache for %d pids (%lu bytes)\n", talloc, sizeof(int)*talloc);
 				return -1;
@@ -517,7 +517,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	closedir(procDir);
 
     if (npids > all_data.capacity_tmp_procStat || all_data.tmp_procStat == NULL) {
-        int talloc = npids > 512 ? npids*2 : 512;
+        int talloc = npids > 511 ? npids*2 : 512;
         all_data.tmp_procStat = (procstat*) realloc(all_data.tmp_procStat, sizeof(procstat)*talloc);
         if (all_data.tmp_procStat == NULL) {
             fprintf(stderr, "FAILED to allocate memory for initial procstat cache for %d pids (%lu bytes)\n", talloc, sizeof(procstat)*talloc);
@@ -923,6 +923,7 @@ void pidfile(const string& pidfilename) {
 int main(int argc, char** argv) {
 	int retCode = 0;
 	struct timeval startTime;
+    memset(&all_data, 0, sizeof(struct all_data_t));
     config = new ProcmonConfig(argc, argv);
     if (getuid() == 0) {
 #ifdef SECURED
@@ -1025,7 +1026,6 @@ int main(int argc, char** argv) {
 	    std::cout << "clockTicksPerSec: " << config->clockTicksPerSec << std::endl;
 	    std::cout << "boottime        : " << config->boottime << std::endl;
     }
-    memset(&all_data, 0, sizeof(struct all_data_t));
 
 	for ( ; ; ) {
 		struct timeval cycleTime;
