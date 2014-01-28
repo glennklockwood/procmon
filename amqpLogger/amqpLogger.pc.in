@@ -1,0 +1,10 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: amqpLogger
+Description: NERSC AMQP Logging Library
+Version: @PACKAGE_VERSION@
+Libs: -L${libdir} -lamqpLogger
+Cflags: -I${includedir}

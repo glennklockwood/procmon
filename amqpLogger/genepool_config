@@ -1,0 +1,10 @@
+with_amqp_server=genepool-mq.nersc.gov
+with_amqp_port=5672
+with_amqp_vhost=jgi
+with_amqp_user=procmon
+with_amqp_password=nomcorp
+with_amqp_exchange=logger
+with_amqp_framesize=131072
+with_amqp_retries=3
+with_socket_path=/var/run/amqplogger.sock
+with_socket_backlog=50

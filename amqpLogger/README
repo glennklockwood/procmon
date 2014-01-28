@@ -1,0 +1,21 @@
+FOR FULL INSTALLATION (INTENDED FOR USER ENVIRONMENT)
+
+module purge
+module load PrgEnv-gnu/4.6
+module load rabbitmq-c/0.4.0_nossl
+module load perl
+module load python
+module load swig
+
+./configure --prefix=/path/you/want SITE_CONFIG=genepool_config
+make
+make install
+
+
+***
+FOR DAEMON INSTALLATION (INTENDED FOR SYSTEM ENVIRONMENT)
+module purge
+module load PrgEnv-gnu/4.6
+module load rabbitmq-c/0.4.0_nossl
+
+./configure --prefix=/usr SITE_CONFIG=genepool_config
