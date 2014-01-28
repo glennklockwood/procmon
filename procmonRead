@@ -9,6 +9,7 @@ from datetime import datetime
 import time
 import curses
 import signal
+import procmon
 
 timeout=60
 lastConnection=datetime.now()
@@ -22,7 +23,16 @@ def handler(signum, frame):
 def recv_message(channel, method_frame, header_frame, body):
     lastConnection = datetime.now()
     print "%s" % (method_frame.routing_key)
-#    print "%s" % body
+    msg_type = method_frame.routing_key.split('.')[-1]
+    msg_data = None
+    if msg_type == "procstat":
+        msg_data = procmon.parse_procstat(body)
+    elif msg_type == "procdata":
+        msg_data = procmon.parse_procdata(body)
+    elif msg_type == "procfd":
+        msg_data = procmon.parse_procfd(body)
+        
+    print "%s" % msg_data
     print 
 
 def setupConnection(routingKeys):
@@ -60,7 +70,9 @@ if __name__ == "__main__":
             usage()
             sys.exit(0)
         else:
-            #print "Routing Key: %s" % routingKey_str
+#routingKey_str = '*.%s.*.*' % sys.argv[i]
+#            print "Routing Key: %s" % routingKey_str
+#            routingKeys.append(routingKey_str)
             routingKeys.append(sys.argv[i])
 
         i += 1
