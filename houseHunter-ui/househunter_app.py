@@ -319,7 +319,7 @@ def get_summary(collection, date=None, user=None, project=None, host=None):
     return ret_val    
 
         
-@app.route("/get_mongo_data", )
+@app.route("/", )
 @crossdomain(origin='https://portal-auth.nersc.gov')
 def serve_query():
     query_hash = {}

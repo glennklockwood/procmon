@@ -3,10 +3,8 @@ import sys
 import re
 import json
 import cgi
-import bson
 
-from multiprocessing import current_process
-import multiprocessing
+import threading
 
 import datetime
 import time
@@ -14,67 +12,14 @@ import time
 from BaseHTTPServer import BaseHTTPRequestHandler
 from BaseHTTPServer import HTTPServer
 import urlparse
-import ssl
-from xml.parsers import expat
-
-from pymongo import MongoClient
 
 
-def note(format, *args):
-    sys.stderr.write('[%s]\t%s\n' % (current_process().name, format % args))
-
-def date_range(start_date, end_date):
-    for n in range(int((end_date - start_date).days)+1):
-        yield start_date + datetime.timedelta(n)
-
-def parse_datatable_query(query, columns):
-    start = 0
-    length = 50
-    sort = []
-    if 'iDisplayStart' in query:
-        start = int(query['iDisplayStart'])
-    if 'iDisplayLength' in query:
-        length = int(query['iDisplayLength'])
-    if 'iSortCol_0' in query and 'iSortingCols' in query:
-        for idx in xrange(int(query['iSortingCols'])):
-            sval = 'iSortCol_%d' % idx
-            if sval not in query:
-                continue
-            sval = int(query[sval])
-            col = 'bSortable_%d' % sval
-            if col in query and query[col] == 'true':
-                col = 'sSortDir_%d' % idx
-                if col in query:
-                    if query[col] == 'asc':
-                        sort.append((columns[sval], 1,))
-                    else:
-                        sort.append((columns[sval], -1,))
-    if len(sort) == 0:
-        sort.append((columns[0], 1,))
-    ret = {'start': start, 'length': length, 'sort': sort}
-    print ret
-    return ret
-
-       
-class MongoDataServer(HTTPServer):
+class AMQPBridgeServer(HTTPServer):
     def __init__(self, config, requestHandler):
-        print config
         HTTPServer.__init__(self, (config['address'], config['port']), requestHandler)
-        self.socket = ssl.wrap_socket(self.socket, certfile=config['ssl_cert'], keyfile=config['ssl_key'])
-#ctx = SSL.Context(SSL.SSLv23_METHOD)
-#ctx.use_privatekey_file(config['ssl_key'])
-#        ctx.use_certificate_file(config['ssl_cert'])
-#        self.socket = SSL.Connection(ctx, socket.socket(self.address_family, self.socket_type))
-#        self.server_bind()
-#        self.server_activate()
         self.config = config
         
     def serve(self):
-        self.client = MongoClient('128.55.56.19', 27017)
-        self.db = self.client.procmon
-        self.db.authenticate('usgweb', '23409yasfh39@knvDD')
-        self.collections = ['houseHunter','firehose']
-        self.cache = {}
         try:
             while True:
                 self.handle_request()
@@ -234,6 +179,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def run_query(self, collection, query):
         self.server.house = self.server.db[collection]
+        self.server.summary = self.server.db['summary']
         currtime = time.mktime(time.gmtime())
         www_project = None
         www_user = None
@@ -247,26 +193,20 @@ class RequestHandler(BaseHTTPRequestHandler):
             www_date = query['date']
 
         if 'get_users' in query:
-            if 'get_users' in self.server.cache and currtime < self.server.cache['get_users'][0]:
-                return self.server.cache['get_users'][1]
-            t_users = self.server.house.distinct('username')
+            t_users = self.server.summary.find({"type":"users"})
             users = ['Any']
             for user in t_users:
                 if user is not None and len(user) > 0:
                     users.append(user)
             message =  json.dumps(users)
-            self.server.cache['get_users'] = (currtime+3600,message)
             return message
         if 'get_projects' in query:
-            if 'get_projects' in self.server.cache and currtime < self.server.cache['get_projects'][0]:
-                return self.server.cache['get_projects'][1]
-            t_projects = self.server.house.distinct('project')
+            t_projects = self.server.summary.find({"type":"projects"})
             projects = ['Any']
             for project in t_projects:
                 if project is not None and len(project) > 0:
                     projects.append(project)
             message =  json.dumps(projects)
-            self.server.cache['get_projects'] = (currtime+3600,message)
             return message
         if 'get_summary' in query:
             if www_date is None:
@@ -391,10 +331,10 @@ def serve_forever(server):
         pass
 
 def runpool(config):
-    server = MongoDataServer(config, RequestHandler)
+    server = AMQPBridgeServer(config, RequestHandler)
     
     for i in range(config['nHTTPServerProcesses'] - 1):
-        p = multiprocessing.Process(target=serve_forever, args=( server, ))
+        p = threading.Thread(target=serve_forever, args=( server, ))
         p.start()
 
     serve_forever(server)

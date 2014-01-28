@@ -4,6 +4,7 @@ import sys
 import os
 import re
 import subprocess
+import json
 from datetime import datetime,timedelta
 ticksPerSec       = 100.
 
@@ -14,6 +15,14 @@ import pandas
 import numpy
 
 H5FILEPATH="/global/projectb/statistics/procmon/genepool"
+
+class NumpyJsonEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, numpy.int32):
+            return int(obj)
+        if isinstance(obj, numpy.int64):
+            return int(obj)
+        return json.JSONEncoder.default(self, obj)
 
 def formatBytes(byteVal):
     exp = 0
@@ -77,6 +86,7 @@ class JobRecord:
             self.ps = None
             self.pd = None
             self.fd = None
+            self.obs = None
             self.__job_data_finalized = False
             self.earliestStart = None
             self.duration = None
@@ -123,6 +133,8 @@ class JobRecord:
             self.pd = self.pd.reset_index()
         if self.fd is not None:
             self.fd = self.fd.reset_index()
+        if self.obs is not None:
+            self.obs = self.obs.reset_index()
 
         if self.ps is None or self.pd is None:
             print 'No process data!  Perhaps the procmon system has not deposited data yet.'
@@ -131,9 +143,11 @@ class JobRecord:
         self.pd.startTime = self.pd.startTime + self.pd.startTimeUSec * 10**-6
         self.ps.startTime = self.ps.startTime + self.ps.startTimeUSec * 10**-6
         self.fd.startTime = self.fd.startTime + self.fd.startTimeUSec * 10**-6
+        self.obs.startTime = self.obs.startTime + self.obs.startTimeUSec * 10**-6
         self.pd.recTime = self.pd.recTime + self.pd.recTimeUSec * 10**-6
         self.ps.recTime = self.ps.recTime + self.ps.recTimeUSec * 10**-6
         self.fd.recTime = self.fd.recTime + self.fd.recTimeUSec * 10**-6
+        self.obs.recTime = self.obs.recTime + self.obs.recTimeUSec * 10**-6
 
         self.earliestStart = self.pd.sort("startTime",ascending=1).ix[0]['startTime']
         self.duration = self.ps.recTime.max() - self.ps.startTime.min()
@@ -146,7 +160,7 @@ class JobRecord:
         self.__job_data_finalized = True
         return True
 
-    def add_job_data(self, tps, tpd, tfd):
+    def add_job_data(self, tps, tpd, tfd, tobs):
         if self.__job_data_finalized:
             return None
 
@@ -174,6 +188,14 @@ class JobRecord:
             lfd = tfd.sort('recTime',ascending=0).set_index(['pid','startTime','path','fd','mode'])
             lfd = lfd.groupby(level=range(len(lfd.index.levels))).first()
             self.fd = self.__merge_records(self.fd, lfd)
+
+        ## merge existing procobs records with new ones; procobs data is strictly
+        ## additive since these mark each observation even if it was removed 
+        ## for being redundant
+        if tobs is not None and not tobs.empty:
+            lobs = tobs.sort('recTime',ascending=0).set_index(['pid','startTime','recTime'])
+            lobs = lobs.groupby(level=range(len(lobs.index.levels))).first()
+            self.obs = self.__merge_records(self.obs, lobs)
 
     def __build_pstree(self, ppids_set, pd):
         process_tree = []
@@ -331,12 +353,20 @@ enable_qs = False
 enable_color = True
 show_cmdline_args = False
 show_cwd = False
+save_h5 = None
 while idx < len(sys.argv):
     if sys.argv[idx] == "--qs":
         enable_qs = True
         enable_qqacct = False
     elif sys.argv[idx] == "--no-color":
         enable_color = False
+    elif sys.argv[idx] == "--save":
+        if len(sys.argv) > idx:
+            idx += 1
+            save_h5 = sys.argv[idx]
+        else:
+            usage()
+            sys.exit(1)
     elif sys.argv[idx] == "--args":
         show_cmdline_args = True
     elif sys.argv[idx] == "--cwd":
@@ -370,8 +400,9 @@ for job in jobs:
 
 files = sorted(h5files.keys())
 for h5file in files:
+    print h5file
     for host in h5files[h5file].keys():
-        (procstat, procdata, procfd) = (None, None, None)
+        (procstat, procdata, procfd, procobs) = (None, None, None, None)
         h5 = pandas.io.pytables.HDFStore(h5file, mode='r')
 
         try:
@@ -386,19 +417,64 @@ for h5file in files:
             procfd = h5.select('/%s/procfd' % host)
         except:
             pass
+        try:
+            procobs = h5.select('/%s/procobs' % host)
+        except:
+            pass
         h5.close()
         for job in h5files[h5file][host]:
-            (ps,pd,fd) = (None,None,None)
+            (ps,pd,fd,obs) = (None,None,None,None)
             if procstat is not None and not procstat.empty:
                 ps = procstat.ix[(procstat.identifier == str(job.job)) & (procstat.subidentifier == str(job.task))]
             if procdata is not None and not procdata.empty:
                 pd = procdata.ix[(procdata.identifier == str(job.job)) & (procdata.subidentifier == str(job.task))]
             if procfd is not None and not procfd.empty:
                 fd = procfd.ix[(procfd.identifier == str(job.job)) & (procfd.subidentifier == str(job.task))]
-            job.add_job_data(ps,pd,fd)
+            if procobs is not None and not procobs.empty:
+                obs = procobs.ix[(procobs.identifier == str(job.job)) & (procobs.subidentifier == str(job.task))]
+            job.add_job_data(ps,pd,fd,obs)
             
 for job in jobs:
     print job
     job.print_job()
     print 
 
+if save_h5 is not None:
+    data = []
+    for job in jobs:
+        datum = {}
+        datum['job'] = "%s%s" % (job.job, "" if job.display_task == "" else ".%s" % job.display_task)
+        datum['host'] = job.host
+        datum['start'] = job.start.strftime('%Y-%m-%dT%H:%M:%S')
+        datum['end'] = job.end.strftime('%Y-%m-%dT%H:%M:%S')
+        datum['user'] = job.user
+        datum['project'] = job.project
+        datum['cpu'] = job.cpu
+        datum['maxvmem'] = job.maxvmem
+        datum['processes'] = []
+        processes = job.pd.sort('recTime', ascending=1)[['pid','ppid','startTime','recTime','execName','exePath','cmdArgs']]
+        processes.cmdArgs = processes.cmdArgs.str.replace('|', ' ')
+        for (idx,tprocess) in processes.iterrows():
+            process = tprocess.to_dict()
+            psCols = ['recTime','state','utime','stime','priority','numThreads','vsize','rss','rsslim','vmpeak','rsspeak','io_rchar','io_wchar','io_readBytes','io_writeBytes','m_size','m_resident','m_share','m_text','m_data','duration','timeoffset','blockedIO','blockedIOPct']
+            psRecords = job.ps.ix[(job.ps.pid == process['pid']) & (job.ps.startTime == process['startTime'])].sort('recTime', ascending=1)[psCols].reset_index()
+            process['ps'] = {}
+            for col in psCols:
+                process['ps'][col] = list(psRecords[col])
+            process['ps']['state'] = [ chr(x) for x in process['ps']['state'] ]
+            
+            fdCols = ['recTime','path','fd','mode']
+            fdRecords = job.fd.ix[(job.fd.pid == process['pid']) & (job.fd.startTime == process['startTime'])].sort(['recTime','fd'],ascending=[1,1])[fdCols].reset_index()
+            process['fd'] = {}
+            for col in fdCols:
+                process['fd'][col] = list(fdRecords[col][...])
+
+            obsRecords = job.obs.ix[(job.obs.pid == process['pid']) & (job.obs.startTime == process['startTime'])].sort('recTime',ascending=1)['recTime'].reset_index()
+            process['obs'] = list(obsRecords.recTime)
+            datum['processes'].append(process)
+        data.append(datum)
+
+    outfile = open(save_h5, 'w')
+    outfile.write(json.dumps(data, cls=NumpyJsonEncoder))
+    outfile.write('\n')
+    outfile.close()

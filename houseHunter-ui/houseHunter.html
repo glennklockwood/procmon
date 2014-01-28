@@ -52,7 +52,7 @@ function update_summary() {
     host = $("#select_host").val();
     date_val = $("#datepicker").val()
     collection = $("#select_collection").val()
-    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_summary=1&user=' + user + '&project=' + project + '&host=' + host + '&date=' + date_val, function(data) {
+    $.getJSON('https://gpweb26.nersc.gov:8242/househunter?collection=' + collection + '&get_summary=1&user=' + user + '&project=' + project + '&host=' + host + '&date=' + date_val, function(data) {
         if ("users_count" in data) {
             $("#data_nusers").html(data.users_count);
         }
@@ -102,7 +102,7 @@ function initialize_chart(chart_type) {
     var container = chart_type + 'summary_chart';
     var date_val = $("#datepicker").val();
     var collection = $("#select_collection").val();
-    var url = 'https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_time_summary=1&date=' + date_val + '&' + chart_type + '=' + query;
+    var url = 'https://gpweb26.nersc.gov:8242/househunter?collection=' + collection + '&get_time_summary=1&date=' + date_val + '&' + chart_type + '=' + query;
 
     var exeColor = '#89A54E';
     var scriptColor = '#4572A7';
@@ -266,13 +266,13 @@ function reset_selection(id, data) {
 }
 $(document).ready(function() {
     var collection = $("#select_collection").val();
-    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_users=1', function(data) {
+    $.getJSON('https://gpweb26.nersc.gov:8242/househunter?collection=' + collection + '&get_users=1', function(data) {
         reset_selection('#select_user', data.users);
     });
-    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_projects=1', function(data) {
+    $.getJSON('https://gpweb26.nersc.gov:8242/househunter?collection=' + collection + '&get_projects=1', function(data) {
         reset_selection('#select_project', data.projects);
     });
-    $.getJSON('https://gpweb26.nersc.gov:8242/get_mongo_data?collection=' + collection + '&get_hosts=1', function(data) {
+    $.getJSON('https://gpweb26.nersc.gov:8242/househunter?collection=' + collection + '&get_hosts=1', function(data) {
         reset_selection('#select_host', data.hosts);
     });
     $("#select_user").change(change_menu_selection);
@@ -285,7 +285,7 @@ $(document).ready(function() {
         "bServerSide": true,
         "bFilter": false,
         "iDisplayLength": 50,
-        "sAjaxSource": "https://gpweb26.nersc.gov:8242/get_mongo_data",
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/househunter",
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
@@ -311,7 +311,7 @@ $(document).ready(function() {
         "bServerSide": true,
         "bFilter": false,
         "iDisplayLength": 50,
-        "sAjaxSource": "https://gpweb26.nersc.gov:8242/get_mongo_data",
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/househunter",
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
@@ -337,7 +337,7 @@ $(document).ready(function() {
         "bServerSide": true,
         "bFilter": false,
         "iDisplayLength": 25,
-        "sAjaxSource": "https://gpweb26.nersc.gov:8242/get_mongo_data",
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/househunter",
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
@@ -364,7 +364,7 @@ $(document).ready(function() {
         "bServerSide": true,
         "bFilter": false,
         "iDisplayLength": 25,
-        "sAjaxSource": "https://gpweb26.nersc.gov:8242/get_mongo_data",
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/househunter",
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
@@ -391,7 +391,7 @@ $(document).ready(function() {
         "bServerSide": true,
         "bFilter": false,
         "iDisplayLength": 25,
-        "sAjaxSource": "https://gpweb26.nersc.gov:8242/get_mongo_data",
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/househunter",
         "fnServerParams": function ( aoData ) {
             user = $("#select_user").val();
             project = $("#select_project").val();
