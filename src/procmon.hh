@@ -11,8 +11,6 @@
 
 #include "config.h"
 
-#define PROCMON_VERSION "2.4"
-
 #ifndef DEFAULT_FREQUENCY
 #define DEFAULT_FREQUENCY 60
 #define DEFAULT_INITIAL_PHASE 0
