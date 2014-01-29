@@ -1,0 +1,43 @@
+diff -rupN rabbitmq-c//CMakeLists.txt rabbitmq-c.new//CMakeLists.txt
+--- rabbitmq-c//CMakeLists.txt	2013-04-28 20:18:15.000000000 -0700
++++ rabbitmq-c.new//CMakeLists.txt	2013-07-15 09:11:55.712640328 -0700
+@@ -211,6 +211,7 @@ find_package(Threads)
+ 
+ option(BUILD_SHARED_LIBS "Build rabbitmq-c as a shared library" ON)
+ option(BUILD_STATIC_LIBS "Build rabbitmq-c as a static library" OFF)
++option(BUILD_FPICSTATIC_LIBS "Build rabbitmq-c as a static library" OFF)
+ 
+ option(BUILD_EXAMPLES "Build Examples" ON)
+ option(BUILD_TOOLS "Build Tools (requires POPT Library)" ${POPT_FOUND})
+diff -rupN rabbitmq-c//librabbitmq/CMakeLists.txt rabbitmq-c.new//librabbitmq/CMakeLists.txt
+--- rabbitmq-c//librabbitmq/CMakeLists.txt	2013-04-28 20:18:15.000000000 -0700
++++ rabbitmq-c.new//librabbitmq/CMakeLists.txt	2013-07-15 09:11:03.869001000 -0700
+@@ -172,6 +172,28 @@ if (BUILD_STATIC_LIBS)
+         set(RMQ_LIBRARY_TARGET rabbitmq-static)
+     endif ()
+ endif (BUILD_STATIC_LIBS)
++if (BUILD_FPICSTATIC_LIBS)
++    add_library(rabbitmq-fpic-static STATIC ${RABBITMQ_SOURCES})
++
++    target_link_libraries(rabbitmq-fpic-static ${RMQ_LIBRARIES})
++
++    set_target_properties(rabbitmq-fpic-static PROPERTIES COMPILE_DEFINITIONS AMQP_STATIC)
++    set_target_properties(rabbitmq-fpic-static PROPERTIES COMPILE_FLAGS "-fPIC")
++    if (WIN32)
++        set_target_properties(rabbitmq-fpic-static PROPERTIES VERSION ${RMQ_VERSION} OUTPUT_NAME librabbitmq.fpic.${RMQ_SOVERSION})
++    else (WIN32)
++        set_target_properties(rabbitmq-fpic-static PROPERTIES VERSION ${RMQ_VERSION} SOVERSION ${RMQ_SOVERSION} OUTPUT_NAME rabbitmq.fpic)
++    endif (WIN32)
++
++    install(TARGETS rabbitmq-fpic-static
++        ARCHIVE DESTINATION lib
++        )
++    install_pdb(rabbitmq-fpic-static)
++
++    if (NOT DEFINED RMQ_LIBRARY_TARGET)
++        set(RMQ_LIBRARY_TARGET rabbitmq-fpic-static)
++    endif ()
++endif (BUILD_FPICSTATIC_LIBS)
+ 
+ install(FILES
+   amqp.h
