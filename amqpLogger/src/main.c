@@ -1,4 +1,4 @@
-#include <config.h>
+#include "config.h"
 #include "amqpLogger.h"
 #include <string.h>
 #include <sys/socket.h>
@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <pthread.h>
+#include <pwd.h>
+#include <grp.h>
+
 
 #define BUFFER_SIZE 1024
 
@@ -193,7 +196,7 @@ int main(int argc, char **argv) {
                     printf("-u/--user requires an argument!\n\n");
                     usage(1);
                 } else {
-                    struct passwd *user_data = getpwdnam(optarg);
+                    struct passwd *user_data = getpwnam(optarg);
                     if (user_data == NULL) {
                         int uid = atoi(optarg);
                         if (uid > 0) {
