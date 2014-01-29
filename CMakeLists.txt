@@ -14,8 +14,14 @@ SET( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O2" )
 SET( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -ggdb" )
 SET( CMAKE_CXX_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2" )
 
-OPTION( BUILD_SECURED "Build the secured version for root execution" OFF)
-SET( DEFAULT_AMQP_HOST "unknown.rabbit.mq" CACHE STRING "default rabbitmq server" FORCE)
+OPTION( BUILD_SECURED "Build the secured version for root execution" ON )
+SET( DEFAULT_AMQP_HOST "unknown.rabbit.mq" CACHE STRING "Default rabbitmq server" )
+SET( DEFAULT_AMQP_VHOST "/" CACHE STRING "Default amqp virtual-host" )
+SET( DEFAULT_AMQP_PORT  5672 CACHE STRING "Default amqp port number" )
+SET( DEFAULT_AMQP_USER  "procmon" CACHE STRING "Default amqp user" )
+SET( DEFAULT_AMQP_PASSWORD "invalid" CACHE STRING "Default amqp password" )
+SET( DEFAULT_AMQP_EXCHANGE "procmon" CACHE STRING "Default amqp exchange" )
+SET( DEFAULT_AMQP_FRAMESIZE 131072 CACHE STRING "Default maximum framesize in bytes" )
 
 ## get a private and patched installation of rabbitmq 0.4.1
 IF ( USE_RABBITMQ_C )
@@ -28,6 +34,8 @@ IF ( USE_RABBITMQ_C )
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${RABBITMQ_C_DIR} -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=ON -DBUILD_FPICSTATIC_LIBS=ON -DENABLE_SSL_SUPPORT=OFF
         )
     SET( RABBITMQ_C_INCLUDE_DIR ${RABBITMQ_C_DIR}/include )
+    SET( RABBITMQ_C_LIB_DIR ${RABBITMQ_C_DIR}/lib )
+    SET( RABBITMQ_C_LIBRARIES "${RABBITMQ_C_DIR}/lib/librabbitmq.fpic.a" )
 ENDIF ( USE_RABBITMQ_C )
 
 ADD_SUBDIRECTORY( src )
