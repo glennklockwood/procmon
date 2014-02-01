@@ -23,6 +23,7 @@ SET( DEFAULT_AMQP_PASSWORD "invalid" CACHE STRING "Default amqp password" )
 SET( DEFAULT_AMQP_EXCHANGE "procmon" CACHE STRING "Default amqp exchange" )
 SET( DEFAULT_AMQP_FRAMESIZE 131072 CACHE STRING "Default maximum framesize in bytes" )
 
+
 ## get a private and patched installation of rabbitmq 0.4.1
 IF ( USE_RABBITMQ_C )
     SET( RABBITMQ_C_DIR "${CMAKE_BINARY_DIR}/rabbit" )
@@ -40,6 +41,7 @@ ENDIF ( USE_RABBITMQ_C )
 
 ADD_SUBDIRECTORY( src )
 ADD_SUBDIRECTORY( amqpLogger )
+ADD_SUBDIRECTORY( extra )
 #INCLUDE_DIRECTORIES("${PROJECT_BINARY_DIR}")
 #
 #SET( procmon_SRCS procmon.cpp )

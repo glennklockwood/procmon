@@ -1,0 +1,53 @@
+#!/bin/bash -l
+set -ex
+
+module load erlang-OTP
+## setup rabbitmq environment
+export SERVICES_BASE=`pwd`/services
+export RABBITMQ_BASE=$SERVICES_BASE/rabbit
+export RABBITMQ_HOME=$RABBITMQ_BASE
+export RABBITMQ_NODE_IP_ADDRESS=@DEFAULT_AMQP_HOST@
+export RABBITMQ_NODE_PORT=@DEFAULT_AMQP_PORT@
+export MONITORING_PORT=@MONITORING_AMQP_PORT@
+export RABBITMQ_MNESIA_BASE=$RABBITMQ_BASE/var/lib/mnesia
+export RABBITMQ_LOG_BASE=$RABBITMQ_BASE/var/log
+
+if [ -e $SERVICES_BASE ]; then
+    if [ -x $RABBITMQ_BASE/sbin/rabbitmqctl ]; then
+        $RABBITMQ_BASE/sbin/rabbitmqctl stop
+    fi
+    rm -rf $SERVICES_BASE
+fi
+
+mkdir -p $SERVICES_BASE
+cd $SERVICES_BASE
+wget http://www.rabbitmq.com/releases/rabbitmq-server/v3.2.3/rabbitmq-server-3.2.3.tar.gz
+tar zxvf rabbitmq-server-3.2.3.tar.gz
+cd rabbitmq-server-3.2.3
+make
+make install_bin TARGET_DIR=$SERVICES_BASE/rabbit SBIN_DIR=$SERVICES_BASE/rabbit/sbin MAN_DIR=$SERVICES_BASE/rabbit/share/man DOC_INSTALL_DIR=$SERVICES_BASE/rabbit/share/doc
+
+
+## write out rabbitmq configfile
+cat <<EOF > $SERVICES_BASE/rabbit/rabbitmq.conf
+[
+    {rabbit,                    [ {tcp_listeners,         [$RABBITMQ_NODE_PORT]}, ] },
+    {rabbitmq_management,       [ {http_log_dir,          "$RABBITMQ_LOG_BASE/http"},
+                                  {listener,              [{port, $MONITORING_PORT}]}, ] },
+].
+EOF
+
+## turn on the web management/monitoring interface
+$RABBITMQ_BASE/sbin/rabbitmq-plugins enable rabbitmq_management
+
+## start the server
+$RABBITMQ_BASE/sbin/rabbitmq-server &
+sleep 5 ## give the broker a few seconds to start
+
+## setup some basic users and ACLs
+$RABBITMQ_BASE/sbin/rabbitmqctl add_vhost @DEFAULT_AMQP_VHOST@
+$RABBITMQ_BASE/sbin/rabbitmqctl add_user @DEFAULT_AMQP_USER@ @DEFAULT_AMQP_PASSWORD@
+$RABBITMQ_BASE/sbin/rabbitmqctl set_permissions -p @DEFAULT_AMQP_VHOST@ @DEFAULT_AMQP_USER@ '.*' '.*' '.*'
+$RABBITMQ_BASE/sbin/rabbitmqctl add_user @MONITORING_AMQP_USER@ @MONITORING_AMQP_PASSWORD@
+$RABBITMQ_BASE/sbin/rabbitmqctl set_permissions -p @DEFAULT_AMQP_VHOST@ @MONITORING_AMQP_USER@ 'alive.*' '.*' '.*'
+$RABBITMQ_BASE/sbin/rabbitmqctl set_user_tags @MONITORING_AMQP_USER@ monitoring
