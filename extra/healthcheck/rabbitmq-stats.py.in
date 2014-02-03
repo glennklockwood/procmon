@@ -1,0 +1,77 @@
+#!/usr/bin/env python
+
+import base64
+import sys
+import urllib2
+import json
+
+protocol = "http"
+hostname = "@DEFAULT_AMQP_HOST@"
+port = @MONITORING_AMQP_PORT@
+vhost = "@DEFAULT_AMQP_VHOST@"
+username = "@MONITORING_AMQP_USER@"
+password = "@MONITORING_AMQP_PASSWORD@"
+
+idx = 1
+while idx < len(sys.argv):
+    if sys.argv[i] == "--host" and i+1 < len(sys.argv):
+        i += 1
+        hostname = sys.argv[i]
+    elif sys.argv[i] == "--port" and i+1 < len(sys.argv):
+        i += 1
+        try:
+            port = int(sys.argv[i])
+        except:
+            print "Invalid port number!"
+            sys.exit(1)
+    elif sys.argv[i] == "--username" and i+1 < len(sys.argv):
+        i += 1
+        username = sys.argv[i]
+    elif sys.argv[i] == "--password" and i+1 < len(sys.argv):
+        i += 1
+        password = sys.argv[i]
+    elif sys.argv[i] == "--https":
+        protocol = "https"
+    i+=1
+
+url = '%s://%s:%d/api/vhosts' % (protocol, hostname, port)
+auth_string = base64.encodestring('%s:%s' % (username, password)).replace('\n','')
+req = urllib2.Request(url)
+req.add_header("Authorization", "Basic %s" % auth_string)
+try:
+    response = urllib2.urlopen(req)
+except:
+    print "Failed to correctly connect to rabbitmq!"
+    sys.exit(1)
+responseStr = response.read()
+response = None
+try:
+    response = json.loads(responseStr)
+except:
+    print "Failed to understand server reply."
+    sys.exit(1)
+if type(response) == list:
+    for t_vhost in response:
+        if 'name' in t_vhost and t_vhost['name'] == vhost:
+            if 'recv_oct' in t_vhost:
+                print '"received_bytes_count":"%s"' % t_vhost['recv_oct']
+            if 'recv_oct_details' in t_vhost and 'rate' in t_vhost['recv_oct_details']:
+                print '"received_bytes_rate":"%s"' % t_vhost['recv_oct_details']['rate']
+            if 'send_oct' in t_vhost:
+                print '"sent_bytes_count":"%s"' % t_vhost['send_oct']
+            if 'send_oct_details' in t_vhost and 'rate' in t_vhost['send_oct_details']:
+                print '"sent_bytes_rate":"%s"' % t_vhost['send_oct_details']['rate']
+            if 'message_stats' in t_vhost:
+                messages = t_vhost['message_stats']
+                if 'publish' in messages:
+                    print '"publish_message_count":"%s"' % messages['publish']
+                if 'publish_details' in messages and 'rate' in messages['publish_details']:
+                    print '"publish_message_rate":"%s"' % messages['publish_details']['rate']
+                if 'deliver_no_ack' in messages:
+                    print '"deliver_no_ack_message_count":"%s"' % messages['deliver_no_ack']
+                if 'deliver_no_ack_details' in messages and 'rate' in messages['deliver_no_ack_details']:
+                    print '"deliver_no_ack_message_rate":"%s"' % messages['deliver_no_ack_details']['rate']
+            sys.exit(0)
+                
+print "Failed to understand server reply."
+sys.exit(1)

@@ -1,0 +1,63 @@
+#!/usr/bin/env python
+
+import base64
+import sys
+import urllib2
+import json
+
+protocol = "http"
+hostname = "@DEFAULT_AMQP_HOST@"
+port = @MONITORING_AMQP_PORT@
+vhost = "@DEFAULT_AMQP_VHOST@"
+username = "@MONITORING_AMQP_USER@"
+password = "@MONITORING_AMQP_PASSWORD@"
+
+idx = 1
+while idx < len(sys.argv):
+    if sys.argv[i] == "--host" and i+1 < len(sys.argv):
+        i += 1
+        hostname = sys.argv[i]
+    elif sys.argv[i] == "--port" and i+1 < len(sys.argv):
+        i += 1
+        try:
+            port = int(sys.argv[i])
+        except:
+            print "Invalid port number!"
+            sys.exit(1)
+    elif sys.argv[i] == "--vhost" and i+1 < len(sys.argv):
+        i += 1
+        vhost = sys.argv[i]
+    elif sys.argv[i] == "--username" and i+1 < len(sys.argv):
+        i += 1
+    elif sys.argv[i] == "--username" and i+1 < len(sys.argv):
+        i += 1
+        password = sys.argv[i]
+    elif sys.argv[i] == "--https":
+        protocol = "https"
+    i+=1
+
+alive_url = '%s://%s:%d/api/aliveness-test/%s' % (protocol, hostname, port, vhost)
+auth_string = base64.encodestring('%s:%s' % (username, password)).replace('\n','')
+req = urllib2.Request(alive_url)
+req.add_header("Authorization", "Basic %s" % auth_string)
+try:
+    response = urllib2.urlopen(req)
+except:
+    print "Failed to correctly connect to rabbitmq!"
+    sys.exit(1)
+responseStr = response.read()
+status = None
+try:
+    status = json.loads(responseStr)
+except:
+    print "Failed to understand server reply."
+    sys.exit(1)
+if type(status) == dict and 'status' in status:
+    if status['status'] == 'ok':
+        print "rabbitmq alive!"
+        sys.exit(0)
+    else:
+        print "rabbitmq not alive: %s" % status['status']
+        sys.exit(1)
+print "Failed to understand server reply."
+sys.exit(1)

@@ -1,0 +1,89 @@
+#!/bin/bash -l
+set -ex
+
+module load erlang-OTP
+## setup rabbitmq environment
+export SERVICES_BASE=`pwd`/services
+export RABBITMQ_BASE=$SERVICES_BASE/rabbit
+export RABBITMQ_HOME=$RABBITMQ_BASE
+export RABBITMQ_NODE_IP_ADDRESS=@DEFAULT_AMQP_HOST@
+export RABBITMQ_NODE_PORT=@DEFAULT_AMQP_PORT@
+export MONITORING_PORT=@MONITORING_AMQP_PORT@
+export RABBITMQ_MNESIA_BASE=$RABBITMQ_BASE/var/lib/mnesia
+export RABBITMQ_LOG_BASE=$RABBITMQ_BASE/var/log
+export RABBITMQ_PLUGINS_DIR=$RABBITMQ_BASE/plugins
+export RABBITMQ_PLUGINS_EXPAND_DIR=$RABBITMQ_MNESIA_BASE/plugins
+export RABBITMQ_ENABLED_PLUGINS_FILE=$RABBITMQ_MNESIA_BASE/active_plugins
+export RABBITMQ_CONFIG_FILE=$RABBITMQ_BASE/rabbitmq
+
+if [ -e $SERVICES_BASE ]; then
+    if [ -x $RABBITMQ_BASE/sbin/rabbitmqctl ]; then
+        $RABBITMQ_BASE/sbin/rabbitmqctl stop || echo "not running after all"
+    fi
+    rm -rf $SERVICES_BASE
+fi
+
+mkdir -p $SERVICES_BASE
+cd $SERVICES_BASE
+wget http://www.rabbitmq.com/releases/rabbitmq-server/v3.2.3/rabbitmq-server-3.2.3.tar.gz
+tar zxvf rabbitmq-server-3.2.3.tar.gz
+cd rabbitmq-server-3.2.3
+make
+make install_bin TARGET_DIR=$SERVICES_BASE/rabbit SBIN_DIR=$SERVICES_BASE/rabbit/sbin MAN_DIR=$SERVICES_BASE/rabbit/share/man DOC_INSTALL_DIR=$SERVICES_BASE/rabbit/share/doc
+
+## write out rabbitmq configfile
+cat <<EOF > $RABBITMQ_CONFIG_FILE.config
+[
+    {rabbitmq_management,       [{http_log_dir,          "$RABBITMQ_LOG_BASE/http"},
+                                 {listener,              [{port, $MONITORING_PORT}]}]}
+].
+EOF
+
+## write out env script
+cat <<EOF > $RABBITMQ_BASE/rabbitmq-env
+export RABBITMQ_BASE=$SERVICES_BASE/rabbit
+export RABBITMQ_HOME=$RABBITMQ_BASE
+export RABBITMQ_NODE_IP_ADDRESS=@DEFAULT_AMQP_HOST@
+export RABBITMQ_NODE_PORT=@DEFAULT_AMQP_PORT@
+export MONITORING_PORT=@MONITORING_AMQP_PORT@
+export RABBITMQ_MNESIA_BASE=$RABBITMQ_BASE/var/lib/mnesia
+export RABBITMQ_LOG_BASE=$RABBITMQ_BASE/var/log
+export RABBITMQ_PLUGINS_DIR=$RABBITMQ_BASE/plugins
+export RABBITMQ_PLUGINS_EXPAND_DIR=$RABBITMQ_MNESIA_BASE/plugins
+export RABBITMQ_ENABLED_PLUGINS_FILE=$RABBITMQ_MNESIA_BASE/active_plugins
+export RABBITMQ_CONFIG_FILE=$RABBITMQ_BASE/rabbitmq
+export PATH=$RABBITMQ_HOME/sbin:\$PATH
+EOF
+
+## write out startup script
+cat <<EOF > $RABBITMQ_BASE/rabbitmq-startup.sh
+#!/bin/bash -l
+. $RABBITMQ_BASE/rabbitmq-env
+$RABBITMQ_HOME/sbin/rabbitmq-server -detach
+EOF
+chmod a+rx $RABBITMQ_BASE/rabbitmq-startup.sh
+
+## write out shutdown script
+cat <<EOF > $RABBITMQ_BASE/rabbitmq-shutdown.sh
+#!/bin/bash -l
+. $RABBITMQ_BASE/rabbitmq-env
+$RABBITMQ_HOME/sbin/rabbitmqctl stop
+EOF
+chmod a+rx $RABBITMQ_BASE/rabbitmq-shutdown.sh
+
+## turn on the web management/monitoring interface
+mkdir -p $RABBITMQ_PLUGINS_EXPAND_DIR
+$RABBITMQ_BASE/sbin/rabbitmq-plugins enable rabbitmq_management
+
+## start the server
+$RABBITMQ_BASE/sbin/rabbitmq-server -detached
+sleep 20 ## give the broker a few seconds to start
+
+## setup some basic users and ACLs
+$RABBITMQ_BASE/sbin/rabbitmqctl delete_user guest
+$RABBITMQ_BASE/sbin/rabbitmqctl add_vhost @DEFAULT_AMQP_VHOST@
+$RABBITMQ_BASE/sbin/rabbitmqctl add_user @DEFAULT_AMQP_USER@ @DEFAULT_AMQP_PASSWORD@
+$RABBITMQ_BASE/sbin/rabbitmqctl set_permissions -p @DEFAULT_AMQP_VHOST@ @DEFAULT_AMQP_USER@ '.*' '.*' '.*'
+$RABBITMQ_BASE/sbin/rabbitmqctl add_user @MONITORING_AMQP_USER@ @MONITORING_AMQP_PASSWORD@
+$RABBITMQ_BASE/sbin/rabbitmqctl set_permissions -p @DEFAULT_AMQP_VHOST@ @MONITORING_AMQP_USER@ 'alive.*' '.*' '.*'
+$RABBITMQ_BASE/sbin/rabbitmqctl set_user_tags @MONITORING_AMQP_USER@ monitoring

@@ -6,7 +6,6 @@ import subprocess
 from datetime import datetime, timedelta
 import time
 import socket
-import sdm_curl ## for JAMO
 import threading
 import json
 import traceback
@@ -16,24 +15,27 @@ import shutil
 
 num_procmuxers = 3
 group = "procman_prod"
-procMuxerPath     = "%s/genepool/procmon/ProcMuxer" % (os.environ['HOME'])
-reducer_path      = "%s/genepool/procmon/PostReducer" % (os.environ['HOME'])
-metadata_path     = "%s/genepool/procmon/CheckH5" % (os.environ['HOME'])
-system_name       = "genepool"
+procMuxerPath     = "%s/bin/ProcMuxer" % ("@CMAKE_INSTALL_PREFIX@")
+reducer_path      = "%s/bin/PostReducer" % ("@CMAKE_INSTALL_PREFIX@")
+metadata_path     = "%s/bin/CheckH5" % ("@CMAKE_INSTALL_PREFIX@")
+system_name       = "@PROCMON_SYSTEM@"
 base_pid_path     = "/scratch/procmon/pids"
 base_prefix       = "/scratch/procmon"
 target_production = "/global/projectb/statistics/procmon/genepool"
 target_scratch    = "/global/projectb/scratch/dmj/procmon_raw_data"
 email_list        = ('dmj@nersc.gov',)
 email_originator  = 'procmon@nersc.gov'
+use_jamo          = @USE_JAMO@
 
-jamo_url          = "https://sdm2.jgi-psf.org"
-jamo_url_dev      = "https://sdm-dev.jgi-psf.org:8034"
-jamo_token        = "5M7B1LX84WGL2YX1385YDKBU5EN4PF1Q"
-jamo_token_dev    = "IST8JHUB9CAP0DSEWGGDIV042SYLJ1IY"
-jamo_user         = "jgi_dna"
-sdm               = sdm_curl.Curl(jamo_url, appToken=jamo_token)
-sdm_lock          = threading.Lock()
+if use_jamo:
+    import sdm_curl
+    jamo_url          = "https://sdm2.jgi-psf.org"
+    jamo_url_dev      = "https://sdm-dev.jgi-psf.org:8034"
+    jamo_token        = "5M7B1LX84WGL2YX1385YDKBU5EN4PF1Q"
+    jamo_token_dev    = "IST8JHUB9CAP0DSEWGGDIV042SYLJ1IY"
+    jamo_user         = "jgi_dna"
+    sdm               = sdm_curl.Curl(jamo_url, appToken=jamo_token)
+    sdm_lock          = threading.Lock()
 
 def send_email(subject, message):
     import smtplib
