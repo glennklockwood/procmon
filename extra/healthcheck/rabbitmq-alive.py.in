@@ -8,7 +8,7 @@ import json
 protocol = "http"
 hostname = "@DEFAULT_AMQP_HOST@"
 port = @MONITORING_AMQP_PORT@
-vhost = "@DEFAULT_AMQP_VHOST"
+vhost = "@DEFAULT_AMQP_VHOST@"
 username = "@MONITORING_AMQP_USER@"
 password = "@MONITORING_AMQP_PASSWORD@"
 
