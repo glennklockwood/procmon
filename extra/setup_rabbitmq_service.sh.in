@@ -11,10 +11,14 @@ export RABBITMQ_NODE_PORT=@DEFAULT_AMQP_PORT@
 export MONITORING_PORT=@MONITORING_AMQP_PORT@
 export RABBITMQ_MNESIA_BASE=$RABBITMQ_BASE/var/lib/mnesia
 export RABBITMQ_LOG_BASE=$RABBITMQ_BASE/var/log
+export RABBITMQ_PLUGINS_DIR=$RABBITMQ_BASE/plugins
+export RABBITMQ_PLUGINS_EXPAND_DIR=$RABBITMQ_MNESIA_BASE/plugins
+export RABBITMQ_ENABLED_PLUGINS_FILE=$RABBITMQ_MNESIA_BASE/active_plugins
+export RABBITMQ_CONFIG_FILE=$RABBITMQ_BASE/rabbitmq.conf
 
 if [ -e $SERVICES_BASE ]; then
     if [ -x $RABBITMQ_BASE/sbin/rabbitmqctl ]; then
-        $RABBITMQ_BASE/sbin/rabbitmqctl stop
+        $RABBITMQ_BASE/sbin/rabbitmqctl stop || echo "not running after all"
     fi
     rm -rf $SERVICES_BASE
 fi
@@ -29,20 +33,21 @@ make install_bin TARGET_DIR=$SERVICES_BASE/rabbit SBIN_DIR=$SERVICES_BASE/rabbit
 
 
 ## write out rabbitmq configfile
-cat <<EOF > $SERVICES_BASE/rabbit/rabbitmq.conf
+cat <<EOF > $RABBITMQ_CONFIG_FILE
 [
-    {rabbit,                    [ {tcp_listeners,         [$RABBITMQ_NODE_PORT]}, ] },
+    {rabbit,                    [ {tcp_listeners,         [{$RABBITMQ_NODE_IP_ADDRESS, $RABBITMQ_NODE_PORT]}, ] },
     {rabbitmq_management,       [ {http_log_dir,          "$RABBITMQ_LOG_BASE/http"},
                                   {listener,              [{port, $MONITORING_PORT}]}, ] },
 ].
 EOF
 
 ## turn on the web management/monitoring interface
+mkdir -p $RABBITMQ_PLUGINS_EXPAND_DIR
 $RABBITMQ_BASE/sbin/rabbitmq-plugins enable rabbitmq_management
 
 ## start the server
-$RABBITMQ_BASE/sbin/rabbitmq-server &
-sleep 5 ## give the broker a few seconds to start
+$RABBITMQ_BASE/sbin/rabbitmq-server -detached
+sleep 20 ## give the broker a few seconds to start
 
 ## setup some basic users and ACLs
 $RABBITMQ_BASE/sbin/rabbitmqctl add_vhost @DEFAULT_AMQP_VHOST@

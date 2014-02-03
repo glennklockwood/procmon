@@ -2,6 +2,7 @@
 
 SET ( MONITORING_AMQP_USER "monitoring" CACHE STRING "Name of rabbitmq monitoring user" )
 SET ( MONITORING_AMQP_PASSWORD "XXXXXX" CACHE STRING "Password for rabbitmq monitoring user" )
+SET ( MONITORING_AMQP_PORT "15672"         CACHE STRING "port for rabbitmq monitoring" )
 
 CONFIGURE_FILE(
     "setup_rabbitmq_service.sh.in"
