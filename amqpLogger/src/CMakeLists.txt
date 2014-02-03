@@ -43,11 +43,12 @@ ADD_EXECUTABLE( amqpLogger-bin main.c amqpLogger.c )
     SET_TARGET_PROPERTIES( amqpLogger-bin PROPERTIES OUTPUT_NAME amqpLogger )
     TARGET_LINK_LIBRARIES( amqpLogger-bin ${RABBITMQ_C_LIBRARIES} )
     TARGET_LINK_LIBRARIES( amqpLogger-bin "rt" )
+    TARGET_LINK_LIBRARIES( amqpLogger-bin "pthread" )
 
 ADD_LIBRARY ( amqpLogger SHARED amqpLogger.c )
     SET_TARGET_PROPERTIES( amqpLogger PROPERTIES VERSION 1.0 )
     SET_TARGET_PROPERTIES( amqpLogger PROPERTIES SOVERSION 1.0 )
-    TARGET_LINK_LIBRARIES( amqpLogger ${RABBITMQ_C_LIBRARIES} -pthread )
+    TARGET_LINK_LIBRARIES( amqpLogger ${RABBITMQ_C_LIBRARIES} )
 
 ADD_LIBRARY ( amqpLogger-static STATIC amqpLogger.c )
     SET_TARGET_PROPERTIES( amqpLogger-static PROPERTIES OUTPUT_NAME amqpLogger )
