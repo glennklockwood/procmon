@@ -5,29 +5,38 @@ import sys
 import urllib2
 import json
 
-get_options_from_args = False
+protocol = "http"
 hostname = "@DEFAULT_AMQP_HOST@"
 port = @MONITORING_AMQP_PORT@
 vhost = "@DEFAULT_AMQP_VHOST"
 username = "@MONITORING_AMQP_USER@"
 password = "@MONITORING_AMQP_PASSWORD@"
 
-if get_options_from_args:
-    if len(args) < 6:
-        print "Not enough arguments: %s <hostname> <port> <vhost> <username> <password>"
-        sys.exit(1)
-    hostname = sys.argv[1]
-    try:
-        port = int(sys.argv[2])
-    except:
-        print "Invalid port number!"
-        sys.exit(1)
-    vhost = sys.argv[3]
-    username = sys.argv[4]
-    password = sys.argv[5]
+idx = 1
+while idx < len(sys.argv):
+    if sys.argv[i] == "--host" and i+1 < len(sys.argv):
+        i += 1
+        hostname = sys.argv[i]
+    elif sys.argv[i] == "--port" and i+1 < len(sys.argv):
+        i += 1
+        try:
+            port = int(sys.argv[i])
+        except:
+            print "Invalid port number!"
+            sys.exit(1)
+    elif sys.argv[i] == "--vhost" and i+1 < len(sys.argv):
+        i += 1
+        vhost = sys.argv[i]
+    elif sys.argv[i] == "--username" and i+1 < len(sys.argv):
+        i += 1
+    elif sys.argv[i] == "--username" and i+1 < len(sys.argv):
+        i += 1
+        password = sys.argv[i]
+    elif sys.argv[i] == "--https":
+        protocol = "https"
+    i+=1
 
-
-alive_url = 'http://%s:%d/api/aliveness-test/%s' % (hostname, port, vhost)
+alive_url = '%s://%s:%d/api/aliveness-test/%s' % (protocol, hostname, port, vhost)
 auth_string = base64.encodestring('%s:%s' % (username, password)).replace('\n','')
 req = urllib2.Request(alive_url)
 req.add_header("Authorization", "Basic %s" % auth_string)
