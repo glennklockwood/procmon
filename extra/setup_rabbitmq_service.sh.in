@@ -52,11 +52,11 @@ export RABBITMQ_PLUGINS_DIR=$RABBITMQ_BASE/plugins
 export RABBITMQ_PLUGINS_EXPAND_DIR=$RABBITMQ_MNESIA_BASE/plugins
 export RABBITMQ_ENABLED_PLUGINS_FILE=$RABBITMQ_MNESIA_BASE/active_plugins
 export RABBITMQ_CONFIG_FILE=$RABBITMQ_BASE/rabbitmq
-export PATH=$RABBITMQ_HOME/sbin:$PATH
+export PATH=$RABBITMQ_HOME/sbin:\$PATH
 EOF
 
 ## write out startup script
-echo <<EOF > $RABBITMQ_BASE/rabbitmq-startup.sh
+cat <<EOF > $RABBITMQ_BASE/rabbitmq-startup.sh
 #!/bin/bash -l
 . $RABBITMQ_BASE/rabbitmq-env
 $RABBITMQ_HOME/sbin/rabbitmq-server -detach
@@ -64,11 +64,12 @@ EOF
 chmod a+rx $RABBITMQ_BASE/rabbitmq-startup.sh
 
 ## write out shutdown script
-echo <<EOF > $RABBITMQ_BASE/rabbitmq-shutdown.sh
+cat <<EOF > $RABBITMQ_BASE/rabbitmq-shutdown.sh
 #!/bin/bash -l
 . $RABBITMQ_BASE/rabbitmq-env
 $RABBITMQ_HOME/sbin/rabbitmqctl stop
 EOF
+chmod a+rx $RABBITMQ_BASE/rabbitmq-shutdown.sh
 
 ## turn on the web management/monitoring interface
 mkdir -p $RABBITMQ_PLUGINS_EXPAND_DIR
