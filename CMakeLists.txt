@@ -23,6 +23,13 @@ SET( DEFAULT_AMQP_PASSWORD "invalid" CACHE STRING "Default amqp password" )
 SET( DEFAULT_AMQP_EXCHANGE "procmon" CACHE STRING "Default amqp exchange" )
 SET( DEFAULT_AMQP_FRAMESIZE 131072 CACHE STRING "Default maximum framesize in bytes" )
 
+IF ( USE_BOOST )
+    SET( Boost_USE_STATIC_LIBS ON )
+    SET( Boost_USE_MULTITHREADED OFF )
+    SET( Boost_USE_STATIC_RUNTIME ON )
+    FIND_PACKAGE( Boost 1.53.0 COMPONENTS program_options )
+ENDIF ( USE_BOOST )
+
 ## get a private and patched installation of rabbitmq 0.4.1
 IF ( USE_RABBITMQ_C )
     SET( RABBITMQ_C_DIR "${CMAKE_BINARY_DIR}/rabbit" )

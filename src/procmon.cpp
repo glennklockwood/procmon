@@ -716,7 +716,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 }
 
 static void craylock() {
-    int fd = open("/tmp/procmon", O_CREAT);
+    int fd = open("/tmp/procmon", O_CREAT, S_IRWXU);
     int lock;
     if (fd < 0) {
         exit(0);

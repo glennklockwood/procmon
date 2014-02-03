@@ -16,13 +16,6 @@ FIND_PACKAGE( PythonLibs )
 FIND_PACKAGE( PythonInterp )
 FIND_PACKAGE( TCL )
 
-IF ( USE_BOOST )
-    SET( Boost_USE_STATIC_LIBS ON )
-    SET( Boost_USE_MULTITHREADED OFF )
-    SET( Boost_USE_STATIC_RUNTIME ON )
-    FIND_PACKAGE( Boost 1.54.0 COMPONENTS program_options )
-ENDIF ( USE_BOOST )
-
 CONFIGURE_FILE( "config.h.in" "config.h")
 
 SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11" )
@@ -54,7 +47,7 @@ ADD_EXECUTABLE( amqpLogger-bin main.c amqpLogger.c )
 ADD_LIBRARY ( amqpLogger SHARED amqpLogger.c )
     SET_TARGET_PROPERTIES( amqpLogger PROPERTIES VERSION 1.0 )
     SET_TARGET_PROPERTIES( amqpLogger PROPERTIES SOVERSION 1.0 )
-    TARGET_LINK_LIBRARIES( amqpLogger ${RABBITMQ_C_LIBRARIES} )
+    TARGET_LINK_LIBRARIES( amqpLogger ${RABBITMQ_C_LIBRARIES} -pthread )
 
 ADD_LIBRARY ( amqpLogger-static STATIC amqpLogger.c )
     SET_TARGET_PROPERTIES( amqpLogger-static PROPERTIES OUTPUT_NAME amqpLogger )
