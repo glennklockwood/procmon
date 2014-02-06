@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import json
+import procmon
 from datetime import datetime,timedelta
 ticksPerSec       = 100.
 
@@ -256,63 +257,6 @@ class JobRecord:
         ## display the process hierarchy
         self.__print_pstree(process_tree, 1)
 
-class ProcmonH5Cache:
-    def __init__(self, basePath, system):
-        self.localcache = []
-        self.__filesystem_query_setup(basePath, system)
-
-    def query(self, job_start, job_end):
-        ret = []
-        for rec in self.localcache:
-            if ((rec['recording_start'] <= job_start and rec['recording_stop'] >= job_start) or
-                    (rec['recording_start'] <= job_end and rec['recording_stop'] >= job_end) or
-                    (rec['recording_start'] >= job_start and rec['recording_stop'] <= job_end)):
-
-                ret.append(rec)
-
-        #if len(ret) == 0:
-        #    job_start = job_start.strftime("%Y-%m-%dT%H:%M:%S")
-        #    job_end = job_end.strftime("%Y-%m-%dT%H:%M:%S")
-        #    return self.__remote_query(job_start, job_end)
-        return ret
-        
-
-            
-#def __remote_query(self, job_start, job_end):
-#        ret = []
-#        remote_files = sdm.post('api/metadata/query',data={'file_type':'procmon_reduced_h5',
-#            '$or': [
-#                {'metadata.procmon.recording_start':{'$lte':job_start},'metadata.procmon.recording_stop':{'$gte':job_start}},
-#                {'metadata.procmon.recording_start':{'$lte':job_end},'metadata.procmon.recording_stop':{'$gte':job_end}},
-#                {'metadata.procmon.recording_start':{'$gte':job_start},'metadata.procmon.recording_stop':{'$lte':job_end}},
-#            ]
-#        })
-#        for record in remote_files:
-#            newrec = {}
-#            newrec['recording_start'] = datetime.strptime(record['metadata']['procmon']['recording_start'], "%Y-%m-%dT%H:%M:%S.%f")
-#            newrec['recording_stop'] = datetime.strptime(record['metadata']['procmon']['recording_stop'], "%Y-%m-%dT%H:%M:%S.%f")
-#            newrec['data'] = record
-#            newrec['path'] = '%s/%s' % (record['file_path'],record['file_name'])
-#            self.localcache.append(newrec)
-#            ret.append(newrec)
-#        return ret
-
-    def __filesystem_query_setup(self, basePath, system):
-        files = os.listdir(basePath)
-        procmonMatcher = re.compile(r'procmon_([a-zA-Z0-9]+).([0-9]+).h5')
-        for filename in files:
-            procmonMatch = procmonMatcher.match(filename)
-            if procmonMatch is not None:
-                l_system = procmonMatch.groups()[0]
-                l_date = procmonMatch.groups()[1]
-                date = datetime.strptime(l_date, '%Y%m%d%H%M%S')
-                newrec = {}
-                newrec['recording_start'] = date
-                newrec['recording_stop'] = date + timedelta(hours=1)
-                newrec['path'] = '%s/%s' % (basePath, filename)
-                newrec['data'] = None
-                self.localcache.append(newrec)
-
 def get_qqacct_data(args, h5cache):
     qqacct_args = ['qqacct']
     qqacct_args.extend(args)
@@ -345,7 +289,7 @@ def usage():
     print "   for more details."
     sys.exit(0)
 
-h5cache = ProcmonH5Cache('/global/projectb/statistics/procmon/genepool', 'genepool')
+h5cache = procmon.H5Cache.H5Cache('/global/projectb/statistics/procmon/genepool', 'procmon_genepool')
 args = []
 idx = 1
 enable_qqacct = True

@@ -4,6 +4,9 @@ import numpy as np
 import pandas
 import re
 from StringIO import StringIO
+from procmon import H5Cache
+
+__all__ = ['H5Cache']
 
 procdata_dt = np.dtype([
         ('pid', np.uint),
