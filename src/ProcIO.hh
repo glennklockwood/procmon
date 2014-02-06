@@ -78,10 +78,10 @@ class ProcTextIO : public ProcIO {
 public:
     ProcTextIO(const string& _filename, ProcIOFileMode _mode);
     ~ProcTextIO();
-    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier) override;
-    virtual unsigned int write_procdata(procdata* start_ptr, int count) override;
-    virtual unsigned int write_procstat(procstat* start_ptr, int count) override;
-    virtual unsigned int write_procfd(procfd* start_ptr, int count) override;
+    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
+    virtual unsigned int write_procdata(procdata* start_ptr, int count);
+    virtual unsigned int write_procstat(procstat* start_ptr, int count);
+    virtual unsigned int write_procfd(procfd* start_ptr, int count);
     ProcRecordType read_stream_record(procdata* procData, procstat* procStat, procfd* procFD);
 private:
 	int fill_buffer();
