@@ -101,6 +101,7 @@ def merge_host_data(existing_hostdata, new_hostdata):
             replaceList = existing_hostdata.index.isin(new_hostdata.index)
             if len(replaceList) > 0 and len(existing_hostdata.index[replaceList]) > 0:
                 existing_hostdata.ix[replaceList] = new_hostdata.ix[existing_hostdata.index[replaceList]]
+                
             addList = numpy.invert(new_hostdata.index.isin(existing_hostdata.index))
             if len(addList) > 0:
                 newdata = new_hostdata.ix[addList]
