@@ -55,7 +55,14 @@ CONFIGURE_FILE(
 CONFIGURE_FILE(ProcIO.cpp ProcIO.procmon.cpp)
 CONFIGURE_FILE(ProcIO.cpp ProcIO.reducer.cpp)
 
-SET( CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++" )
+include( CheckCXXCompilerFlag )
+check_cxx_compiler_flag(-static-libgcc CXX_HAS_STATIC_LIBGCC)
+check_cxx_compiler_flag(-static-libstdc++ CXX_HAS_STATIC_LIBSTDCXX)
+if (CXX_HAS_STATIC_LIBSTDCXX)
+    set( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++" )
+else ()
+    set( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static" )
+endif ()
 
 INCLUDE_DIRECTORIES ( "${CMAKE_CURRENT_SOURCE_DIR}" )
 INCLUDE_DIRECTORIES ( "${CMAKE_CURRENT_BINARY_DIR}" )
