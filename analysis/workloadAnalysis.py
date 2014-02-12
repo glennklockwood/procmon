@@ -82,6 +82,11 @@ def get_h5_files(config):
     baseline = [ x['path'] for x in procmon_h5cache.query(config.start - timedelta(minutes=20), config.start - timedelta(minutes=1)) ]
     return (baseline, h5files)
 
+def get_rank_files(config, h5files):
+    global rank
+    global size
+
+
 def get_hostlist(config, h5files):
     h5files = sorted(h5files)
 
