@@ -1,7 +1,7 @@
 import os
 import sys
 import argparse
-import ConfigParser
+from ConfigParser import SafeConfigParser
 import re
 import procmon
 from datetime import date,datetime,timedelta,time
@@ -20,9 +20,9 @@ if 'PROCMON_DIR' in os.environ:
 
 class ConfigParser:
     def __init__(self, args):
-        self.config = read_configuration(args)
+        self.config = self.read_configuration(args)
 
-    def __split_args(arg_str, splitRegex):
+    def __split_args(self, arg_str, splitRegex):
         items = re.split(splitRegex, arg_str)
         ret_items = []
         for item in items:
@@ -31,16 +31,16 @@ class ConfigParser:
                 ret_items.append(item)
         return ret_items
 
-    def split_hostlist(arg_str):
-        return __split_args(arg_str, '[,\n]')
+    def split_hostlist(self, arg_str):
+        return self.__split_args(arg_str, '[,\n]')
 
-    def split_path(arg_str):
-        return __split_args(arg_str, '[:\n]')
+    def split_path(self, arg_str):
+        return self.__split_args(arg_str, '[:\n]')
 
-    def parse_datetime(arg_str):
+    def parse_datetime(self, arg_str):
         return datetime.strptime(arg_str, '%Y%m%d%H%M%S')
 
-    def read_configuration(args):
+    def read_configuration(self, args):
         global procmonInstallBase
         yesterday = date.today() - timedelta(days=1)
         start_time = datetime.combine(yesterday, time(0,0,0))
@@ -57,7 +57,7 @@ class ConfigParser:
             "end": end_time.strftime("%Y%m%d%H%M%S"),
         }
         if args.config and os.path.exists(args.config):
-            config = ConfigParser.SafeConfigParser()
+            config = SafeConfigParser()
             config.read([args.config])
             new_defaults = dict(config.items("workloadAnalysis"))
             for key in new_defaults:
@@ -66,11 +66,11 @@ class ConfigParser:
 
         parser = argparse.ArgumentParser(parents=[parser])
         parser.set_defaults(**defaults)
-        parser.add_argument("--start", help="Start time for analysis (YYYYmmddHHMMSS format)", type=parse_datetime)
-        parser.add_argument("--end", help="End time for analysis (YYYYmmddHHMMSS format)", type=parse_datetime)
-        parser.add_argument("--h5_path", help="Search path for h5 files", type=split_path)
+        parser.add_argument("--start", help="Start time for analysis (YYYYmmddHHMMSS format)", type=self.parse_datetime)
+        parser.add_argument("--end", help="End time for analysis (YYYYmmddHHMMSS format)", type=self.parse_datetime)
+        parser.add_argument("--h5_path", help="Search path for h5 files", type=self.split_path)
         parser.add_argument("--h5_prefix", help="Prefix for h5 file names (e.g., h5-path/<prefix>.YYYYMmddhHMMSS.h5)")
-        parser.add_argument("--base_hostlist", help="Core set of known hosts in case h5 index is corrupted (RARE!)", type=split_hostlist)
+        parser.add_argument("--base_hostlist", help="Core set of known hosts in case h5 index is corrupted (RARE!)", type=self.split_hostlist)
         args = parser.parse_args(remaining_args)
         return args
 
@@ -85,7 +85,6 @@ def get_h5_files(config):
 def get_rank_files(config, h5files):
     global rank
     global size
-
 
 def get_hostlist(config, h5files):
     h5files = sorted(h5files)
@@ -118,10 +117,16 @@ def get_hostlist(config, h5files):
     return sum_records
     
 def main(args):
+    global comm
     config = ConfigParser(args[1:]).config
+    (baseline_h5files, analysis_h5files) = (None,None)
     if rank == 0:
         (baseline_h5files, analysis_h5files) = get_h5_files(config)
-    print get_hostlist(config, analysis_h5files)
+    (baseline_h5files, analysis_h5files) = comm.bcast((baseline_h5files, analysis_h5files,), root=0)
+    print baseline_h5files
+    print sorted(analysis_h5files)
+#get_processes(config, baseline_h5files, analysis_h5files)
+#print get_hostlist(config, analysis_h5files)
 
 if __name__ == "__main__":
     main(sys.argv)
