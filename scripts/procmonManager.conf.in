@@ -1,0 +1,18 @@
+[procmonManager]
+num_procmuxers    = 2
+group             = @MANAGER_GROUP@
+procMuxerPath     = @CMAKE_INSTALL_PREFIX@/sbin/ProcMuxer
+reducer_path      = @CMAKE_INSTALL_PREFIX@/sbin/PostReducer
+metadata_path     = @CMAKE_INSTALL_PREFIX@/sbin/CheckH5
+base_pid_path     = @MANAGER_SCRATCH@/pids
+base_prefix       = @MANAGER_SCRATCH@
+h5_path           = @PROCMON_H5_STORAGE@
+h5_prefix         = @PROCREDUCER_OUTPUT_PREFIX@
+target_scratch    = @PROCMON_H5_SCRATCH@
+email_list        = @MANAGER_TARGET_EMAIL@
+email_originator  = @MANAGER_EMAIL@
+use_jamo          = @USE_JAMO@
+jamo_url          = @JAMO_URL@
+jamo_token        = @JAMO_TOKEN@
+jamo_user         = @JAMO_USER@
+use_email         = @MANAGER_USE_EMAIL@

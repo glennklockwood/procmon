@@ -12,43 +12,45 @@ import traceback
 import errno
 import re
 import shutil
+import argparse
+from ConfigParser import SafeConfigParser
 
-num_procmuxers = 3
-group = "procman_prod"
-procMuxerPath     = "%s/bin/ProcMuxer" % ("@CMAKE_INSTALL_PREFIX@")
-reducer_path      = "%s/bin/PostReducer" % ("@CMAKE_INSTALL_PREFIX@")
-metadata_path     = "%s/bin/CheckH5" % ("@CMAKE_INSTALL_PREFIX@")
-system_name       = "@PROCMON_SYSTEM@"
-base_pid_path     = "/scratch/procmon/pids"
-base_prefix       = "/scratch/procmon"
-target_production = "/global/projectb/statistics/procmon/genepool"
-target_scratch    = "/global/projectb/scratch/dmj/procmon_raw_data"
-email_list        = ('dmj@nersc.gov',)
-email_originator  = 'procmon@nersc.gov'
-use_jamo          = @USE_JAMO@
+procmonInstallBase = ''
+if 'PROCMON_DIR' in os.environ:
+    procmonInstallBase = os.environ['PROCMON_DIR']
 
-if use_jamo:
-    import sdm_curl
-    jamo_url          = "https://sdm2.jgi-psf.org"
-    jamo_url_dev      = "https://sdm-dev.jgi-psf.org:8034"
-    jamo_token        = "5M7B1LX84WGL2YX1385YDKBU5EN4PF1Q"
-    jamo_token_dev    = "IST8JHUB9CAP0DSEWGGDIV042SYLJ1IY"
-    jamo_user         = "jgi_dna"
-    sdm               = sdm_curl.Curl(jamo_url, appToken=jamo_token)
-    sdm_lock          = threading.Lock()
+def split_args(arg_str, splitRegex):
+    items = re.split(splitRegex, arg_str)
+    ret_items = []
+    for item in items:
+        item = item.strip()
+        if len(item) > 0:
+            ret_items.append(item)
+    return ret_items
 
-def send_email(subject, message):
+def split_path(arg_str):
+    return split_args(arg_str, '[:\n]')
+
+def is_True(arg_str):
+    return arg_str == "True"
+
+def split_comma(arg_str):
+    return split_args(arg_str, '[,\s\n]')
+
+def send_email(config, subject, message):
+    if not config.use_email:
+        return
     import smtplib
     message = """From: %s
 To: %s
 Subject: MESSAGE FROM PROCMON: %s
 
 %s
-""" % (email_originator, ", ".join(email_list), subject, message)
+""" % (config.email_originator, ", ".join(config.email_list), subject, message)
 
     try:
         smtp_message = smtplib.SMTP('localhost')
-        smtp_message.sendmail(email_originator, email_list, message)
+        smtp_message.sendmail(config.email_originator, config.email_list, message)
     except smtplib.SMTPException:
         print "Error: failed to send email!"
 
@@ -59,8 +61,8 @@ def get_exception():
     str_stack2 = '\n'.join(traceback.format_stack())
     return '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
 
-def start_procMuxer(group=None, id=None, prefix=None, pidfile=None):
-    args = [procMuxerPath, '-c', '60', '-d']
+def start_procMuxer(config, group=None, id=None, prefix=None, pidfile=None):
+    args = [config.procMuxerPath, '-c', '60', '-d']
     if prefix is not None:
         args.extend(['-O',prefix])
     if group is not None:
@@ -73,8 +75,8 @@ def start_procMuxer(group=None, id=None, prefix=None, pidfile=None):
     print "starting proxmuxer with args: ", args
     return subprocess.call(args, stdin=None, stdout=None, stderr=None)
 
-def get_muxer_pid(muxer_id):
-    pidfilename = "%s/%s/%d" % (base_pid_path, group, muxer_id)
+def get_muxer_pid(config, muxer_id):
+    pidfilename = "%s/%s/%d" % (config.base_pid_path, config.group, muxer_id)
     current_pid = None
     if os.path.exists(pidfilename):
         try:
@@ -85,23 +87,23 @@ def get_muxer_pid(muxer_id):
             pass
     return current_pid
 
-def is_muxer_running(muxer_id):
-    current_pid = get_muxer_pid(muxer_id)
+def is_muxer_running(config, muxer_id):
+    current_pid = get_muxer_pid(config, muxer_id)
 
     if type(current_pid) is int:
         procfile = "/proc/%d/status" % current_pid
         return os.path.exists(procfile)
     return False
 
-def get_current_files(muxer_id):
-    current_pid = get_muxer_pid(muxer_id)
+def get_current_files(config, muxer_id):
+    current_pid = get_muxer_pid(config, muxer_id)
     files = []
     if type(current_pid) is int:
         for fdnum in xrange(3,10):
             fdpath = "/proc/%d/fd/%d" % (current_pid, fdnum)
             if os.path.exists(fdpath):
                 filename = os.readlink(fdpath)
-                if re.search('%s.*procMuxer\.%d' % (group, muxer_id), filename):
+                if re.search('%s.*procMuxer\.%d' % (config.group, muxer_id), filename):
                     files.append(filename)
             else:
                 break
@@ -114,7 +116,7 @@ def mkdir_p(path):
         if e.errno == errno.EEXIST and os.path.isdir(path): pass
         else: raise
 
-def register_jamo(fname, ftype, sources = None):
+def register_jamo(config, fname, ftype, sources = None):
     md_final = None
     tape_archival = [1]
     local_purge_days = 180
@@ -131,10 +133,10 @@ def register_jamo(fname, ftype, sources = None):
 
     retval = subprocess.call(['/bin/setfacl', '-m', 'user:%s:rw-' % jamo_user, fname])
     if retval != 0:
-        send_email("failed to set acl", fname)
+        send_email(config, "failed to set acl", fname)
         return None
 
-    md_proc = subprocess.Popen([metadata_path, '-i', fname], stdout=subprocess.PIPE)
+    md_proc = subprocess.Popen([config.metadata_path, '-i', fname], stdout=subprocess.PIPE)
     (stdout, stderr) = md_proc.communicate()
     if md_proc.returncode == 0:
         metadata = json.loads(stdout)
@@ -150,14 +152,14 @@ def register_jamo(fname, ftype, sources = None):
         md_final = {}
         md_final['procmon'] = metadata
     else:
-        send_email("failed to read file stats", fname)
+        send_email(config, "failed to read file stats", fname)
         return None
     
     posted = None
     if sources is None:
         sources = []
-    with sdm_lock:
-        posted = sdm.post('api/metadata/file',
+    with config.sdm_lock:
+        posted = config.sdm.post('api/metadata/file',
                 file=fname,
                 file_type=ftype,
                 local_purge_days=local_purge_days,
@@ -166,87 +168,90 @@ def register_jamo(fname, ftype, sources = None):
                 metadata=md_final,
         )
     if posted is None or 'metadata_id' not in posted:
-        send_email("failed to register with jamo", "%s\n%s\n" % (fname, ftype, ))
+        send_email(config, "failed to register with jamo", "%s\n%s\n" % (fname, ftype, ))
     return posted
 
 
-def reduce_files(timeobj, filenames):
+def reduce_files(config, timeobj, filenames):
     """Runs the reducer on the files.  Then moves files to final destination,
        sets proper permissions, then registers the files with JAMO"""
 
-    product_output = "%s/%s/processing/procmon_%s.%s.h5" % (base_prefix, group, system_name, timeobj.strftime("%Y%m%d%H%M%S"))
-    bad_output = "%s/%s/processing/bad_procmon_%s.%s.h5" % (base_prefix, group, system_name, timeobj.strftime("%Y%m%d%H%M%S"))
-    reducer_args = [reducer_path, '-o', product_output, '-b', bad_output]
+    product_output = "%s/%s/processing/%s.%s.h5" % (config.base_prefix, config.group, config.h5_prefix, timeobj.strftime("%Y%m%d%H%M%S"))
+    bad_output = "%s/%s/processing/bad_%s.%s.h5" % (config.base_prefix, config.group, config.h5_prefix, timeobj.strftime("%Y%m%d%H%M%S"))
+    reducer_args = [config.reducer_path, '-o', product_output, '-b', bad_output]
     for f in filenames:
         reducer_args.extend(['-i', f])
     retval = subprocess.call(reducer_args, stdin=None, stdout=None, stderr=None)
     if retval != 0:
-        send_email("reducer failed!", "retcode: %d\ncmd: %s" % (retval, " ".join(reducer_args)))
+        send_email(config, "reducer failed!", "retcode: %d\ncmd: %s" % (retval, " ".join(reducer_args)))
         return 1
     (currpath, product_fname) = os.path.split(product_output)
     (currpath, bad_fname) = os.path.split(bad_output)
 
-    final_product = '%s/%s' % (target_production, product_fname)
-    final_badoutput = '%s/%s' % (target_scratch, bad_fname)
+    final_product = '%s/%s' % (config.h5_path, product_fname)
+    final_badoutput = '%s/%s' % (config.target_scratch, bad_fname)
 
     sources = []
     for f in filenames:
         (somepath,fname) = os.path.split(f)
-        newpath = "%s/%s" % (target_scratch, fname)
+        newpath = "%s/%s" % (config.target_scratch, fname)
         try:
             shutil.move(f, newpath);
             os.chmod(newpath, 0444)
         except:
-            send_email("reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
+            send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
             return 1
-        response = register_jamo(newpath, "procmon_stripe_h5")
-        if 'metadata_id' in response:
-            sources.append(response['metadata_id'])
+        if config.use_jamo:
+            response = register_jamo(config, newpath, "procmon_stripe_h5")
+            if 'metadata_id' in response:
+                sources.append(response['metadata_id'])
 
 
     try:
         shutil.move(product_output, final_product)
         os.chmod(final_product, 0444)
     except:
-        send_email("reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, get_exception()))
+        send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, get_exception()))
         return 1
 
-    register_jamo(final_product, "procmon_reduced_h5", sources)
+    if config.use_jamo:
+        register_jamo(config, final_product, "procmon_reduced_h5", sources)
 
     try:
         shutil.move(bad_output, final_badoutput)
         os.chmod(final_badoutput, 0444)
     except:
-        send_email("reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, get_exception()))
+        send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, get_exception()))
         return 1
 
-    register_jamo(final_badoutput, "procmon_badrecords_h5", sources)
+    if config.use_jamo:
+        register_jamo(config, final_badoutput, "procmon_badrecords_h5", sources)
         
 
-def main_loop(args):
+def main_loop(config):
     # create pid directory
-    mkdir_p("%s/%s" % (base_pid_path, group))
+    mkdir_p("%s/%s" % (config.base_pid_path, config.group))
 
     # create working directory
-    mkdir_p("%s/%s" % (base_prefix, group))
-    mkdir_p("%s/%s/processing" % (base_prefix, group))
-    mkdir_p("%s/%s/collecting" % (base_prefix, group))
-    os.chdir("%s/%s" % (base_prefix, group))
+    mkdir_p("%s/%s" % (config.base_prefix, config.group))
+    mkdir_p("%s/%s/processing" % (config.base_prefix, config.group))
+    mkdir_p("%s/%s/collecting" % (config.base_prefix, config.group))
+    os.chdir("%s/%s" % (config.base_prefix, config.group))
 
-    file_prefix = "%s/%s/collecting/procMuxer" % (base_prefix, group)
+    file_prefix = "%s/%s/collecting/procMuxer" % (config.base_prefix, config.group)
 
     last_rotation = None
 
-    send_email("%s starting" % group, "starting management of %s ProcMuxer group on %s" % (group, socket.gethostname()))
+    send_email(config, "%s starting" % config.group, "starting management of %s ProcMuxer group on %s" % (config.group, socket.gethostname()))
     ## enter into perpetual loop
     reduce_threads = {}
     while True:
         ## check if the muxers are running, if not, restart them
-        for muxer_id in xrange(num_procmuxers):
-            if not is_muxer_running(muxer_id):
-                start_procMuxer(group=group, id=muxer_id,
+        for muxer_id in xrange(config.num_procmuxers):
+            if not is_muxer_running(config, muxer_id):
+                start_procMuxer(config, group=config.group, id=muxer_id,
                         prefix="%s.%d" % (file_prefix, muxer_id),
-                        pidfile="%s/%s/%d" % (base_pid_path, group, muxer_id)
+                        pidfile="%s/%s/%d" % (config.base_pid_path, config.group, muxer_id)
                 )
 
         ## if more than an hour has elapsed since the last successful
@@ -254,15 +259,15 @@ def main_loop(args):
         if (not last_rotation) or ((datetime.now() - last_rotation).total_seconds() > 3600):
             ## get list of currently open files
             open_filenames = []
-            for muxer_id in xrange(num_procmuxers):
-                files = get_current_files(muxer_id)
+            for muxer_id in xrange(config.num_procmuxers):
+                files = get_current_files(config, muxer_id)
                 for f in files:
                     (path,fname) = os.path.split(f)
                     if fname: open_filenames.append(fname)
 
             ## get list of files in collecting, filter out current files and non-targets
             ## put into candidate_files
-            files = os.listdir('%s/%s/collecting' % (base_prefix, group))
+            files = os.listdir('%s/%s/collecting' % (config.base_prefix, config.group))
             open_files = []
             candidate_files = []
             for f in files:
@@ -300,27 +305,88 @@ def main_loop(args):
                 ## move the files
                 processing_files = []
                 for fname in final_candidate_files[fc_time]:
-                    old_filename = "%s/%s/collecting/%s" % (base_prefix, group, fname)
-                    new_filename = "%s/%s/processing/%s" % (base_prefix, group, fname)
+                    old_filename = "%s/%s/collecting/%s" % (config.base_prefix, config.group, fname)
+                    new_filename = "%s/%s/processing/%s" % (config.base_prefix, config.group, fname)
                     os.rename(old_filename, new_filename)
                     processing_files.append(new_filename)
 
                 ## create a thread to manage the reduction of the files
-                reduce_thread = threading.Thread(target=reduce_files, args=(fc_time, processing_files,))
+                reduce_thread = threading.Thread(target=reduce_files, args=(config, fc_time, processing_files,))
                 reduce_thread.start()
 #reduce_threads[fc_time] = reduce_thread
                 last_rotation = fc_time
             
         time.sleep(20)
 
+def read_configuration(args):
+    global procmonInstallBase
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('-f', '--config', help="Specify configuration file instead of default at $PROCMON_DIR/etc/procmonManager.conf", default='%s/etc/procmonManager.conf' % procmonInstallBase, metavar="FILE")
+    args, remaining_args = parser.parse_known_args()
+    defaults = {
+        "num_procmuxers": 2,
+        "procMuxerPath": "%s/sbin/ProcMuxer" % procmonInstallBase,
+        "reducer_path": "%s/sbin/PostReducer" % procmonInstallBase,
+        "metadata_path": "%s/sbin/CheckH5" % procmonInstallBase,
+        "base_pid_path": "/tmp/pid",
+        "base_prefix": "/tmp",
+        "h5_path": "%s/var/procmon" % procmonInstallBase,
+        "h5_prefix": "procmon",
+        "target_scratch": None,
+        "email_list": None,
+        "email_originator": None,
+        "use_email": False,
+        "use_jamo": False,
+        "jamo_url": None,
+        "jamo_token": None,
+        "jamo_user": None,
+    }
+    if args.config and os.path.exists(args.config):
+        config = SafeConfigParser()
+        config.read([args.config])
+        new_defaults = dict(config.items("procmonManager"))
+        for key in new_defaults:
+            if key in defaults:
+                defaults[key] = new_defaults[key]
+
+    parser = argparse.ArgumentParser(parents=[parser])
+    parser.set_defaults(**defaults)
+    parser.add_argument("--num_procmuxers", help="Number of procMuxers (listeners) to run", type=int)
+    parser.add_argument("--group", help="Management group of muxers", type=str)
+    parser.add_argument("--procMuxerPath", help="Path to ProcMuxer", type=str)
+    parser.add_argument("--reducer_path", help="Path to PostReducer", type=str)
+    parser.add_argument("--metadata_path", help="Path to CheckH5", type=str)
+    parser.add_argument("--base_pid_path", help="Directory for pidfiles", type=str)
+    parser.add_argument("--base_prefix", help="Local storage for data collection and processing", type=str)
+    parser.add_argument("--h5_path", help="Search path for h5 files", type=str)
+    parser.add_argument("--h5_prefix", help="Prefix for h5 file names (e.g., h5-path/<prefix>.YYYYMmddhHMMSS.h5)")
+    parser.add_argument("--target_scratch", help="Path for scratch products", type=str)
+    parser.add_argument("--email_list", help="Comma seperated list of people to email about procmonManager", type=split_comma)
+    parser.add_argument("--email_originator", help="'From' email address", type=str)
+    parser.add_argument("--use_jamo", help="Use Jamo (or Not)", type=is_True)
+    parser.add_argument("--jamo_url", help="URL for JAMO", type=str)
+    parser.add_argument("--jamo_token", help="Token for JAMO", type=str)
+    parser.add_argument("--jamo_user", help="username for jamo user", type=str)
+    parser.add_argument("--use_email", help="Use Email for warnings/errors (or Not)", type=is_True)
+    args = parser.parse_args(remaining_args)
+    return args
+
+
 if __name__ == "__main__":
     try:
-        main_loop(sys.argv)
+        config = read_configuration(sys.argv[1:])
+        print config
+        if config.use_jamo:
+            import sdm_curl
+            config.sdm      = sdm_curl.Curl(config.jamo_url, appToken=config.jamo_token)
+            config.sdm_lock = threading.Lock()
+        main_loop(config)
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         str_exc = traceback.format_exc()
         str_tb = '\n'.join(traceback.format_tb(exc_traceback))
         str_stack2 = '\n'.join(traceback.format_stack())
         print '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
-        send_email('PROCMON FAILURE', '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2))
+        send_email(config, 'PROCMON FAILURE', '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2))
     
