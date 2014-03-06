@@ -61,18 +61,24 @@ bool ProcAMQPIO::_amqp_open() {
 	socket = amqp_tcp_socket_new(conn);
 	istatus = amqp_socket_open(socket, mqServer.c_str(), port);
 	if (istatus != 0) {
-		throw ProcIOException("Failed AMQP connection to " + mqServer + ":" + to_string(port));
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Failed AMQP connection to %s:%d", mqServer.c_str(), port);
+        throw ProcIOException(errBuffer);
 	}
 	//amqp_set_socket(conn, socket);
 	_amqp_eval_status(amqp_login(conn, mqVHost.c_str(), 0, frameSize, 0, AMQP_SASL_METHOD_PLAIN, username.c_str(), password.c_str()));
 	if (amqpError) {
-		throw ProcIOException("Failed AMQP login to " + mqServer + ":" + to_string(port) + " as " + username + "; Error: " + amqpErrorMessage);
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Failed AMQP login to %s:%d as %s; Error: %s", mqServer.c_str(), port, username.c_str(), amqpErrorMessage.c_str());
+        throw ProcIOException(errBuffer);
 	}
 
 	amqp_channel_open(conn, 1);
 	_amqp_eval_status(amqp_get_rpc_reply(conn));
 	if (amqpError) {
-		throw ProcIOException("Failed AMQP open channel on " + mqServer + ":" + to_string(port) + "; Error: " + amqpErrorMessage);
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Failed AMQP open channel on %s:%d; Error: %s", mqServer.c_str(), port, amqpErrorMessage.c_str());
+        throw ProcIOException(errBuffer);
 	}
 
 	amqp_exchange_declare(conn, 1, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes("topic"), 0, 0, amqp_empty_table);
@@ -111,31 +117,37 @@ bool ProcAMQPIO::_amqp_close(bool throw_errors) {
 }
 
 bool ProcAMQPIO::_amqp_eval_status(amqp_rpc_reply_t status) {
+    char messageBuffer[1024];
 	amqpError = false;
 	switch (status.reply_type) {
 		case AMQP_RESPONSE_NORMAL:
 			return false;
 			break;
 		case AMQP_RESPONSE_NONE:
-			amqpErrorMessage = "missing RPC reply type (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ")";
+            snprintf(messageBuffer, 1024, "missing RPC reply type (ReplyVal: %u)", (unsigned int) status.reply_type);
+            amqpErrorMessage = string(messageBuffer);
 			break;
 		case AMQP_RESPONSE_LIBRARY_EXCEPTION:
-			amqpErrorMessage = string(amqp_error_string2(status.library_error)) + " (ReplyVal:" + to_string( (unsigned int) status.reply_type) + ", LibraryErr: " + to_string( (unsigned int) status.library_error) + ")";
+            snprintf(messageBuffer, 1024, "%s (ReplyVal: %u)", amqp_error_string2(status.library_error), (unsigned int) status.reply_type);
+            amqpErrorMessage = string(messageBuffer);
 			break;
 		case AMQP_RESPONSE_SERVER_EXCEPTION: {
 			switch (status.reply.id) {
 				case AMQP_CONNECTION_CLOSE_METHOD: {
 					amqp_connection_close_t *m = (amqp_connection_close_t *) status.reply.decoded;
-					amqpErrorMessage = "server connection error " + to_string((int) m->reply_code) + ", message: " +  string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
+                    snprintf(messageBuffer, 1024, "server connection error %d, message: ", (int) m->reply_code);
+					amqpErrorMessage = string(messageBuffer) + string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
 					break;
 				}
 				case AMQP_CHANNEL_CLOSE_METHOD: {
 					amqp_channel_close_t *m = (amqp_channel_close_t *) status.reply.decoded;
-					amqpErrorMessage = "server channel error " + to_string((int) m->reply_code) + ", message: " +  string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
+                    snprintf(messageBuffer, 1024, "server channel error %d, message: ", (int) m->reply_code);
+					amqpErrorMessage = string(messageBuffer) + string(reinterpret_cast<const char *>(m->reply_text.bytes), (int) m->reply_text.len);
 					break;
 				}
 				default:
-					amqpErrorMessage = "unknown server error, method id " + to_string((int)status.reply.id);
+                    snprintf(messageBuffer, 1024, "unknown server error, method id %d", (int)status.reply.id);
+					amqpErrorMessage = string(messageBuffer);
 					break;
 			}
 			break;
@@ -234,7 +246,9 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
                     *pool_size = alloc_size;
                 }
 				if (*data == NULL) {
-					throw ProcIOException("failed to allocate memory for " + to_string(nRecords) + " " + frameMessageType + " records");
+                    char errBuffer[1024];
+                    snprintf(errBuffer, 1024, "failed to allocate memory for %d %s records", nRecords, frameMessageType.c_str());
+                    throw ProcIOException(errBuffer);
 				}
                 bzero(*data, required_size);
 				if (recType == TYPE_PROCSTAT) {
@@ -623,7 +637,9 @@ bool ProcAMQPIO::_amqp_bind_context() {
 	amqp_queue_declare_ok_t* queue_reply = amqp_queue_declare(conn, 1, queue_name_bytes, 0, 0, 0, 1, amqp_empty_table);
 	_amqp_eval_status(amqp_get_rpc_reply(conn));
 	if (amqpError) {
-		throw ProcIOException("Failed AMQP queue declare on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Failed AMQP queue declare on %s:%d, exchange %s; Error: %s", mqServer.c_str(), port, exchangeName.c_str(), amqpErrorMessage.c_str());
+		throw ProcIOException(errBuffer);
 	}
 
 	amqp_bytes_t queue = amqp_bytes_malloc_dup(queue_reply->queue);
@@ -635,12 +651,16 @@ bool ProcAMQPIO::_amqp_bind_context() {
     amqp_queue_bind(conn, 1, queue, amqp_cstring_bytes(exchangeName.c_str()), amqp_cstring_bytes(bindKey.c_str()), amqp_empty_table);
     _amqp_eval_status(amqp_get_rpc_reply(conn));
     if (amqpError) {
-        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Failed AMQP queue bind on %s:%d, exchange %s; Error: %s", mqServer.c_str(), port, exchangeName.c_str(), amqpErrorMessage.c_str());
+        throw ProcIOException(errBuffer);
     }
     amqp_basic_consume(conn, 1, queue, amqp_empty_bytes, 0, 1, 0, amqp_empty_table);
     _amqp_eval_status(amqp_get_rpc_reply(conn));
     if (amqpError) {
-        throw ProcIOException("Failed AMQP queue bind on " + mqServer + ":" + to_string(port) + ", exchange " + exchangeName + "; Error: " + amqpErrorMessage);
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Failed AMQP queue bind on %s:%d, exchange %s; Error: %s", mqServer.c_str(), port, exchangeName.c_str(), amqpErrorMessage.c_str());
+        throw ProcIOException(errBuffer);
     }
 	amqp_bytes_free(queue);
     return true;
@@ -1111,7 +1131,9 @@ unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, vo
     herr_t status;
 
 	if (nRecords == NULL) {
-		throw ProcIOException("Couldn't identify dataset size records (recordType " + to_string((int)recordType) + ") invalid");
+        char errBuffer[1024];
+        snprintf(errBuffer, 1024, "Couldn't identify dataset size records (recordType %d invalid)", (int)recordType);
+        throw ProcIOException(errBuffer);
 	}
 
 	if (hdf5Segment == nullptr) return 0;

@@ -28,6 +28,7 @@
 #include <pthread.h>
 #include <sys/capability.h>
 #include <sys/prctl.h>
+#include <errno.h>
 #endif
 
 #include "ProcData.hh"
@@ -1053,7 +1054,7 @@ int main(int argc, char** argv) {
             retCode *= -1;
             cleanUpFlag = 1;
 		} else  {
-            for (auto iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
+            for (std::vector<ProcIO*>::iterator iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
 
                 if (all_data.n_procStat > 0) {
                     (*iter)->write_procstat(all_data.procStat, all_data.n_procStat);
