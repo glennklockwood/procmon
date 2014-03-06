@@ -97,7 +97,8 @@ ADD_EXECUTABLE( PostReducer PostReducer.cpp ProcIO.reducer.cpp ProcReducerData.c
     SET_TARGET_PROPERTIES( PostReducer PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
     TARGET_LINK_LIBRARIES( PostReducer ${Boost_LIBRARIES} )
 
-INSTALL_TARGETS(/bin procmon ProcReducer ProcMuxer CheckH5 PostReducer)
+INSTALL_TARGETS(/bin procmon)
+INSTALL_TARGETS(/sbin ProcReducer ProcMuxer CheckH5 PostReducer)
 
 IF ( BUILD_SECURED )
     ADD_EXECUTABLE( procmon.secured procmon.cpp ProcIO.procmon.cpp )
