@@ -1,7 +1,7 @@
 ## Discover dependencies
 
-CONFIGURE_FILE( "procHunter.sh.in" "procHunter.sh" )
-CONFIGURE_FILE( "catjob.in" "catjob" )
+CONFIGURE_FILE( "procHunter.sh.in" "procHunter.sh" @ONLY )
+CONFIGURE_FILE( "catjob.in" "catjob" @ONLY )
 
 INSTALL(FILES catjob.py procFinder.py DESTINATION analysis
     PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
@@ -9,4 +9,4 @@ INSTALL(FILES catjob.py procFinder.py DESTINATION analysis
 INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/catjob ${CMAKE_CURRENT_BINARY_DIR}/procHunter.sh DESTINATION analysis
     PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
-INSTALL(CODE "execute_process(COMMAND setup_procmon_analysis.sh ${CMAKE_INSTALL_PREFIX}/python)")
+ADD_SUBDIRECTORY( python )

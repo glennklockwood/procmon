@@ -30,8 +30,8 @@ PROCMON_SCRIPTS=@CMAKE_INSTALL_PREFIX@/analysis
 PROCMON_SOURCE=@PROCMON_H5_STORAGE@
 PROCFINDER=$PROCMON_SCRIPTS/procFinder.py
 MONGOSUMMARY=$PROCMON_SCRIPTS/mongoSummary.py
-STARTDATE=`date -d yesterday +"%Y-%m-%d"`
-ENDDATE=`date +"%Y-%m-%d"`
+STARTDATE=$( date -d yesterday +"%Y-%m-%d" )
+ENDDATE=$( date +"%Y-%m-%d" )
 
 START=${1:-"${STARTDATE} 00:00:00"}
 END=${2:-"${ENDDATE} 00:00:00"}
