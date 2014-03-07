@@ -25,6 +25,7 @@ import pwd
 import subprocess
 import tempfile
 from mpi4py import MPI
+import procmon.Scriptable
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -98,15 +99,11 @@ def merge_host_data(existing_hostdata, new_hostdata):
         if existing_hostdata is None:
             existing_hostdata = new_hostdata
         else:
-            replaceList = existing_hostdata.index.isin(new_hostdata.index)
-            if len(replaceList) > 0 and len(existing_hostdata.index[replaceList]) > 0:
-                existing_hostdata.ix[replaceList] = new_hostdata.ix[existing_hostdata.index[replaceList]]
-                
+            existing_hostdata.update(new_hostdata)
             addList = numpy.invert(new_hostdata.index.isin(existing_hostdata.index))
             if len(addList) > 0:
                 newdata = new_hostdata.ix[addList]
                 existing_hostdata = pandas.concat([existing_hostdata, newdata], axis=0)
-                #existing_hostdata = existing_hostdata.append(new_hostdata.ix[addList])
     return (records,existing_hostdata)
     
 
@@ -156,17 +153,10 @@ def get_job_data(start, end, qqacct_file):
         pass
     return (ret, qqacct_data)
 
-def find_script(args):
-    """Identify scripts passed to interpreters by returning first value that doesn't start with a dash."""
-    for arg in args:
-        if type(arg) is str and len(arg) > 0 and arg[0] != "-":
-            return arg
-    return None
-
 def identify_scripts(processes):
     """For known scripting interpreter processes, work out what the executed script was."""
     executables = processes.exePath.unique()
-    prefixes = ["perl","python","ruby","bash","sh","tcsh","csh"]
+    prefixes = ["perl","python","ruby","bash","sh","tcsh","csh","java"]
     processes['scripts'] = None
     for exe in executables:
         executable = os.path.split(exe)[1]
@@ -179,7 +169,7 @@ def identify_scripts(processes):
             selection = processes.exePath == exe
             subset = processes.ix[selection]
             args = subset.cmdArgs.str.split("|")
-            scripts = args.apply(lambda x: find_script(x[1::]))
+            scripts = args.apply(lambda x: procmon.Scriptable.Scriptable(executable, x[1::]))
             processes.scripts[selection] = scripts
 
 
