@@ -24,12 +24,10 @@ module load uge
 module load openmpi/1.6.4
 
 ## start the houseHunter virtualenv
-. ___INSTALLDIR___/python/bin/activate
+. @CMAKE_INSTALL_PREFIX@/python/bin/activate
 
-export _LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-
-PROCMON_SCRIPTS=___INSTALLDIR___/scripts
-PROCMON_SOURCE=/global/projectb/shared/data/genepool/procmon
+PROCMON_SCRIPTS=@CMAKE_INSTALL_PREFIX@/analysis
+PROCMON_SOURCE=@PROCMON_H5_STORAGE@
 PROCFINDER=$PROCMON_SCRIPTS/procFinder.py
 MONGOSUMMARY=$PROCMON_SCRIPTS/mongoSummary.py
 STARTDATE=`date -d yesterday +"%Y-%m-%d"`

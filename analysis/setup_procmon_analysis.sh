@@ -1,6 +1,4 @@
-#!/bin/bash -l
-
-set -e
+#!/bin/sh -ef
 
 module purge
 module load PrgEnv-gnu/4.7
@@ -30,6 +28,6 @@ pip install pymongo
 
 mkdir -p $INSTALLDIR/scripts
 mkdir -p $INSTALLDIR/bin
-cp procFinder.py $INSTALLDIR/scripts
+cp analysis/procFinder.py $INSTALLDIR/scripts
 cat procHunter.sh.init | sed "s|___INSTALLDIR___|$INSTALLDIR|g" > $INSTALLDIR/bin/procHunter.sh
 chmod a+rX $INSTALLDIR/bin/procHunter.sh

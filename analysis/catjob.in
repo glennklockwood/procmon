@@ -1,6 +1,6 @@
 #!/bin/bash -l
 
-INSTALL_PATH=$( cd $( dirname ${BASH_SOURCE[0]} ) && pwd )
+INSTALL_PATH=@CMAKE_INSTALL_PREFIX@/analysis
 
 module purge
 module load PrgEnv-gnu/4.6

@@ -15,8 +15,6 @@ numexpr.set_num_threads(1)
 import pandas
 import numpy
 
-H5FILEPATH="/global/projectb/statistics/procmon/genepool"
-
 class NumpyJsonEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, numpy.int32):

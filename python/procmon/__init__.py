@@ -6,7 +6,7 @@ import re
 from StringIO import StringIO
 from procmon import H5Cache
 
-__all__ = ['H5Cache']
+__all__ = ['H5Cache','Scriptable']
 
 procdata_dt = np.dtype([
         ('pid', np.uint),
