@@ -333,6 +333,7 @@ def read_configuration(args):
         "base_prefix": "/tmp",
         "h5_path": "%s/var/procmon" % procmonInstallBase,
         "h5_prefix": "procmon",
+        "daemonize": False,
         "target_scratch": None,
         "email_list": None,
         "email_originator": None,
@@ -369,18 +370,41 @@ def read_configuration(args):
     parser.add_argument("--jamo_token", help="Token for JAMO", type=str)
     parser.add_argument("--jamo_user", help="username for jamo user", type=str)
     parser.add_argument("--use_email", help="Use Email for warnings/errors (or Not)", type=is_True)
+    parser.add_argument("--daemonize", help="Daemonize the manager process", type=is_True)
     args = parser.parse_args(remaining_args)
     return args
 
+def daemonize():
+    pid = None
+    sid = None
+    if os.getppid() == 1:
+        # already daemonized
+        return
+
+    pid = os.fork()
+    if pid < 0:
+        sys.stderr.write("Failed to fork! Bailing out.\n");
+        sys.exit(1)
+    elif pid > 0:
+        # this is the parent, exit out
+        sys.exit(0)
+    os.umask(022)
+    os.chdir("/")
+    devnull = open(os.devnull, "rw")
+    for fd in (sys.stdin, sys.stdout, sys.stderr):
+        fd.close()
+        fd = devnull
 
 if __name__ == "__main__":
+    config = read_configuration(sys.argv[1:])
+    print config
+    if config.use_jamo:
+        import sdm_curl
+        config.sdm      = sdm_curl.Curl(config.jamo_url, appToken=config.jamo_token)
+        config.sdm_lock = threading.Lock()
+    if config.daemonize:
+        daemonize()
     try:
-        config = read_configuration(sys.argv[1:])
-        print config
-        if config.use_jamo:
-            import sdm_curl
-            config.sdm      = sdm_curl.Curl(config.jamo_url, appToken=config.jamo_token)
-            config.sdm_lock = threading.Lock()
         main_loop(config)
     except:
         exc_type, exc_value, exc_traceback = sys.exc_info()
