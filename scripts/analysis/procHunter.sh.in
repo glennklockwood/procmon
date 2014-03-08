@@ -40,7 +40,7 @@ args=()
 idx=3
 nargs=0
 while [ $idx -lt $# ]; do
-    args+=(${allargs[$idx]})
+    args+=("${allargs[$idx]}")
     idx=$(( $idx + 1 ))
     nargs=$(( $nargs + 1 ))
 done
@@ -69,4 +69,5 @@ echo qqacct -S "$STARTDATE" -E "$ENDDATE" -q "last_good_end_time >= $STARTDATETI
 qqacct -S "$STARTDATE" -E "$ENDDATE" -q "last_good_end_time >= $STARTDATETIME && last_good_end_time < $ENDDATETIME" -c "user,project,job_number,task_number,hostname,h_rt,end-start,memory(ppn*h_vmem),memory(maxvmem),ppn,failed,exit_status" -t : -o $QQACCT_FILE
 
 ## run the procFinder with procHunter options
-time mpirun --bind-to-socket python $PROCFINDER --start $STARTFMT --end $ENDFMT --save-prefix $SAVEPREFIX --qqacct-data $QQACCT_FILE ${args[*]}
+ARGS=("${args[*]}")
+/bin/sh -f -c "time mpirun --bind-to-socket python $PROCFINDER --start $STARTFMT --end $ENDFMT --save-prefix $SAVEPREFIX --qqacct-data $QQACCT_FILE $ARGS"

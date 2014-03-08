@@ -20,7 +20,7 @@ procdata_dt = np.dtype([
         ('cmdArgs', 'S1024'),
         ('exePath', 'S1024'),
         ('cwdPath', 'S1024'),
-], align=True)
+])
 
 procfd_dt = np.dtype([
         ('pid', np.uint),
@@ -32,7 +32,7 @@ procfd_dt = np.dtype([
         ('path', 'S1024'),
         ('fd', np.uint),
         ('mode', np.uint),
-], align=True)
+])
 
 procobs_dt = np.dtype([
         ('pid', np.uint),
@@ -40,7 +40,7 @@ procobs_dt = np.dtype([
         ('recTimeUSec', np.uint64),
         ('startTime', np.uint64),
         ('startTimeUSec', np.uint64),
-], align=True)
+])
 
 procstat_dt = np.dtype([
         ('pid', np.uint),
@@ -90,7 +90,7 @@ procstat_dt = np.dtype([
         ('effUid', np.uint64),
         ('realGid', np.uint64),
         ('effGid', np.uint64),
-], align=True)
+])
 
 def parse_procstat(message):
         idx = message.find('\n')

@@ -2,8 +2,6 @@
 ## procFinder.py -- query the procmon data
 ##
 ## Author: Doug Jacobsen <dmj@nersc.gov>
-## Date  : 2013/06/10
-##
 ## Copyright (C) 2013 - The Regents of the University of California
 
 ## discovered that numexpr was starting as many threads as there are cores;
@@ -25,13 +23,14 @@ import pwd
 import subprocess
 import tempfile
 from mpi4py import MPI
+import procmon
 import procmon.Scriptable
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-def get_host_processes(hostname, fd, query):
+def get_host_processes(hostname, fd, query, filename):
     """Read process data from an hdf5 host-group, merge, select according to query, and return a pandas DataFrame.
 
     Arguments:
@@ -54,22 +53,22 @@ def get_host_processes(hostname, fd, query):
         hostgroup = fd[hostname]
         nprocdata = hostgroup['procdata'].attrs['nRecords']
         nprocstat = hostgroup['procstat'].attrs['nRecords']
-        procdata = pandas.DataFrame(hostgroup['procdata'][0:nprocdata])
+        procdata = hostgroup['procdata'][0:nprocdata]
+        procdata = pandas.DataFrame(procdata)
         procdata['key_startTime'] = procdata['startTime']
         procdata = procdata.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
         procdata['host'] = hostname
-        procstat = pandas.DataFrame(hostgroup['procstat'][0:nprocstat])
+        procstat = hostgroup['procstat'][0:nprocstat]
+        procstat = pandas.DataFrame(procstat)
         procstat['key_startTime'] = procstat['startTime']
         procstat = procstat.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
         procstat['host'] = hostname
-
     except:
         sys.stderr.write('[%d] unable to retrieve data for %s; skipping\n' % (rank, hostname))
         traceback.print_exc(file=sys.stderr)
         exc_type, exc_value, exc_traceback = sys.exc_info()
         traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
         
-    
     t_data = None
 
     ## for just query processes
@@ -84,8 +83,14 @@ def get_host_processes(hostname, fd, query):
                     idx = idx | sq
         processes = procdata[idx]
         if not processes.empty:
-            pd = processes.groupby(level=[0,1]).first()
-            ps = procstat.ix[pd.index].groupby(level=[0,1]).first()
+            try:
+                pd = processes.groupby(level=[0,1]).first()
+                ps = procstat.ix[procstat.index.isin(pd.index)].groupby(level=[0,1]).first()
+            except:
+                print filename, hostname
+                print pd.index
+                print procstat
+                raise
             t_data = pd.join(ps, rsuffix='_ps')
             t_data['key_host'] = t_data['host']
             t_data = t_data.set_index('key_host', append=True)
@@ -126,7 +131,7 @@ def parse_h5(filename, id_processes, query):
         if hostname not in fd:
             continue
 
-        hostdata = get_host_processes(hostname, fd, query)
+        hostdata = get_host_processes(hostname, fd, query, filename)
         existing_hostdata = None
         if hostname in id_processes:
             existing_hostdata = id_processes[hostname]
