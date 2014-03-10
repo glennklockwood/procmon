@@ -14,6 +14,6 @@ STARTFMT=`date -d "${START}" +"%Y%m%d%H%M%S"`
 
 jobid=`qsub -terse -wd $BSCRATCH -pe pe_16 16 -l exclusive.c -l ram.c=7.5G $PROCHUNTER "$STARTDATE" "$ENDDATE" $BSCRATCH/firehose.$STARTFMT exePath '.*'`
 if [ $? -eq 0 ]; then
-    echo qsub -wd $BSCRATCH -hold_jid $jobid $MONGOSUMMARY "$STARTDATE" "$ENDDATE" $BSCRATCH/firehose.$STARTFMT exePath '.*'
+    echo qsub -wd $BSCRATCH -hold_jid $jobid $MONGOSUMMARY "$STARTDATE" "$ENDDATE" $BSCRATCH/firehose.$STARTFMT exePath '.\\*'
 fi
 
