@@ -378,20 +378,24 @@ def get_processes(filenames, baseline_filenames, query, start_time):
         
     print "[%d] finished merging data" % rank
     print "[%d] setting baseline data" % rank
-    processes['utime_baseline'] = 0
-    processes['stime_baseline'] = 0
-    processes['startTime_baseline'] = processes.startTime
-    if processes is not None and not processes.empty and baseline_processes is not None and not baseline_processes.empty:
-        start_timestamp = (start_time - datetime(1970,1,1)).total_seconds
-        # identify processes which started before start_time
+    if processes is not None and not processes.empty: 
+        processes['utime_baseline'] = 0
+        processes['stime_baseline'] = 0
+        processes['startTime_baseline'] = processes.startTime.copy(True)
+        start_timestamp = int(start_time.strftime("%s"))
+        print "start_timestamp: %d" % start_timestamp
         early_starters = processes.ix[processes.startTime < start_timestamp].index
-        processes.utime_baseline[early_starters] = baseline_processes.ix[early_starters].utime
-        processes.stime_baseline[early_starters] = baseline_processes.ix[early_starters].stime
-        processes.startTime_baseline[early_starters] = start_timestamp
+        print "early starters: ", early_starters
+        if baseline_processes is not None and not baseline_processes.empty and len(early_starters) > 0:
+            # identify processes which started before start_time
+            processes.utime_baseline[early_starters] = baseline_processes.ix[early_starters].utime
+            processes.stime_baseline[early_starters] = baseline_processes.ix[early_starters].stime
+            processes.startTime_baseline[early_starters] = start_timestamp
+            print processes.startTime_baseline
         
-        ## in case the baseline data is missing some things we think should be there
-        processes.utime_baseline[numpy.invert(processes.utime_baseline.notnull())] = 0
-        processes.stime_baseline[numpy.invert(processes.stime_baseline.notnull())] = 0
+            ## in case the baseline data is missing some things we think should be there
+            processes.utime_baseline[numpy.invert(processes.utime_baseline.notnull())] = 0
+            processes.stime_baseline[numpy.invert(processes.stime_baseline.notnull())] = 0
 
     print "[%d] baselining complete" % rank
 
@@ -410,7 +414,7 @@ def get_processes(filenames, baseline_filenames, query, start_time):
 
 def identify_users(processes):
     uids = processes.realUid.unique()
-    processes['username'] = None
+    processes['username'] = 'unknown uid'
     user_hash = {}
     for uid in uids:
         uid_processes_idx = processes.realUid == uid
@@ -425,7 +429,7 @@ def identify_users(processes):
 
 def integrate_job_data(processes, qqacct_data):
     if qqacct_data is None:
-        processes['project'] = 'None'
+        processes['project'] = 'unknown project'
         return processes
     qqacct_data.job = qqacct_data.job.astype('str')
     qqacct_data.task[qqacct_data.task == 0] = 1
