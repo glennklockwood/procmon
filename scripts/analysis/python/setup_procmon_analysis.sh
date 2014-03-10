@@ -7,7 +7,7 @@ if [ $INSTALLDIR == "undef" ]; then
 fi
 pwd
 mkdir -p $INSTALLDIR/python
-virtualenv $INSTALLDIR/python
+virtualenv --system-site-packages $INSTALLDIR/python
 . $INSTALLDIR/python/bin/activate
 pip install numpy
 pip install matplotlib
@@ -17,6 +17,5 @@ pip install h5py
 pip install tables
 pip install pandas
 pip install mpi4py
-pip install ipython
 pip install pymongo
 python setup.py install

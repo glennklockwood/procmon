@@ -177,6 +177,14 @@ def identify_scripts(processes):
             scripts = args.apply(lambda x: procmon.Scriptable.Scriptable(executable, x[1::]))
             processes.scripts[selection] = scripts
 
+def identify_userCommand(processes):
+    """ Use a simple heuristic to identify the intended command for each process
+        depends on indentify_scripts already having been run """
+
+    command = processes.scripts.str.split('/').str.get(-1)
+    mask = (command == "COMMAND" ) | (command == "") | (numpy.invert(command.notnull()))
+    command[mask] = processes.ix[mask].exePath.str.split('/').str.get(-1)
+    processes['command'] = command 
 
 def identify_files(filenames):
     """Determine which mpi rank should parse which hdf5 files.
@@ -572,9 +580,14 @@ def main(args):
     summaries = None
     if processes is not None and not processes.empty:
         identify_scripts(processes)
+        identify_userCommand(processes)
         identify_users(processes)
         processes = integrate_job_data(processes, qqacct_data)
         summ_index = {
+            'command' : ['command'],
+            'commandUser' : ['username','command'],
+            'commandProject' : ['project','command'],
+            'commandHost' : ['host','command'],
             'executables' : ['exePath'],
             'execUser' : ['username', 'exePath'],
             'execProject' : ['project', 'exePath'],
