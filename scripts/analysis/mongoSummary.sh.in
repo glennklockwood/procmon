@@ -1,0 +1,49 @@
+#!/bin/bash -l
+
+## Wrapper to deposit process summary data into mongo
+## Author: Doug Jacobsen <dmj@nersc.gov>
+## Date  : 2014-03-10
+##
+## Takes three arguments (all optional)
+##   1. Start datetime (YYYY-mm-dd HH:MM:SS)
+##   2. End datetime   (YYYY-mm-dd HH:MM:SS)
+##   3. save file prefix
+##   4. mongo collection name
+
+set -e
+
+## load the needed modules
+module purge
+module load PrgEnv-gnu/4.7
+module load python/2.7.4
+module load hdf5/1.8.11
+module load uge
+module load openmpi/1.6.4
+
+## start the houseHunter virtualenv
+. @CMAKE_INSTALL_PREFIX@/python/bin/activate
+
+PROCMON_SCRIPTS=@CMAKE_INSTALL_PREFIX@/analysis
+PROCMON_SOURCE=@PROCMON_H5_STORAGE@
+PROCFINDER=$PROCMON_SCRIPTS/procFinder.py
+MONGOSUMMARY=$PROCMON_SCRIPTS/mongoSummary.py
+STARTDATE=$( date -d yesterday +"%Y-%m-%d" )
+ENDDATE=$( date +"%Y-%m-%d" )
+
+START=${1:-"${STARTDATE} 00:00:00"}
+END=${2:-"${ENDDATE} 00:00:00"}
+
+## re-calculate the dates/times with possible user input
+STARTFMT=`date -d "${START}" +"%Y%m%d%H%M%S"`
+ENDFMT=`date -d "${END}" +"%Y%m%d%H%M%S"`
+STARTDATE=`date -d "${START}" +"%Y-%m-%d"`
+STARTDATE_NODASH=`date -d "${START}" +"%Y%m%d"`
+STARTDATETIME=`date -d "${START}" +"%Y-%m-%d %H:%M:%S"`
+ENDDATE=`date -d "${END}" +"%Y-%m-%d"`
+ENDDATETIME=`date -d "${END}" +"%Y-%m-%d %H:%M:%S"`
+
+## calculate (or accept) the save-file prefix
+SAVEPREFIX=${3:-"${SCRATCH}/procHunted.${STARTFMT}"}
+COLLECTION=${4:-"UNKNOWN"}
+
+python $MONGOSUMMARY $COLLECTION $SAVEPREFIX.summary.h5 $STARTDATE_NODASH

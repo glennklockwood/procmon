@@ -13,12 +13,16 @@ collection_label = sys.argv[1]
 summary_file = sys.argv[2]
 date = sys.argv[3]
 
-client = MongoClient('128.55.56.19', 27017)
+client = MongoClient(@PROCMON_MONGODB_HOST@, @PROCMON_MONGODB_PORT@)
 db = client.procmon
-db.authenticate('procmon', 'nomcorp')
+db.authenticate('@PROCMON_MONGODB_USER@', '@PROCMON_MONGODB_PASSWD@')
 collection = db[collection_label]
 
 summ_index = {
+    'command' : ['command'],
+    'commandUser' : ['username','command'],
+    'commandProject' : ['project','command'],
+    'commandHost' : ['host','command'],
     'executables' : ['exePath'],
     'execUser' : ['username', 'exePath'],
     'execProject' : ['project', 'exePath'],
