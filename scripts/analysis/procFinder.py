@@ -380,7 +380,7 @@ def get_processes(filenames, baseline_filenames, query, start_time):
     print "[%d] setting baseline data" % rank
     if processes is not None and not processes.empty: 
         processes['utime_baseline'] = numpy.zeros(processes.shape[0],dtype=processes.utime.dtype)
-        processes['stime_baseline'] = numpy.zeros(processes.shape[0],dytpe=processes.stime.dtype)
+        processes['stime_baseline'] = numpy.zeros(processes.shape[0],dtype=processes.stime.dtype)
         processes['startTime_baseline'] = processes.startTime.copy(True)
         start_timestamp = int(start_time.strftime("%s"))
         early_starters = processes.ix[processes.startTime < start_timestamp].index
