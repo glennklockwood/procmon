@@ -310,7 +310,7 @@ def divide_data(rank_hosts, host_processes):
     print "[%d] divided processes: " % rank, div_count
     return div_data
 
-def get_processes(filenames, query):
+def get_processes(filenames, baseline_filenames, query, start_time):
     status = 0
     processes = None
 
@@ -324,6 +324,15 @@ def get_processes(filenames, query):
 
     for filename in filenames:
         parse_h5(filename, host_processes, query)
+
+    baseline_processes = {}
+    if rank == (size - 1):
+        for filename in baseline_filenames:
+            print "[%d] parsing baseline file: %s" % (rank, filename) 
+            parse_h5(filename, baseline_processes, query)
+            baseline_processes = pandas.concat(baseline_processes.values())
+    print "[%d] starting baseline data bcast" % rank
+    baseline_processes = comm.bcast(baseline_processes, root=(size-1))
 
     # build dictionary of hosts and known processes per host
     hosts = {x:host_processes[x].shape[0] for x in host_processes}
@@ -368,6 +377,24 @@ def get_processes(filenames, query):
                     print "[%d] %s\n" % (rank, string)
         
     print "[%d] finished merging data" % rank
+    print "[%d] setting baseline data" % rank
+    processes['utime_baseline'] = 0
+    processes['stime_baseline'] = 0
+    processes['startTime_baseline'] = processes.startTime
+    if processes is not None and not processes.empty and baseline_processes is not None and not baseline_processes.empty:
+        start_timestamp = (start_time - datetime(1970,1,1)).total_seconds
+        # identify processes which started before start_time
+        early_starters = processes.ix[processes.startTime < start_timestamp].index
+        processes.utime_baseline[early_starters] = baseline_processes.ix[early_starters].utime
+        processes.stime_baseline[early_starters] = baseline_processes.ix[early_starters].stime
+        processes.startTime_baseline[early_starters] = start_timestamp
+        
+        ## in case the baseline data is missing some things we think should be there
+        processes.utime_baseline[numpy.invert(processes.utime_baseline.notnull())] = 0
+        processes.stime_baseline[numpy.invert(processes.stime_baseline.notnull())] = 0
+
+    print "[%d] baselining complete" % rank
+
     if processes is not None and not processes.empty:
         ## clean up paths to make equivalent and understandable
         processes.exePath = processes.exePath.str.replace("^/chos","",case=False)
@@ -411,7 +438,9 @@ def integrate_job_data(processes, qqacct_data):
 def summarize_processes(group):
     rowhash = {
         'cpu_time' : (group.utime + group.stime).sum() / 100.,
+        'net_cpu_time': ((group.utime + group.stime) - (group.utime_baseline + group.stime_baseline)).sum() / 100.,
         'walltime' : (group.recTime - group.startTime).sum(),
+        'net_walltime' : (group.recTime - group.startTime_baseline).sum(),
         'nobs'     : group.utime.count()
     }
     return pandas.Series(rowhash)
@@ -536,20 +565,12 @@ def main(args):
                 query[key].append(value)
         i += 1
 
-    ## get list of files
-    filename_hash = {}
-    all_files = os.listdir(h5_path)
-    pattern = "%s\.([0-9]+)\.h5" % (h5_prefix)
-    regex = re.compile(pattern)
-    for filename in all_files:
-        f_match = regex.match(filename)
-        if f_match is not None:
-            currts = datetime.strptime(f_match.group(1), "%Y%m%d%H%M%S")
-            if currts >= start_time and currts < end_time:
-                filename_hash[currts] = os.path.join(h5_path, filename)
-    
-    keys = sorted(filename_hash.keys())
-    filenames = [filename_hash[x] for x in keys]
+    procmon_h5cache = procmon.H5Cache.H5Cache(h5_path, h5_prefix)
+    filenames = [ x['path'] for x in procmon_h5cache.query(start_time, end_time) ]
+    baseline_filenames = [ x['path'] for x in procmon_h5cache.query(start_time - timedelta(minutes=20), start_time - timedelta(minutes=1)) ]
+
+    filenames = sorted(filenames)
+    baseline_filenames = sorted(baseline_filenames)
 
     if len(filenames) == 0:
         print "procmon data files could not be found"
@@ -576,7 +597,7 @@ def main(args):
     print "distributing qqacct data"
     qqacct_data = comm.bcast(qqacct_data, root=0)
     print "getting process data (may take a long time):"
-    (h_status, processes) = get_processes(filenames, query)
+    (h_status, processes) = get_processes(filenames, baseline_filenames, query, start_time)
     summaries = None
     if processes is not None and not processes.empty:
         identify_scripts(processes)
