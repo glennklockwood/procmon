@@ -181,9 +181,10 @@ def identify_userCommand(processes):
     """ Use a simple heuristic to identify the intended command for each process
         depends on indentify_scripts already having been run """
 
+    processes['execCommand'] = processes.exePath.str.split('/exePath').str.get(-1)
     command = processes.scripts.str.split('/').str.get(-1)
     mask = (command == "COMMAND" ) | (command == "") | (numpy.invert(command.notnull()))
-    command[mask] = processes.ix[mask].exePath.str.split('/').str.get(-1)
+    command[mask] = processes.ix[mask].execCommand
     processes['command'] = command 
 
 def identify_files(filenames):
@@ -607,10 +608,10 @@ def main(args):
         identify_users(processes)
         processes = integrate_job_data(processes, qqacct_data)
         summ_index = {
-            'command' : ['command'],
-            'commandUser' : ['username','command'],
-            'commandProject' : ['project','command'],
-            'commandHost' : ['host','command'],
+            'command' : ['command', 'execCommand'],
+            'commandUser' : ['username','command','execCommand'],
+            'commandProject' : ['project','command','execCommand'],
+            'commandHost' : ['host','command','execCommand'],
             'executables' : ['exePath'],
             'execUser' : ['username', 'exePath'],
             'execProject' : ['project', 'exePath'],
