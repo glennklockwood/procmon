@@ -383,9 +383,7 @@ def get_processes(filenames, baseline_filenames, query, start_time):
         processes['stime_baseline'] = 0
         processes['startTime_baseline'] = processes.startTime.copy(True)
         start_timestamp = int(start_time.strftime("%s"))
-        print "start_timestamp: %d" % start_timestamp
         early_starters = processes.ix[processes.startTime < start_timestamp].index
-        print "early starters: ", early_starters
         if baseline_processes is not None and not baseline_processes.empty and len(early_starters) > 0:
             # identify processes which started before start_time
             processes.utime_baseline[early_starters] = baseline_processes.ix[early_starters].utime
