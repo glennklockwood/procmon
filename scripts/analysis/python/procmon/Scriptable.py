@@ -4,37 +4,35 @@
 import re
 
 def Scriptable(execName, commandArgs):
+    localArgs = [ x.strip() for x in commandArgs ]
     if execName == "java":
-        return JavaScriptable(execName, commandArgs)
+        return JavaScriptable(execName, localArgs)
     if execName.startswith("python"):
-        return PythonScriptable(execName, commandArgs)
+        return PythonScriptable(execName, localArgs)
     if execName.startswith("perl"):
-        return PerlScriptable(execName, commandArgs)
+        return PerlScriptable(execName, localArgs)
     if execName.startswith("ruby"):
-        return RubyScriptable(execName, commandArgs)
+        return RubyScriptable(execName, localArgs)
     if re.match("^(ba)?sh.*", execName) is not None:
-        return BashScriptable(execName, commandArgs)
+        return BashScriptable(execName, localArgs)
     if re.match("^(t)?csh.*", execName) is not None:
-        return CshScriptable(execName, commandArgs)
+        return CshScriptable(execName, localArgs)
     return None
 
 def JavaScriptable(execName, commandArgs):
     idx = 0
     while idx < len(commandArgs):
-        if commandArgs[idx] == "-jar":
-            idx += 1
-            if idx < len(commandArgs):
-                # return the name of the executable jar file
-               return commandArgs[idx]; 
-        if commandArgs[idx] == "-cp":
+        if commandArgs[idx] == "-cp" or commandArgs[idx] == "-classpath":
             # skip next arg
             idx += 1
         elif commandArgs[idx].startswith("-"):
             # skip this arg
             pass
         else:
-            # class name
-            return commandArgs[idx]
+            # class name (or -jar arg, it turns out that -jar is just a flag to use a jar, doesn't need to be in order)
+            if len(commandArgs[idx]) > 0:
+                return commandArgs[idx]
+            return None
         idx += 1
     return None
 
@@ -50,7 +48,9 @@ def PythonScriptable(execName, commandArgs):
             #skip this arg
             pass
         else:
-            return commandArgs[idx]
+            if len(commandArgs[idx]) > 0:
+                return commandArgs[idx]
+            return None
         idx += 1
     return None
 
@@ -62,7 +62,9 @@ def PerlScriptable(execName, commandArgs):
         elif commandArgs[idx].startswith("-"):
             pass
         else:
-            return commandArgs[idx]
+            if len(commandArgs[idx]) > 0:
+                return commandArgs[idx]
+            return None
         idx += 1
     return None
 
@@ -76,7 +78,9 @@ def RubyScriptable(execName, commandArgs):
         elif commandArgs[idx].startswith("-"):
             pass
         else:
-            return commandArgs[idx]
+            if len(commandArgs[idx]) > 0:
+                return commandArgs[idx]
+            return None
         idx += 1
     return None
 
@@ -90,7 +94,9 @@ def BashScriptable(execName, commandArgs):
         elif commandArgs[idx].startswith("-"):
             pass
         else:
-            return commandArgs[idx]
+            if len(commandArgs[idx]) > 0:
+                return commandArgs[idx]
+            return None
         idx += 1
     return None
 
@@ -102,10 +108,14 @@ def CshScriptable(execName, commandArgs):
         elif commandArgs[idx].startswith('-') and commandArgs[idx].find('b') > 0:
             idx += 1
             if idx < len(commandArgs):
-                return commandArgs[i]
+                if len(commandArgs[idx]) > 0:
+                    return commandArgs[i]
+                return None
         elif commandArgs[idx].startswith("-"):
             pass
         else:
-            return commandArgs[idx]
+            if len(commandArgs[idx]) > 0:
+                return commandArgs[idx]
+            return None
         idx += 1
     return None
