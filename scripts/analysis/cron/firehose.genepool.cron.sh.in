@@ -8,8 +8,11 @@ MONGOSUMMARY=$PROCMON_SCRIPTS/mongoSummary.sh
 STARTDATE=$( date -d yesterday +"%Y-%m-%d" )
 ENDDATE=$( date +"%Y-%m-%d" )
 
-START=${1:-"${STARTDATE} 00:00:00"}
-END=${2:-"${ENDDATE} 00:00:00"}
+STARTDATE=${1:-"${STARTDATE}"}
+ENDDATE=${2:-"${ENDDATE}"}
+
+START="${STARTDATE} 00:00:00"
+END="${ENDDATE} 00:00:00"
 STARTFMT=`date -d "${START}" +"%Y%m%d%H%M%S"`
 
 jobid=`qsub -terse -wd $BSCRATCH -pe pe_16 16 -l exclusive.c -l ram.c=7.5G $PROCHUNTER "$STARTDATE" "$ENDDATE" $BSCRATCH/firehose.$STARTFMT exePath '.\\*'`
