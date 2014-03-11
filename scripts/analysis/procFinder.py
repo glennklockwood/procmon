@@ -181,7 +181,7 @@ def identify_userCommand(processes):
     """ Use a simple heuristic to identify the intended command for each process
         depends on indentify_scripts already having been run """
 
-    processes['execCommand'] = processes.exePath.str.split('/exePath').str.get(-1)
+    processes['execCommand'] = processes.exePath.str.split('/').str.get(-1)
     command = processes.scripts.str.split('/').str.get(-1)
     mask = (command == "COMMAND" ) | (command == "") | (numpy.invert(command.notnull()))
     command[mask] = processes.ix[mask].execCommand

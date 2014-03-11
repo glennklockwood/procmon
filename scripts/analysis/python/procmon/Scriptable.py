@@ -41,11 +41,11 @@ def JavaScriptable(execName, commandArgs):
 def PythonScriptable(execName, commandArgs):
     idx = 0
     while idx < len(commandArgs):
-        if commandArgs[idx] in ("-m", "-Q", "-W",):
+        if commandArgs[idx].startswith('-') and commandArgs[idx].find('c') > 0:
+            return "COMMAND"
+        elif commandArgs[idx] in ("-m", "-Q", "-W",):
             #skip next arg
             idx += 1
-        elif commandArgs[idx] == "-c":
-            return "COMMAND"
         elif commandArgs[idx].startswith("-"):
             #skip this arg
             pass
@@ -57,7 +57,7 @@ def PythonScriptable(execName, commandArgs):
 def PerlScriptable(execName, commandArgs):
     idx = 0
     while idx < len(commandArgs):
-        if commandArgs[idx].startswith("-e") or commandArgs[idx].startswith("-E"):
+        if commandArgs[idx].startswith('-') and (commandArgs[idx].find('e') > 0 or commandArgs[idx].find('E') > 0):
             return "COMMAND";
         elif commandArgs[idx].startswith("-"):
             pass
@@ -69,10 +69,10 @@ def PerlScriptable(execName, commandArgs):
 def RubyScriptable(execName, commandArgs):
     idx = 0
     while idx < len(commandArgs):
-        if commandArgs[idx] in ("-C","-F","-I","-K","-r"):
-            idx += 1
-        elif commandArgs[idx] == "-e":
+        if commandArgs[idx].startswith('-') and commandArgs[idx].find('e') > 0:
             return "COMMAND"
+        elif commandArgs[idx] in ("-C","-F","-I","-K","-r"):
+            idx += 1
         elif commandArgs[idx].startswith("-"):
             pass
         else:
@@ -83,10 +83,10 @@ def RubyScriptable(execName, commandArgs):
 def BashScriptable(execName, commandArgs):
     idx = 0
     while idx < len(commandArgs):
-        if commandArgs[idx] in ("--rcfile","--init-file", "-O", "+O"):
-            idx += 1
-        elif commandArgs[idx] == "-c":
+        if commandArgs[idx].startswith('-') and commandArgs[idx].find('c') > 0:
             return "COMMAND"
+        elif commandArgs[idx] in ("--rcfile","--init-file", "-O", "+O"):
+            idx += 1
         elif commandArgs[idx].startswith("-"):
             pass
         else:
@@ -97,12 +97,12 @@ def BashScriptable(execName, commandArgs):
 def CshScriptable(execName, commandArgs):
     idx = 0
     while idx < len(commandArgs):
-        if commandArgs[idx] == "-b":
+        if commandArgs[idx].startswith('-') and commandArgs[idx].find('c') > 0:
+            return "COMMAND"
+        elif commandArgs[idx].startswith('-') and commandArgs[idx].find('b') > 0:
             idx += 1
             if idx < len(commandArgs):
                 return commandArgs[i]
-        elif commandArgs[idx] == "-c":
-            return "COMMAND"
         elif commandArgs[idx].startswith("-"):
             pass
         else:
