@@ -7,11 +7,11 @@ import datetime
 import time
 
 app = Flask(__name__)
-app.config["MONGO_HOST"] = '128.55.56.19'
-app.config['MONGO_PORT'] = 27017
-app.config['MONGO_DBNAME'] = 'procmon'
-app.config['MONGO_USERNAME'] = 'usgweb'
-app.config['MONGO_PASSWORD'] = '23409yasfh39@knvDD'
+app.config["MONGO_HOST"] = '@PROCMON_MONGODB_HOST@'
+app.config['MONGO_PORT'] = @PROCMON_MONGODB_PORT@
+app.config['MONGO_DBNAME'] = '@PROCMON_MONGODB_DB@'
+app.config['MONGO_USERNAME'] = '@PROCMON_MONGODB_ROUSER@'
+app.config['MONGO_PASSWORD'] = '@PROCMON_MONGODB_ROPASSWD@'
 app.debug = True
 
 mongo = PyMongo(app)

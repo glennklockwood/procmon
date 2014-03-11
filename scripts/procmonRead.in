@@ -36,14 +36,14 @@ def recv_message(channel, method_frame, header_frame, body):
     print 
 
 def setupConnection(routingKeys):
-    credentials = pika.PlainCredentials('procmon','nomcorp')
-    connection = pika.BlockingConnection(pika.ConnectionParameters('genepool-mq.nersc.gov', 5672, "jgi", credentials))
+    credentials = pika.PlainCredentials('@DEFAULT_AMQP_USER@','@DEFAULT_AMQP_PASSWORD@')
+    connection = pika.BlockingConnection(pika.ConnectionParameters('@DEFAULT_AMQP_HOST@', @DEFAULT_AMQP_PORT@, "@DEFAULT_AMQP_VHOST@", credentials))
     channel = connection.channel()
-    channel.exchange_declare(exchange="procmon", exchange_type="topic")
+    channel.exchange_declare(exchange="@DEFAULT_AMQP_EXCHANGE@", exchange_type="topic")
     queueRes = channel.queue_declare(exclusive=True)
     queue_name = queueRes.method.queue
     for routing_key in routingKeys:
-        channel.queue_bind(exchange="procmon", queue=queue_name, routing_key=routing_key)
+        channel.queue_bind(exchange="@DEFAULT_AMQP_EXCHANGE@", queue=queue_name, routing_key=routing_key)
     try:
         channel.basic_consume(recv_message, queue=queue_name, no_ack=True)
         channel.start_consuming()
