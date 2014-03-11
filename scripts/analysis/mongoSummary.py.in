@@ -82,7 +82,16 @@ for summary_label in summ_index.keys():
 users = db.firehose.distinct("username")
 projects = db.firehose.distinct("project")
 hosts = db.firehose.distinct("host")
+
+items = {"users": users, 
+    "projects": projects,
+    "hosts": hosts,
+}
+
 collection = db['summary']
-collection.find_and_modify(query={"type":"users"}, update={"type":"users", "obj":users})
-collection.find_and_modify(query={"type":"projects"}, update={"type":"projects", "obj":projects})
-collection.find_and_modify(query={"type":"hosts"}, update={"type":"hosts", "obj":hosts})
+for item in items:
+    collcount = collection.find({'type':item}).count()
+    if collcount > 0:
+        collection.find_and_modify(query={"type":item}, update={"type":item, "obj":items[item]})
+    else:
+        collection.insert({'type':item, 'obj':items[item]})
