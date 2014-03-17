@@ -1,12 +1,11 @@
 #!/bin/bash
 #
-# /etc/rc.d/init.d/procmon
+# /etc/rc.d/init.d/amqpLogger
 #
-# Process Monitor
+# Simple AMQP-based logging daemon
 #        
-# chkconfig: 2345 99 1
-# description: Process Monitor
-# processname: procmon
+# description: Simple AMQP-based logging daemon
+# processname: amqpLogger
 # pidfile: /var/run/procmon.pid
 
 ### BEGIN INIT INFO
@@ -17,14 +16,14 @@
 # Should-Stop: $network
 # Default-Start: 2 3 4 5
 # Default-Stop: 0 1 6
-# Short-Description: Start procmon
-# Description: Process monitor
+# Short-Description: Start amqpLogger
+# Description: Simple AMQP-based logging daemon
 ### END INIT INFO
 
 # Source function library.
 . /etc/init.d/functions
 
-prog="procmon"
+prog="amqpLogger"
 
 if [ -f "/etc/sysconfig/$prog" ]; then
     . "/etc/sysconfig/$prog"
@@ -32,11 +31,11 @@ fi
 
 PIDFILE="/var/run/${prog}.pid"
 RETVAL=0
-RUNPROCMON="${RUNPROCMON_PREFIX:-/usr/bin}/run${prog}"
+AMQPLOGGER="${PROCMON_PREFIX:-/usr/bin}/${prog}"
 
 start() {
     echo -n "Starting ${prog}: "
-    daemon --pidfile "${PIDFILE}" "${RUNPROCMON}" --pid "${PIDFILE}"
+    daemon --pidfile "${PIDFILE}" "${AMQPLOGGER}" --pidfile "${PIDFILE} --daemon"
     RETVAL=$?
     echo
     touch /var/lock/subsys/${prog}

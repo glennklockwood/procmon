@@ -38,6 +38,7 @@
 var chart_data;
 var exec_table_obj;
 var script_table_obj;
+var command_table_obj;
 var usersummary_table_obj;
 var projectsummary_table_obj;
 var hostsummary_table_obj;
@@ -71,6 +72,7 @@ function update_summary() {
     });
     exec_table_obj.fnDraw();
     script_table_obj.fnDraw();
+    command_table_obj.fnDraw();
     usersummary_table_obj.fnDraw();
     projectsummary_table_obj.fnDraw();
     hostsummary_table_obj.fnDraw();
@@ -332,6 +334,32 @@ $(document).ready(function() {
         }],
     } ); 
 
+    command_table_obj = $('#command_table').dataTable( {
+        "bProcessing": true,
+        "bServerSide": true,
+        "bFilter": false,
+        "iDisplayLength": 50,
+        "sAjaxSource": "https://gpweb26.nersc.gov:8242/househunter",
+        "fnServerParams": function ( aoData ) {
+            user = $("#select_user").val();
+            project = $("#select_project").val();
+            host = $("#select_host").val();
+            date_val = $("#datepicker").val();
+            collection = $("#select_collection").val();
+            aoData.push( {"name": "get_command", "value": 1} );
+            aoData.push( {"name": "user", "value": user} );
+            aoData.push( {"name": "project", "value": project} );
+            aoData.push( {"name": "host", "value": host} );
+            aoData.push( {"name": "date", "value": date_val} );
+            aoData.push( {"name": "collection", "value": collection} );
+        },
+        "aaSorting": [[2, "desc"]],
+        "aoColumnDefs": [ {
+            "aTargets": [ -1 ],
+            "mRender": function (data, type, full) { return Math.round(data*100)/100; },
+        }],
+    } ); 
+
     usersummary_table_obj = $('#usersummary_table').dataTable( {
         "bProcessing": true,
         "bServerSide": true,
@@ -504,8 +532,11 @@ $(".dataBox").corner("30px");
         <thead>
             <th>exePath</th>
             <th>N instances</th>
+            <th>Net Walltime (s)</th>
+            <th>Net CPU Time (s)</th>
             <th>Total Walltime (s)</th>
             <th>CPU time (s)</th>
+
         </thead>
         <tbody></tbody>
     </table>
@@ -516,6 +547,22 @@ $(".dataBox").corner("30px");
             <th>script</th>
             <th>exePath</th>
             <th>N instances</th>
+            <th>Net Walltime (s)</th>
+            <th>Net CPU Time (s)</th>
+            <th>Total Walltime (s)</th>
+            <th>CPU time (s)</th>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+<div id="command_table_div">
+    <table id="command_table">
+        <thead>
+            <th>command</th>
+            <th>executable</th>
+            <th>N instances</th>
+            <th>Net Walltime (s)</th>
+            <th>Net CPU Time (s)</th>
             <th>Total Walltime (s)</th>
             <th>CPU time (s)</th>
         </thead>
