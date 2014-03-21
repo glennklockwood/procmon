@@ -36,13 +36,6 @@ SET ( PROCMUXER_MAX_TOTAL_WRITES 100000000 CACHE STRING "Maximum number of hdf5 
 SET ( PROCMUXER_MAX_MEMORY "5G" CACHE STRING "Maximum memory size of procmuxer" )
 SET ( PROCREDUCER_MAX_FDS 10 CACHE STRING "Number of reported fds to expect on the wire" )
 
-IF ( USE_BOOST )
-    SET( Boost_USE_STATIC_LIBS ON )
-    SET( Boost_USE_MULTITHREADED OFF )
-    SET( Boost_USE_STATIC_RUNTIME ON )
-    FIND_PACKAGE( Boost 1.53.0 COMPONENTS program_options )
-ENDIF ( USE_BOOST )
-
 IF ( USE_HDF5 )
     FIND_PACKAGE( HDF5 )
 ENDIF ( USE_HDF5 )
