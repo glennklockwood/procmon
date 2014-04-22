@@ -30,87 +30,79 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-def get_host_processes(hostname, fd, query, filename):
-    """Read process data from an hdf5 host-group, merge, select according to query, and return a pandas DataFrame.
+class HostProcesses(Object):
+    def __init__(self, hostname):
+        self.hostname = hostname
+        self.procmon = {
+            'procdata': None,
+            'procstat': None,
+            'procobs' : None,
+            'procfd'  : None,
+        }
+        self.procmon_keys = {
+            'procdata': ['pid','startTime'],
+            'procstat': ['pid','startTime','recTime'],
+            'procobs' : ['pid','startTime','recTime'],
+            'procfd'  : ['pid','startTime','path','fd','mode']
+        }
 
-    Arguments:
-    hostname -- string (key, hdf5 group name) of the target hostname
-    fd       -- file descriptor for hdf5 file
-    query    -- dictionary representing the query
+    def __merge_records(self, existing_records, new_records):
+        existing_records_count = 0
+        records = 0
+        if new_records is not None and not new_records.empty:
+            records = new_records.shape[0]
+            if existing_records is None:
+                existing_records = new_records
+            else:
+                existing_records.update(new_records)
+                addList = numpy.invert(new_records.index.isin(existing_records.index))
+                if len(addList) > 0:
+                    newdata = new_records.ix[addList]
+                    existing_records = pandas.concat([existing_records, newdata], axis = 0)
+        return existing_records
 
-    Returns:
-    pandas DataFrame of the selected data for hostname in hdf5 file fd.
-    The pandas DataFrame contains the most recent recorded record for
-    each unique process.
-    """
-    global rank
-    hostgroup = None
-    procdata = None
-    procstat = None
-    try:
-        ## read the nRecords attribute to get the number of properly written
-        ## records
-        hostgroup = fd[hostname]
-        nprocdata = hostgroup['procdata'].attrs['nRecords']
-        nprocstat = hostgroup['procstat'].attrs['nRecords']
-        procdata = hostgroup['procdata'][0:nprocdata]
-        procdata = pandas.DataFrame(procdata)
-        procdata['key_startTime'] = procdata['startTime']
-        procdata = procdata.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
-        procdata['host'] = hostname
-        procstat = hostgroup['procstat'][0:nprocstat]
-        procstat = pandas.DataFrame(procstat)
-        procstat['key_startTime'] = procstat['startTime']
-        procstat = procstat.sort('recTime', ascending=0).set_index(['pid','key_startTime'])
-        procstat['host'] = hostname
-    except:
-        sys.stderr.write('[%d] unable to retrieve data for %s; skipping\n' % (rank, hostname))
-        traceback.print_exc(file=sys.stderr)
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
-        
-    t_data = None
+    def add_data(self, hostgroup, query):
+        tmpdata = {}
+        try:
+            for dataset in self.procmon:
+                nRec = hostgroup[dataset].attrs['nRecords']
+                data = pandas.DataFrame(hostgroup[dataset][0:nRec])
+                data.startTime = data.startTime + data.startTimeUSec * 10**-6
+                data.recTime = data.recTime + data.recTimeUSec * 10**-6
+                data = data.set_index(['pid','startTime'])  ## host is already implied, only looking at per-host records
+                if data is not None and not data.empty:
+                    tmpdata[dataset] = data
+        except:
+            sys.stderr.write('[%d] unable to retrieve data for %s; skipping\n' % (rank, hostname))
+            traceback.print_exc(file=sys.stderr)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
+            return
 
-    ## for just query processes
-    if procdata is not None and procstat is not None and not procdata.empty:
-        idx = None
-        for key in query:
-            for q in query[key]:
-                sq = procdata[key].str.contains(q)
+        ## apply any query criteria to the procdata results
+        if 'procdata' in tmpdata and tmpdata['procdata'] is not None and not tmpdata['procdata'].empty:
+            idx = None
+            for key in query:
+                sq = tmpdata['procdata'][key].str.contains(q)
                 if idx is None:
                     idx = sq
                 else:
                     idx = idx | sq
-        processes = procdata[idx]
-        if not processes.empty:
-            try:
-                pd = processes.groupby(level=[0,1]).first()
-                ps = procstat.ix[procstat.index.isin(pd.index)].groupby(level=[0,1]).first()
-            except:
-                print filename, hostname
-                print pd.index
-                print procstat
-                raise
-            t_data = pd.join(ps, rsuffix='_ps')
-            t_data['key_host'] = t_data['host']
-            t_data = t_data.set_index('key_host', append=True)
-    return t_data
-    
-def merge_host_data(existing_hostdata, new_hostdata):
-    """Merge older data and more recently recorded data from same host together."""
-    records = 0
-    if new_hostdata is not None and not new_hostdata.empty:
-        records = new_hostdata.shape[0]
-        if existing_hostdata is None:
-            existing_hostdata = new_hostdata
-        else:
-            existing_hostdata.update(new_hostdata)
-            addList = numpy.invert(new_hostdata.index.isin(existing_hostdata.index))
-            if len(addList) > 0:
-                newdata = new_hostdata.ix[addList]
-                existing_hostdata = pandas.concat([existing_hostdata, newdata], axis=0)
-    return (records,existing_hostdata)
-    
+            for dataset in tmpdata:
+                tmpdata[dataset] = tmpdata[dataset][idx].reset_index()
+
+        ## merge data with existing data
+        for dataset in tmpdata:
+            data = tmpdata[dataset]
+            data = data.sort('recTime', ascending=0).set_index(self.procmon_keys[dataset])
+            data = data.groupby(level=range(len(data.index.levels))).first()
+            self.procmon[dataset] = self.__merge_records(self.procmon[dataset], data)
+
+    def count_processes(self):
+        if 'procdata' in self.procmon and self.procmon['procdata'] is not None and not self.procmon['procdata'].empty:
+            return self.procmon['procdata'].shape[0]
+        return 0
+
 
 def parse_h5(filename, id_processes, query):
     """Parse hdf5 file, store data (according to query) in id_processes"""
@@ -131,21 +123,21 @@ def parse_h5(filename, id_processes, query):
         if hostname not in fd:
             continue
 
-        hostdata = get_host_processes(hostname, fd, query, filename)
-        existing_hostdata = None
+        hostgroup = fd[hostname]
+        hostdata = None
         if hostname in id_processes:
-            existing_hostdata = id_processes[hostname]
-        (records, output) = merge_host_data(existing_hostdata, hostdata)
-        if output is not None:
-            id_processes[hostname] = output
-        finalRecords += records
-        #print hostname, records, finalRecords
-        totalRecords += records
+            hostdata = id_processes[hostname]
+        else:
+            hostdata = HostProcesses(hostname)
+            id_processes[hostname] = hostdata
+
+        hostdata.add_data(hostgroup, query)
+        
     finalRecords = 0
     for hostname in id_processes:
-        finalRecords += id_processes[hostname].shape[0]
+        finalRecords += id_processes[hostname].count_processes()
 
-    print "[%d] ===== %d; %d =====" % (rank, totalRecords, finalRecords)
+    print "[%d] ===== %d =====" % (rank, finalRecords)
 
 def get_job_data(start, end, qqacct_file):
     """Read job (qqacct) data from a file and return pandas DataFrame of it."""
@@ -298,14 +290,13 @@ def divide_data(rank_hosts, host_processes):
         processes = None
         cnt = 0
         if r < len(rank_hosts) and len(rank_hosts[r]['host']) > 0:
-            host_process_list = []
+            host_process_dict = {}
             for host in rank_hosts[r]['host']:
                 if host in host_processes:
-                    host_process_list.append(host_processes[host])
-            if len(host_process_list) > 0:
-                processes = pandas.concat(host_process_list, axis=0)
-                if processes is not None and not processes.empty:
-                    cnt = processes.shape[0]
+                    host_process_dict[host] = host_processes[host]
+            cnt = 0
+            for host in host_process_dict:
+                cnt += host_processes[host].count_processes()
         div_count.append(cnt)
         div_data.append(processes)
     print "[%d] divided processes: " % rank, div_count
@@ -331,12 +322,11 @@ def get_processes(filenames, baseline_filenames, query, start_time):
         for filename in baseline_filenames:
             print "[%d] parsing baseline file: %s" % (rank, filename) 
             parse_h5(filename, baseline_processes, query)
-            baseline_processes = pandas.concat(baseline_processes.values())
-    print "[%d] starting baseline data bcast" % rank
-    baseline_processes = comm.bcast(baseline_processes, root=(size-1))
+#print "[%d] starting baseline data bcast" % rank
+#    baseline_processes = comm.bcast(baseline_processes, root=(size-1))
 
     # build dictionary of hosts and known processes per host
-    hosts = {x:host_processes[x].shape[0] for x in host_processes}
+    hosts = {x:host_processes[x].count_processes() for x in host_processes}
     print "[%d] type(hosts): %s, %d" % (rank, type(hosts), len(hosts.keys()))
     print "[%d] starting allgather communication" % rank
     allhosts = comm.allgather(hosts)
@@ -362,6 +352,7 @@ def get_processes(filenames, baseline_filenames, query, start_time):
 
     print "[%d] merging data: %s" % (rank, type(my_data))
     print "[%d] merging data len: %d, %s" % (rank, len(my_data), type(my_data[0]))
+    sys.exit(0)
     processes = None
     for r in xrange(len(my_data)):
         if my_data[r] is not None:
