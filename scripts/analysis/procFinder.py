@@ -30,14 +30,14 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-class HostProcesses(Object):
+class HostProcesses:
     def __init__(self, hostname):
         self.hostname = hostname
         self.procmon = {
             'procdata': None,
             'procstat': None,
             'procobs' : None,
-            'procfd'  : None,
+            #'procfd'  : None,
         }
         self.procmon_keys = {
             'procdata': ['pid','startTime'],
@@ -61,6 +61,21 @@ class HostProcesses(Object):
                     existing_records = pandas.concat([existing_records, newdata], axis = 0)
         return existing_records
 
+    def __set_index(self, dataframe, columns):
+        newcols = []
+        for col in columns:
+            ncol = 'key_%s' % col
+            dataframe[ncol] = dataframe[col]
+            newcols.append(ncol)
+        return dataframe.set_index(newcols)
+
+    def __reset_index(self, dataframe):
+        dataframe = dataframe.reset_index()
+        for col in dataframe.columns:
+            if col.startswith('key_') or col == "index":
+                del dataframe[col]         
+        return dataframe
+
     def add_data(self, hostgroup, query):
         tmpdata = {}
         try:
@@ -69,7 +84,7 @@ class HostProcesses(Object):
                 data = pandas.DataFrame(hostgroup[dataset][0:nRec])
                 data.startTime = data.startTime + data.startTimeUSec * 10**-6
                 data.recTime = data.recTime + data.recTimeUSec * 10**-6
-                data = data.set_index(['pid','startTime'])  ## host is already implied, only looking at per-host records
+                data = self.__set_index(data, ['pid','startTime'])  ## host is already implied, only looking at per-host records
                 if data is not None and not data.empty:
                     tmpdata[dataset] = data
         except:
@@ -83,20 +98,32 @@ class HostProcesses(Object):
         if 'procdata' in tmpdata and tmpdata['procdata'] is not None and not tmpdata['procdata'].empty:
             idx = None
             for key in query:
-                sq = tmpdata['procdata'][key].str.contains(q)
-                if idx is None:
-                    idx = sq
-                else:
-                    idx = idx | sq
+                for q in query[key]:
+                    sq = tmpdata['procdata'][key].str.contains(q)
+                    if idx is None:
+                        idx = sq
+                    else:
+                        idx = idx | sq
+            index = tmpdata['procdata'][idx].index
+            if len(index) == 0:
+                return
             for dataset in tmpdata:
-                tmpdata[dataset] = tmpdata[dataset][idx].reset_index()
+                tmpdata[dataset] = tmpdata[dataset].ix[index]
+                tmpdata[dataset] = self.__reset_index(tmpdata[dataset])
 
         ## merge data with existing data
         for dataset in tmpdata:
             data = tmpdata[dataset]
-            data = data.sort('recTime', ascending=0).set_index(self.procmon_keys[dataset])
-            data = data.groupby(level=range(len(data.index.levels))).first()
-            self.procmon[dataset] = self.__merge_records(self.procmon[dataset], data)
+            try:
+                data = data.sort('recTime', ascending=0)
+                data = self.__set_index(data, self.procmon_keys[dataset])
+                data = data.groupby(level=range(len(data.index.levels))).first()
+                self.procmon[dataset] = self.__merge_records(self.procmon[dataset], data)
+            except:
+                print self.hostname, dataset, data
+                traceback.print_exc(file=sys.stderr)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
 
     def count_processes(self):
         if 'procdata' in self.procmon and self.procmon['procdata'] is not None and not self.procmon['procdata'].empty:
@@ -238,7 +265,7 @@ def identify_files(filenames):
     print "rank %d files, resid %02.f, %0.2f bytes: ; %d files" % (rank,float(rank_files[rank]['size'] - tgt_size_per_rank)/1024**2, float(rank_files[rank]['size'])/1024**2, len(rank_files[rank]['file']))
     return rank_files
 
-def identify_hosts(hosts):
+def identify_hosts(hosts, totalprocs):
     global comm
     global rank
     global size
@@ -248,34 +275,28 @@ def identify_hosts(hosts):
         used_ranks = len(hosts)
     
     h_list = sorted(hosts.keys())
-    h_values = [(x,hosts[x],) for x in h_list]
+    h_values = [hosts[x] for x in h_list]
 
     # spread out hosts
-    hosts_per_rank = len(h_values) / size
-    n_ranks_with_one_extra = len(h_values) % size
+    goal_procs_per_rank = totalprocs / used_ranks
 
-    print "[%d] hosts: %d, hosts_per_rank: %d, n_ranks_with_one_extra: %d" % (rank, len(h_values), hosts_per_rank, n_ranks_with_one_extra)
+    print "[%d] ranks: %d, hosts: %d, goal_processes_per_rank: %d" % (rank, used_ranks, len(h_values), goal_procs_per_rank)
     rank_hosts = []
-    h = 0
-    for i in xrange(size):
-        t = {'host_idx': [], 'size': 0}
-        hosts_to_add = hosts_per_rank
-        if i < n_ranks_with_one_extra:
-            hosts_to_add += 1
-        for j in xrange(hosts_to_add):
-            t['host_idx'].append(h)
-            t['size'] += h_values[h][1]
-            h += 1
+    h_idx = 0
+    for i in xrange(used_ranks):
+        t = {'host': [], 'size': 0}
+        done = False
+        while not done and h_idx < len(h_list):
+            operand = h_values[h_idx] if i < used_ranks/2 else 0
+            done = t['size'] + operand > goal_procs_per_rank
+            if not done:
+                t['host'].append(h_list[h_idx])
+                t['size'] += h_values[h_idx]
+                h_idx += 1
+
         rank_hosts.append(t)
-    
-    for r in rank_hosts:
-        r['host'] = []
-        for idx in r['host_idx']:
-            if idx > len(h_list):
-                print "[%d]: trying to append %d to hostlist" % (rank, idx)
-            else:
-                r['host'].append(h_values[idx][0])
-    
+
+    print "[%d] rank_hosts: " % rank, [ x['size'] for x in rank_hosts ]
     return rank_hosts
 
 def divide_data(rank_hosts, host_processes):
@@ -287,7 +308,6 @@ def divide_data(rank_hosts, host_processes):
     div_count = []
 
     for r in xrange(size):
-        processes = None
         cnt = 0
         if r < len(rank_hosts) and len(rank_hosts[r]['host']) > 0:
             host_process_dict = {}
@@ -298,7 +318,7 @@ def divide_data(rank_hosts, host_processes):
             for host in host_process_dict:
                 cnt += host_processes[host].count_processes()
         div_count.append(cnt)
-        div_data.append(processes)
+        div_data.append(host_processes)
     print "[%d] divided processes: " % rank, div_count
     return div_data
 
@@ -327,7 +347,7 @@ def get_processes(filenames, baseline_filenames, query, start_time):
 
     # build dictionary of hosts and known processes per host
     hosts = {x:host_processes[x].count_processes() for x in host_processes}
-    print "[%d] type(hosts): %s, %d" % (rank, type(hosts), len(hosts.keys()))
+    print "[%d] type(hosts): %s, %d, %s" % (rank, type(hosts), len(hosts.keys()), type(hosts[hosts.keys()[0]]))
     print "[%d] starting allgather communication" % rank
     allhosts = comm.allgather(hosts)
         
@@ -344,14 +364,14 @@ def get_processes(filenames, baseline_filenames, query, start_time):
         procsum += hosts[host]
     print "[%d] got %d total hosts for %d processes" % (rank, len(hosts.keys()), procsum)
 
-    rank_hosts = identify_hosts(hosts)
+    rank_hosts = identify_hosts(hosts, procsum)
     split_data_by_rank = divide_data(rank_hosts, host_processes)
+    print "[%d] data type: %s" % (rank, type(split_data_by_rank[0]))
     
     print "[%d] starting all to all" % rank
     my_data = comm.alltoall(split_data_by_rank)
 
-    print "[%d] merging data: %s" % (rank, type(my_data))
-    print "[%d] merging data len: %d, %s" % (rank, len(my_data), type(my_data[0]))
+    print "[%d] merging data: %s, %d" % (rank, type(my_data), len(my_data)), [ type(x) for x in my_data ]
     sys.exit(0)
     processes = None
     for r in xrange(len(my_data)):
@@ -486,7 +506,7 @@ def main(args):
     yesterday = date.today() - timedelta(days=1)
     start_time = datetime.combine(yesterday, time(0,0,0))
     end_time = datetime.combine(date.today(), time(0,0,0))
-    h5_path = "/global/projectb/statistics/procmon/genepool"
+    h5_path = "/scratch/proc"
     h5_prefix = "procmon_genepool"
     save_all_processes = False
     qqacct_file = None
