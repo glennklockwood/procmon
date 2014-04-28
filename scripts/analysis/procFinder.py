@@ -26,10 +26,13 @@ import tempfile
 from mpi4py import MPI
 import procmon
 import procmon.Scriptable
+import stat
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
+
+monitored_filesystems = {'projectb':'(/chos)?/global/projectb/','project':'(/chos)?/global/project/', 'scratch2':'(/chos)?/global/scratch2/', 'u1':'(/chos)?/global/u1/','u2':'(/chos)?/global/u2/','seqfs':'(/chos)?/global/seqfs/','dna':'(/chos)?/global/dna/', 'common':'(/chos)?/global/common/', 'local_scratch':'/scratch/', 'local_tmp':'/tmp/'}
 
 def generate_mpi_type(np_dtype):
     fields = sorted([ np_dtype.fields[x] for x in np_dtype.fields ], key=lambda y: y[1])
@@ -84,6 +87,7 @@ class HostProcesses:
 
     def add_data(self, hostgroup, query):
         tmpdata = {}
+        global monitored_filesystems
         try:
             for dataset in self.procmon:
                 nRec = hostgroup[dataset].attrs['nRecords']
@@ -98,10 +102,8 @@ class HostProcesses:
                 data = data[ list(newNames) ]
                 data = nprec.append_fields(data, names=['recTime','startTime'], data=[recTime,startTime], usemask=False)
 
-                ## sort (in reverse) by recTime
+                ## sort by recTime
                 data.sort(order=['recTime'])
-                data = data[::-1]
-
 
                 if data is not None and len(data) > 0:
                     tmpdata[dataset] = data
@@ -113,10 +115,15 @@ class HostProcesses:
             return
 
         ## apply any query criteria to the procdata results
-        if 'procdata' in tmpdata and tmpdata['procdata'] is not None:
+        if ('procdata' in tmpdata and tmpdata['procdata'] is not None) and
+           ('procstat' in tmpdata and tmpdata['procstat'] is not None) and
+           ('procobs' in tmpdata and tmpdata['procobs'] is not None) and
+           ('procfd' in tmpdata and tmpdata['procfd'] is not None):
+
             pd = tmpdata['procdata']
-            ps = tmpdata['procstat'] if 'procstat' in tmpdata else None
-            po = tmpdata['procobs'] if 'procobs' in tmpdata else None
+            ps = tmpdata['procstat']
+            po = tmpdata['procobs']
+            pf = tmpdata['procfd']
 
             ## identify pids which have ancestors, done by transposing pidv
             ## vector and subtracting ppid vector, and looking for indices
@@ -134,20 +141,84 @@ class HostProcesses:
             ## all observations
             volatilityScore = np.zeros(dtype=np.float64, shape=pd.size)
             nObservations = np.zeros(dtype=np.int64, shape=pd.size)
-            if ps is not None and po is not None:
-                unique_processes = np.unique( pd[ ['pid','startTime'] ] )
-                for id in unique_processes:
-                    pd_mask = pd[ ['pid','startTime'] ] == id
-                    po_mask = po[ ['pid','startTime'] ] == id
-                    ps_mask = ps[ ['pid','startTime'] ] == id
-                    volatilityScore[pd_mask] = ( sum(ps_mask) - 1) / sum(po_mask)
-                    nObservations[pd_mask]   = sum(po_mask)
+            unique_processes = np.unique( pd[ ['pid','startTime'] ] )
+            duration = ps['recTime'] - ps['startTime']
+            cpu = (ps['utime'] + ps['stime']) / 100.
+            io_sum = (ps['io_rchar'] + ps['io_wchar'])
+            cpuRate = np.zeros(dtype=np.float64, shape=ps.size)
+            io_rcharRate = np.zeros(dtype=np.float64, shape=ps.size)
+            io_wcharRate = np.zeros(dtype=np.float64, shape=ps.size)
+            io_charRate = np.zeros(dtype=np.float64, shape=ps.size)
+            m_sizeRate = np.zeros(dtype=np.float64, shape=ps.size)
+            m_residentRate = np.zeros(dtype=np.float64, shape=ps.size)
+            resList = ['cpu','io_rchar','io_wchar','io_char','m_size','m_resident']
+            res_idx1 = 0
+            res_idx2 = 1
+            xcorList =  []
+            xcorType = []
+            while res_idx1 < len(resList):
+                res_idx2 = res_idx1+1
+                while res_idx2 < len(resList):
+                    xcorList.append((res_idx1,res_idx2,))
+                    xcorType.append(('%sX%s' % (resList[idx1], resList[idx2]), np.float64))
+                    res_idx2 += 1
+                res_idx1 += 1
+            xcorData = np.zeros(shape=unique_processes.size, dtype=np.dtype(xcorType))
 
+            fread_mask = (stat.S_IRUSR & pf['mode']) > 0
+            fwrite_mask = (stat.S_IWUSR & pf['mode']) > 0
+            fs_masks = {}
+            fs_columns = {}
+            for fs in monitored_filesystems:
+                fsq = re.compile(monitored_filesystems[fs]
+                fsmatch = np.vectorize(lambda x:bool(fsq.match(x)))
+                fs_mask = fsmatch(pf['path'])
+                fs_masks[fs] = fs_mask
+                fs_columns[fs] = np.zeros(shape=unique_processes.size, dtype=np.dtype([('%s_write' % fs, np.bool),('%s_read' % fs, np.bool)]))
+
+            # iterate through the list of unique processes and evaluate each
+            # the volatilityScore, observation count, resource consumption
+            # rates, filesystem usage, and rough time-series x-correlation
+            for (idx,id) in enumerate(unique_processes):
+                pd_mask = pd[ ['pid','startTime'] ] == id
+                po_mask = po[ ['pid','startTime'] ] == id
+                ps_mask = ps[ ['pid','startTime'] ] == id
+                pf_mask = pf[ ['pid','startTime'] ] == id
+                volatilityScore[pd_mask] = ( sum(ps_mask) - 1) / sum(po_mask)
+                nObservations[pd_mask]   = sum(po_mask)
+                cpuRate[ps_mask] = np.hstack([np.NaN,
+                        np.diff(cpu[ps_mask])/np.diff(duration[ps_mask])
+                        ])
+                io_rcharRate[ps_mask] = np.hstack([np.NaN,
+                        np.diff(ps[ps_mask]['io_rchar'])/np.diff(duration[ps_mask])
+                        ])
+                io_wcharRate[ps_mask] = np.hstack([np.NaN,
+                        np.diff(ps[ps_mask]['io_wchar'])/np.diff(duration[ps_mask])
+                        ])
+                io_charRate[ps_mask] = np.hstack([np.NaN,
+                        np.diff(io_sum[ps_mask])/np.diff(duration[ps_mask])
+                        ])
+                m_sizeRate[ps_mask] = np.hstack([np.NaN,
+                        np.diff(ps[ps_mask]['m_size'])/np.diff(duration[ps_mask])
+                        ])
+                m_residentRate[ps_mask] = np.hstack([np.NaN,
+                        np.diff(ps[ps_mask]['m_resident'])/np.diff(duration[ps_mask])
+                        ])
+
+                cc = np.corrcoef([cpuRate[ps_mask][1:], io_rcharRate[ps_mask][1:], io_wcharRate[ps_mask][1:], io_charRate[ps_mask][1:], m_sizeRate[ps_mask][1:], m_residentRate[ps_mask][1:])
+                res_idx1 = 0
+                while res_idx1 < len(resList):
+                    res_idx2 = res_idx1 + 1
+                    while res_idx2 < len(resList):
+                        colname = '%sX%s' % (resList[res_idx1], resList[res_idx2])
+
+
+                for fs in fs_masks:
+                    fs_read = np.sum(fread_mask & pf_mask & fs_masks[fs]) > 0
+                    fs_write = np.sum(fwrite_mask & pf_mask & fs_masks[fs]) > 0
+                    fs_columns[fs][idx] = (fs_write, fs_read)
+            ps = nprec.append_fields(ps, names=['cpu','cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate'], data=[cpu,cpuRate,io_rcharRate,io_wcharRate,io_charRate,m_sizeRate,m_residentRate])
             pd = nprec.append_fields(pd, names=['hasChild','volatilityScore','nObservations'], data=[hasChild,volatilityScore,nObservations], usemask=False)
-
-
-
-
 
             idx = None
             for key in query:
