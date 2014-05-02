@@ -32,7 +32,29 @@ comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-monitored_filesystems = {'projectb':'(/chos)?/global/projectb/','project':'(/chos)?/global/project/', 'scratch2':'(/chos)?/global/scratch2/', 'u1':'(/chos)?/global/u1/','u2':'(/chos)?/global/u2/','seqfs':'(/chos)?/global/seqfs/','dna':'(/chos)?/global/dna/', 'common':'(/chos)?/global/common/', 'local_scratch':'/scratch/', 'local_tmp':'/tmp/'}
+monitored_filesystems = {
+    'projectb':'^(/chos)?/global/projectb/.*',
+    'project':'^(/chos)?/global/project/.*',
+    'scratch2':'^(/chos)?/global/scratch2/.*',
+    'u1':'^(/chos)?/global/u1/.*',
+    'u2':'^(/chos)?/global/u2/.*',
+    'seqfs':'^(/chos)?/global/seqfs/.*',
+    'dna':'^(/chos)?/global/dna/.*',
+    'common':'^(/chos)?/global/common/.*',
+    'local_scratch':'^/scratch/.*',
+    'local_tmp':'^/tmp/.*'
+}
+
+def generate_mpi_type_simple(np_dtype):
+    offsets = [0]
+    counts  = [np_dtype.itemsize]
+    mpi_types = [MPI.BYTE]
+    mpidt = MPI.Datatype.Create_struct(counts, offsets, mpi_types)
+    mpidt_final = mpidt.Create_resized(0, np_dtype.itemsize).Commit()
+    mpidt.Free()
+
+    return mpidt_final
+
 
 def generate_mpi_type(np_dtype):
     fields = sorted([ np_dtype.fields[x] for x in np_dtype.fields ], key=lambda y: y[1])
@@ -47,11 +69,15 @@ def generate_mpi_type(np_dtype):
         mpi_type = MPI.BYTE
         if str_type == 'S':
             field_count = byte_count
-            mpi_type = MPI_CHAR
-        if str_type == 'u' and byte_count in (4,8): 
-            mpi_type = eval('MPI.UINT' + str(byte_count*8) + '_T')
-        if str_type == 'i' and byte_count in (4,8): 
-            mpi_type = eval('MPI.INT' + str(byte_count*8) + '_T')
+            mpi_type = MPI.CHAR
+        if str_type == 'u' and byte_count == 4:
+            mpi_type = MPI.UNSIGNED
+        if str_type == 'u' and byte_count == 8:
+            mpi_type = MPI.UNSIGNED_LONG_LONG
+        if str_type == 'i' and byte_count == 4:
+            mpi_type = MPI.INT
+        if str_type == 'i' and byte_count == 8:
+            mpi_type = MPI.LONG_LONG
         if byte_count == 1:
             mpi_type = MPI.BYTE
 
@@ -61,27 +87,24 @@ def generate_mpi_type(np_dtype):
         counts.append(field_count)
         mpi_types.append(mpi_type)
     mpidt = MPI.Datatype.Create_struct(counts, offsets, mpi_types)
-    if np_dtype.itemsize % 8 != 0:
-        final_size = np_dtype.itemsize + (8 - np_dtype.itemsize % 8)
-        mpidt = mpidt.Create_resized(0, final_size).Commit()
-    else:
-        mpidt = mpidt.Commit()
-    return mpidt
+    mpidt_final = mpidt.Create_resized(0, np_dtype.itemsize).Commit()
+    mpidt.Free()
+
+    return mpidt_final
             
 class HostProcesses:
     def __init__(self, hostname):
         self.hostname = hostname
+        self.read_datasets = ['procdata','procstat','procfd','procobs']
         self.procmon = {
             'procdata': None,
             'procstat': None,
-            'procobs' : None,
-            #'procfd'  : None,
+            'procfd' : None,
+            'procobs'  : None,
         }
         self.procmon_keys = {
             'procdata': ['pid','startTime'],
             'procstat': ['pid','startTime','recTime'],
-            'procobs' : ['pid','startTime','recTime'],
-            'procfd'  : ['pid','startTime','path','fd','mode']
         }
         self.mpi_types = {}
 
@@ -89,22 +112,14 @@ class HostProcesses:
         tmpdata = {}
         global monitored_filesystems
         try:
-            for dataset in self.procmon:
+            for dataset in self.read_datasets:
                 nRec = hostgroup[dataset].attrs['nRecords']
                 data = hostgroup[dataset][0:nRec]
-
-                ## combine the (rec/start)Time with corresponding USec, by
-                ## creating new arrays for each, dropping the old columns
-                ## and re-adding the new floating point versions
-                recTime = data['recTime'] + (data['recTimeUSec']*10**-6)
-                startTime = data['startTime'] + (data['startTimeUSec']*10**-6)
-                newNames = set(data.dtype.names) - {'recTime','recTimeUSec','startTime','startTimeUSec'}
-                data = data[ list(newNames) ]
-                data = nprec.append_fields(data, names=['recTime','startTime'], data=[recTime,startTime], usemask=False)
-
-                ## sort by recTime
-                data.sort(order=['recTime'])
-
+                   
+                if dataset not in self.procmon or self.procmon[dataset] is None:
+                    self.procmon[dataset] = data
+                else:
+                    self.procmon[dataset] = np.concatenate((self.procmon[dataset],data))
                 if data is not None and len(data) > 0:
                     tmpdata[dataset] = data
         except:
@@ -114,152 +129,325 @@ class HostProcesses:
             traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
             return
 
-        ## apply any query criteria to the procdata results
-        if ('procdata' in tmpdata and tmpdata['procdata'] is not None) and
-           ('procstat' in tmpdata and tmpdata['procstat'] is not None) and
-           ('procobs' in tmpdata and tmpdata['procobs'] is not None) and
-           ('procfd' in tmpdata and tmpdata['procfd'] is not None):
+        return
 
-            pd = tmpdata['procdata']
-            ps = tmpdata['procstat']
-            po = tmpdata['procobs']
-            pf = tmpdata['procfd']
+    
 
-            ## identify pids which have ancestors, done by transposing pidv
-            ## vector and subtracting ppid vector, and looking for indices
-            ## that are zero-value
-            ## the underlying assumption is that we won't see any duplication
-            ## of pids (or ppids) at this point
-            hasChild = np.zeros(dtype=np.bool, shape=len(pd))
-            parentIndices = np.nonzero( (pd['pid'][:,np.newaxis] - pd['ppid']) == 0 )[0]
-            hasChild[parentIndices] = True
+    def reduce_data(self, datasets):
+        if ('procdata' not in datasets or datasets['procdata'] is None) or ('procstat' not in datasets or datasets['procstat'] is None) or ('procfd' not in datasets or datasets['procfd'] is None) or ('procobs' not in datasets or datasets['procobs'] is None):
 
-            ## process volatility is the ratio of (#procstat - 1)/(#procobs)
-            ## procstat records are only recorded when a change in counters
-            ## is observed; the "-1" term is to prevent single observation
-            ## processes from getting a perfect score; procobs is recorded for
-            ## all observations
-            volatilityScore = np.zeros(dtype=np.float64, shape=pd.size)
-            nObservations = np.zeros(dtype=np.int64, shape=pd.size)
-            unique_processes = np.unique( pd[ ['pid','startTime'] ] )
-            duration = ps['recTime'] - ps['startTime']
-            cpu = (ps['utime'] + ps['stime']) / 100.
-            io_sum = (ps['io_rchar'] + ps['io_wchar'])
-            cpuRate = np.zeros(dtype=np.float64, shape=ps.size)
-            io_rcharRate = np.zeros(dtype=np.float64, shape=ps.size)
-            io_wcharRate = np.zeros(dtype=np.float64, shape=ps.size)
-            io_charRate = np.zeros(dtype=np.float64, shape=ps.size)
-            m_sizeRate = np.zeros(dtype=np.float64, shape=ps.size)
-            m_residentRate = np.zeros(dtype=np.float64, shape=ps.size)
-            resList = ['cpu','io_rchar','io_wchar','io_char','m_size','m_resident']
-            res_idx1 = 0
-            res_idx2 = 1
-            xcorList =  []
-            xcorType = []
-            while res_idx1 < len(resList):
-                res_idx2 = res_idx1+1
-                while res_idx2 < len(resList):
-                    xcorList.append((res_idx1,res_idx2,))
-                    xcorType.append(('%sX%s' % (resList[idx1], resList[idx2]), np.float64))
-                    res_idx2 += 1
-                res_idx1 += 1
-            xcorData = np.zeros(shape=unique_processes.size, dtype=np.dtype(xcorType))
+            print "[%d] %s missing a dataset! I have: "%(rank,self.hostname),datasets.keys(), 
+            return
 
-            fread_mask = (stat.S_IRUSR & pf['mode']) > 0
-            fwrite_mask = (stat.S_IWUSR & pf['mode']) > 0
-            fs_masks = {}
-            fs_columns = {}
+        print "[%d] starting to reduce %s" % (rank, self.hostname)
+        pd = datasets['procdata']
+        ps = datasets['procstat']
+        po = datasets['procobs']
+        pf = datasets['procfd']
+
+        pd.sort(order=['recTime'])
+        ps.sort(order=['recTime'])
+        po.sort(order=['recTime'])
+        pf.sort(order=['recTime'])
+
+        ## identify pids which have ancestors, done by transposing pidv
+        ## vector and subtracting ppid vector, and looking for indices
+        ## that are zero-value
+        ## the underlying assumption is that we won't see any duplication
+        ## of pids (or ppids) at this point
+        def detectChildProcesses(pids, ppids):
+            out = []
+            it = np.nditer([pids, ppids], ['external_loop'], [['readonly'], ['readonly']],
+                    op_axes=[range(pids.ndim)+[-1]*ppids.ndim, [-1]*pids.ndim+range(ppids.ndim)])
+            for (lpids, lppids) in it:
+                out.append(np.unique( lpids[np.nonzero(np.subtract(lpids,lppids) == 0)[0]]))
+            return np.unique(np.concatenate(out))
+        parentPids = detectChildProcesses(np.unique(pd['pid']), np.unique(pd['ppid']))
+
+        ## detect which filesystems were written to and which were read from
+        fs_masks = {}
+        fs_types = [('pid',ps['pid'].dtype), ('startTime',ps['startTime'].dtype), ('recTime',ps['recTime'].dtype),('fread',bool),('fwrite',bool)]
+        for fs in monitored_filesystems:
+            fsq = re.compile(monitored_filesystems[fs])
+            fsmatch = np.vectorize(lambda x: bool(fsq.match(x)))
+            fs_mask = fsmatch(pf['path'])
+            fs_masks[fs] = fs_mask
+            fs_types.append(('%s' % fs, np.bool,))
+        fsData = np.zeros(shape=pf.size, dtype=np.dtype(fs_types))
+        fsData['pid'] = pf['pid']
+        fsData['startTime'] = pf['startTime']
+        fsData['recTime'] = pf['recTime']
+        fsData['fread'] = (stat.S_IRUSR & pf['mode']) > 0
+        fsData['fwrite'] = (stat.S_IWUSR & pf['mode']) > 0
+        for fs in fs_masks:
+            fsData[fs] = fs_masks[fs]
+
+        # convert to pandas DataFrames for more efficient
+        # grouping and summarization    
+        pd = pandas.DataFrame(pd)#.sort(['recTime','recTimeUSec'])
+        ps = pandas.DataFrame(ps)#.sort(['recTime','recTimeUSec'])
+        po = pandas.DataFrame(po)#.sort(['recTime','recTimeUSec'])
+        fs = pandas.DataFrame(fsData)#.sort(['recTime','recTimeUSec'])
+
+        pd_group = pd.groupby(['pid','startTime'])
+        ps_group = ps.groupby(['pid','startTime'])
+        po_group = po.groupby(['pid','startTime'])
+        fs_group = fs.groupby(['pid','startTime'])
+
+        def summarize_timeseries(ps_rec):
+            ps_rec = ps_rec.sort(['recTime'])
+            cpu = (ps_rec.utime + ps_rec.stime) / 100.
+            iosum = ps_rec.io_wchar + ps_rec.io_rchar
+            duration = ps_rec.recTime - ps_rec.startTime
+            durDiff = duration.diff()
+            cpuRate = cpu.diff() / durDiff
+            iowRate = ps_rec.io_wchar.diff() / durDiff
+            iorRate = ps_rec.io_rchar.diff() / durDiff
+            ioRate = iosum.diff() / durDiff
+            msizeRate = ps_rec.m_size.diff() / durDiff
+            mresidentRate = ps_rec.m_resident.diff() / durDiff
+
+            rates = pandas.DataFrame({'cpuRate':cpuRate, 'iowRate':iowRate, 'iorRate':iorRate, 'ioRate':ioRate, 'msizeRate': msizeRate, 'mresidentRate': mresidentRate})
+            correlation = rates.corr()
+            retData = {
+                'cpuRateMax': cpuRate.max(),
+                'iowRateMax': iowRate.max(),
+                'iorRateMax': iorRate.max(),
+                'msizeRateMax': msizeRate.max(),
+                'mresidentRateMax': mresidentRate.max(),
+                'nRecords': ps_rec.shape[0],
+            }
+            return pandas.Series(retData)
+
+        def summarize_procobs(po_rec):
+            return pandas.Series({'nRecords': po_rec.shape[0]})
+
+        def summarize_fs(fs_rec):
+            ret = {}
             for fs in monitored_filesystems:
-                fsq = re.compile(monitored_filesystems[fs]
-                fsmatch = np.vectorize(lambda x:bool(fsq.match(x)))
-                fs_mask = fsmatch(pf['path'])
-                fs_masks[fs] = fs_mask
-                fs_columns[fs] = np.zeros(shape=unique_processes.size, dtype=np.dtype([('%s_write' % fs, np.bool),('%s_read' % fs, np.bool)]))
+                ret['%s_write' % fs] = sum(fs_rec.fwrite & fs_rec[fs]) > 0
+                ret['%s_read' % fs] = sum(fs_rec.fread & fs_rec[fs]) > 0
+            return pandas.Series(ret)
+                
+        ps_summaries = ps_group.apply(summarize_timeseries)
+        po_summaries = po_group.apply(summarize_procobs)
+        fs_summaries = fs_group.apply(summarize_fs)
 
-            # iterate through the list of unique processes and evaluate each
-            # the volatilityScore, observation count, resource consumption
-            # rates, filesystem usage, and rough time-series x-correlation
-            for (idx,id) in enumerate(unique_processes):
-                pd_mask = pd[ ['pid','startTime'] ] == id
-                po_mask = po[ ['pid','startTime'] ] == id
-                ps_mask = ps[ ['pid','startTime'] ] == id
-                pf_mask = pf[ ['pid','startTime'] ] == id
-                volatilityScore[pd_mask] = ( sum(ps_mask) - 1) / sum(po_mask)
-                nObservations[pd_mask]   = sum(po_mask)
-                cpuRate[ps_mask] = np.hstack([np.NaN,
-                        np.diff(cpu[ps_mask])/np.diff(duration[ps_mask])
-                        ])
-                io_rcharRate[ps_mask] = np.hstack([np.NaN,
-                        np.diff(ps[ps_mask]['io_rchar'])/np.diff(duration[ps_mask])
-                        ])
-                io_wcharRate[ps_mask] = np.hstack([np.NaN,
-                        np.diff(ps[ps_mask]['io_wchar'])/np.diff(duration[ps_mask])
-                        ])
-                io_charRate[ps_mask] = np.hstack([np.NaN,
-                        np.diff(io_sum[ps_mask])/np.diff(duration[ps_mask])
-                        ])
-                m_sizeRate[ps_mask] = np.hstack([np.NaN,
-                        np.diff(ps[ps_mask]['m_size'])/np.diff(duration[ps_mask])
-                        ])
-                m_residentRate[ps_mask] = np.hstack([np.NaN,
-                        np.diff(ps[ps_mask]['m_resident'])/np.diff(duration[ps_mask])
-                        ])
+        pd_final = pd_group.last()
+        ps_final = ps_group.last()
+        return
 
-                cc = np.corrcoef([cpuRate[ps_mask][1:], io_rcharRate[ps_mask][1:], io_wcharRate[ps_mask][1:], io_charRate[ps_mask][1:], m_sizeRate[ps_mask][1:], m_residentRate[ps_mask][1:])
+
+
+        ## process volatility is the ratio of (#procstat - 1)/(#procobs)
+        ## procstat records are only recorded when a change in counters
+        ## is observed; the "-1" term is to prevent single observation
+        ## processes from getting a perfect score; procobs is recorded for
+        ## all observations
+        unique_processes = np.unique( pd[ ['pid','startTime'] ] )
+        final_pd = np.zeros(dtype=pd.dtype, shape=unique_processes.size)
+        final_ps = np.zeros(dtype=ps.dtype, shape=unique_processes.size)
+        hasChild = np.zeros(dtype=np.bool, shape=unique_processes.size)
+        volatilityScore = np.zeros(dtype=np.float64, shape=unique_processes.size)
+        nObservations = np.zeros(dtype=np.int64, shape=unique_processes.size)
+        duration = ps['recTime'] - ps['startTime']
+        cpu = (ps['utime'] + ps['stime']) / 100.
+        io_sum = (ps['io_rchar'] + ps['io_wchar'])
+        resList = ['cpu','io_rchar','io_wchar','io_char','m_size','m_resident']
+        res_idx1 = 0
+        res_idx2 = 1
+        xcorList =  []
+        xcorType = [('pid',ps['pid'].dtype), ('startTime',ps['startTime'].dtype)]
+        while res_idx1 < len(resList):
+            res_idx2 = res_idx1+1
+            while res_idx2 < len(resList):
+                xcorList.append((res_idx1,res_idx2,))
+                xcorType.append(('%sX%s' % (resList[res_idx1], resList[res_idx2]), np.float64))
+                res_idx2 += 1
+            res_idx1 += 1
+        xcorData = np.zeros(shape=unique_processes.size, dtype=np.dtype(xcorType))
+
+        fread_mask = (stat.S_IRUSR & pf['mode']) > 0
+        fwrite_mask = (stat.S_IWUSR & pf['mode']) > 0
+        fs_masks = {}
+        fs_types = [('pid',ps['pid'].dtype), ('startTime',ps['startTime'].dtype)]
+        for fs in monitored_filesystems:
+            fsq = re.compile(monitored_filesystems[fs])
+            fsmatch = np.vectorize(lambda x: bool(fsq.match(x)))
+            fs_mask = fsmatch(pf['path'])
+            fs_masks[fs] = fs_mask
+            fs_types.extend([('%s_write' % fs, np.bool),('%s_read' % fs, np.bool)])
+        fsData = np.zeros(shape=unique_processes.size, dtype=np.dtype(fs_types))
+
+        # iterate through the list of unique processes and evaluate each
+        # the volatilityScore, observation count, resource consumption
+        # rates, filesystem usage, and rough time-series x-correlation
+        print "[%d] about to iterate through processes for %s" % (rank, self.hostname)
+        for (idx,id) in enumerate(unique_processes):
+            pd_mask = pd[ ['pid','startTime'] ] == id
+            po_mask = po[ ['pid','startTime'] ] == id
+            ps_mask = ps[ ['pid','startTime'] ] == id
+            pf_mask = pf[ ['pid','startTime'] ] == id
+            if id[0] in parentPids:
+                hasChild[idx] = True
+
+            final_pd[idx] = pd[pd_mask][-1]
+            final_ps[idx] = ps[ps_mask][-1]
+                
+            volatilityScore[idx] = ( sum(ps_mask) - 1) / sum(po_mask)
+            nObservations[idx]   = sum(po_mask)
+            cpuRate = np.diff(cpu[ps_mask])/np.diff(duration[ps_mask])
+            io_rcharRate = np.diff(ps[ps_mask]['io_rchar'])/np.diff(duration[ps_mask])
+            io_wcharRate = np.diff(ps[ps_mask]['io_wchar'])/np.diff(duration[ps_mask])
+            io_charRate = np.diff(io_sum[ps_mask])/np.diff(duration[ps_mask])
+            m_sizeRate = np.diff(ps[ps_mask]['m_size'])/np.diff(duration[ps_mask])
+            m_residentRate = np.diff(ps[ps_mask]['m_resident'])/np.diff(duration[ps_mask])
+
+            ## if we have some largish number of observations, try getting
+            ## the correlations between the observed rates for this time
+            ## window
+            if np.sum(ps_mask) > 30:
+                cc = np.corrcoef([cpuRate, io_rcharRate, io_wcharRate, io_charRate, m_sizeRate, m_residentRate])
                 res_idx1 = 0
                 while res_idx1 < len(resList):
                     res_idx2 = res_idx1 + 1
                     while res_idx2 < len(resList):
                         colname = '%sX%s' % (resList[res_idx1], resList[res_idx2])
+                        xcorData[colname][idx] = cc[res_idx1, res_idx2]
+                        res_idx2 += 1
+                    res_idx1 += 1
+            try:
+                xcorData['pid'][idx] = id[0]
+                xcorData['startTime'][idx] = id[1]
+            except Exception, ex:
+                print ex
+                print idx
+                print xcorData[idx]
+                sys.exit(1)
+
+            for fs in fs_masks:
+                fs_read = np.sum(np.logical_and(fread_mask, np.logical_and(pf_mask, fs_masks[fs])))
+                fs_write = np.sum(np.logical_and(fwrite_mask, np.logical_and(pf_mask, fs_masks[fs])))
+                fsData['%s_write' % fs][idx] = fs_write
+                fsData['%s_read' % fs][idx] = fs_read
+            fsData['pid'][idx] = id[0]
+            fsData['startTime'][idx] = id[1]
+        print "[%d] done iterating through processes for %s" % (rank, self.hostname)
 
 
-                for fs in fs_masks:
-                    fs_read = np.sum(fread_mask & pf_mask & fs_masks[fs]) > 0
-                    fs_write = np.sum(fwrite_mask & pf_mask & fs_masks[fs]) > 0
-                    fs_columns[fs][idx] = (fs_write, fs_read)
-            ps = nprec.append_fields(ps, names=['cpu','cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate'], data=[cpu,cpuRate,io_rcharRate,io_wcharRate,io_charRate,m_sizeRate,m_residentRate])
-            pd = nprec.append_fields(pd, names=['hasChild','volatilityScore','nObservations'], data=[hasChild,volatilityScore,nObservations], usemask=False)
+        return
+        new_ps_types = zip(['cpu','cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate'], [cpu.dtype,cpuRate.dtype,io_rcharRate.dtype,io_wcharRate.dtype,io_charRate.dtype,m_sizeRate.dtype,m_residentRate.dtype])
+        print "[%d] ps[0]: "% rank, ps[0]
+#ps = nprec.append_fields(ps, names=['cpu','cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate'], data=[cpu,cpuRate,io_rcharRate,io_wcharRate,io_charRate,m_sizeRate,m_residentRate])
+#pd = nprec.append_fields(pd, names=['hasChild','volatilityScore','nObservations'], data=[hasChild,volatilityScore,nObservations], usemask=False)
+        ## at this point, I have four needed datasets:
+        ##        ps, pd, xcorData, and fsData
+        ## ps and pd potentially have multiple records for the same process
+        ## and are sorted by recTime to ease selection later, xcorData and
+        ## fsData only have unique processes (for this observation window)
+        tmpdata = {'ps':ps, 'pd':pd, 'xc':xcorData, 'fs':fsData }
 
-            idx = None
-            for key in query:
-                for q in query[key]:
-                    r = re.compile(q)
-                    qmatch = np.vectorize(lambda x:bool(r.match(x)))
-                    sq = qmatch(tmpdata['procdata'][key])
-                    if idx is None:
-                        idx = sq
-                    else:
-                        idx = idx | sq
-            index = tmpdata['procdata'][idx][['pid','startTime']]
-            if len(index) == 0:
-                return
-            for dataset in tmpdata:
-                data = tmpdata[dataset]
-                m_pid = np.in1d(data['pid'], index['pid'])
-                m_startTime = np.in1d(data['startTime'], index['startTime'])
-                mask = m_pid & m_startTime
-                tmpdata[dataset] = data[mask]
 
-        ## concatenate data with existing data
+        ## trim datasets based on user queries
+        idx = None
+        for key in query:
+            for q in query[key]:
+                r = re.compile(q)
+                qmatch = np.vectorize(lambda x:bool(r.match(x)))
+                sq = qmatch(pd[key])
+                if idx is None:
+                    idx = sq
+                else:
+                    idx = idx | sq
+        index = pd[idx][['pid','startTime']]
+        if len(index) == 0:
+            return
+
         for dataset in tmpdata:
             data = tmpdata[dataset]
-            try:
-                if len(data) > 0:
-                    if dataset not in self.procmon or self.procmon[dataset] is None or len(self.procmon[dataset]) == 0:
-                        self.procmon[dataset] = data
-                    else:
-                        self.procmon[dataset] = np.concatenate((self.procmon[dataset], data))
-                #print dataset, self.procmon[dataset].dtype
-            except:
-                print self.hostname, dataset, data
-                traceback.print_exc(file=sys.stderr)
-                exc_type, exc_value, exc_traceback = sys.exc_info()
-                traceback.print_tb(exc_traceback, limit=1, file=sys.stderr)
+            mask = np.in1d(data[['pid','startTime']], index)
+            tmpdata[dataset] = data[mask]
+
+
+        return
+        ## concatenate data with existing data
+        self.merge_procdata(tmpdata['pd'])
+        self.merge_procstat(tmpdata['ps'])
+        self.merge_xc(tmpdata['xc'])
+        self.merge_fs(tmpdata['fs'])
+
+    def merge_procdata(self, new_pd):
+        alldata = new_pd
+        if self.procmon['procdata'] is not None and self.procmon['procdata'].size > 0:
+            alldata = np.concatenate((self.procmon['procdata'],new_pd), axis=0)
+
+        alldata.sort(order=['recTime'])
+        unique_processes = np.unique(alldata[['pid','startTime']])
+        trimmeddata = np.zeros(shape=unique_processes.size, dtype=alldata.dtype)
+        for (idx,proc) in enumerate(unique_processes):
+            mask = alldata[['pid','startTime']] == proc
+            trimmeddata[idx] = alldata[mask][-1]
+        self.procmon['procdata'] = trimmeddata
+    
+    def merge_procstat(self, new_ps):
+        alldata = new_ps
+        if self.procmon['procstat'] is not None and self.procmon['procstat'].size > 0:
+            alldata = np.concatenate((self.procmon['procstat'],new_ps), axis=0)
+        alldata.sort(order=['recTime'])
+        unique_processes = np.unique(alldata[['pid','startTime']])
+        trimmeddata = np.zeros(unique_processes.size, dtype=alldata.dtype)
+        for (idx,proc) in enumerate(unique_processes):
+            mask = alldata[['pid','startTime']] == proc
+            trimmeddata[idx] = alldata[mask][-1]
+            for col in ['cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate']:
+                pass
+                if 1 == 0:
+                    t = np.nanmax(alldata[mask][col])
+                    trimmeddata[col][idx] = t
+                    
+        self.procmon['procstat'] = trimmeddata
+
+    def merge_xc(self, new_xc):
+        alldata = new_xc
+        if self.procmon['xc'] is not None and self.procmon['xc'].size > 0:
+            alldata = np.concatenate((self.procmon['xc'], new_xc), axis=0)
+        ## new process data will necessarily be sorted after old data by
+        ## concatenate
+
+        unique_processes = np.unique(alldata[['pid','startTime']])
+        trimmeddata = np.zeros(unique_processes.size, dtype=alldata.dtype)
+        columns = list( set(alldata.dtype.names) - {'pid','startTime'} )
+        for (idx,proc) in enumerate(unique_processes):
+            mask = alldata[['pid','startTime']] == proc
+            trimmeddata[idx] = alldata[mask][-1]
+            for col in columns:
+                maxval = np.nanmax(alldata[mask][col])
+                minval = np.nanmin(alldata[mask][col])
+                if abs(minval) > maxval:
+                    trimmeddata[col][idx] = minval
+                else:
+                    trimmeddata[col][idx] = maxval
+        self.procmon['xc'] = trimmeddata
+
+    def merge_fs(self, new_fs):
+        alldata = new_fs
+        if self.procmon['fs'] is not None and self.procmon['fs'].size > 0:
+            alldata = np.concatenate((self.procmon['fs'], new_fs), axis=0)
+        unique_processes = np.unique(alldata[['pid','startTime']])
+        trimmeddata = np.zeros(unique_processes.size, dtype=alldata.dtype)
+        columns = list( set(alldata.dtype.names) - {'pid','startTime'} )
+        for (idx,proc) in enumerate(unique_processes):
+            mask = alldata[['pid','startTime']] == proc
+            trimmeddata[idx] = alldata[mask][-1]
+            for col in columns:
+                trimmeddata[col][idx] = np.nanmax(alldata[mask][col])
+        self.procmon['fs'] = trimmeddata
 
 
     def count_processes(self):
         if 'procdata' in self.procmon and self.procmon['procdata'] is not None:
-            return len(self.procmon['procdata'])
+            unique_processes = np.unique(self.procmon['procdata'][['pid','startTime']])
+            return unique_processes.size
         return 0
 
 
@@ -278,10 +466,14 @@ def parse_h5(filename, id_processes, query):
         sys.stderr.write("Couldn't get hostnames from %s, problem with file?; falling back on hard-coded host list." % filename)
         hostnames = base_hostlist
 
+    count = 0
     for hostname in hostnames:
         if hostname not in fd:
             continue
 
+# if count > 10:
+#            break        
+            
         hostgroup = fd[hostname]
         hostdata = None
         if hostname in id_processes:
@@ -291,6 +483,7 @@ def parse_h5(filename, id_processes, query):
             id_processes[hostname] = hostdata
 
         hostdata.add_data(hostgroup, query)
+        count += 1
         
     finalRecords = 0
     for hostname in id_processes:
@@ -431,55 +624,72 @@ def identify_hosts(host_list, host_proc_cnt):
     ## the same number of total processes per rank (the processes within each
     ## host)
     print "[%d] ranks: %d, hosts: %d, goal_processes_per_rank: %d" % (rank, used_ranks, len(host_list), goal_procs_per_rank)
-    rank_hosts = []
     h_idx = 0
-    for rank in xrange(used_ranks):
+    for lrank in xrange(used_ranks):
         t = {'host': [], 'size': 0}
         done = False
         cnt = 0
         while not done and h_idx < len(host_list):
             proc_count = host_proc_cnt[h_idx]
-            operand = proc_count if rank < used_ranks/2 else 0
-            done = cnt > 0 and rank_proc_cnt[rank] + operand > goal_procs_per_rank
+            operand = proc_count if lrank < used_ranks/2 else 0
+            done = cnt > 0 and rank_proc_cnt[lrank] + operand > goal_procs_per_rank
             if not done:
-                rank_host_cnt[rank] += 1
-                rank_proc_cnt[rank] += proc_count
+                rank_host_cnt[lrank] += 1
+                rank_proc_cnt[lrank] += proc_count
                 h_idx += 1
                 cnt += 1
+    lrank = used_ranks-1
+    while h_idx < len(host_list):
+        proc_count = host_proc_cnt[h_idx]
+        rank_host_cnt[lrank] += 1
+        rank_proc_cnt[lrank] += proc_count       
+        h_idx += 1
 
-        rank_hosts.append(t)
 
     print "[%d] rank_hosts: " % rank, rank_host_cnt, rank_proc_cnt
-    return rank_hosts
+    return rank_host_cnt
 
-def divide_data(host_list, rank_hosts, host_processes):
+def divide_data(host_list, rank_hosts, host_processes, dataset):
+    """Combine datasets into massive single arrays for alltoallv transmission.
+       @param host_list - ordered list of hosts
+       @param rank_hosts - list of how many hosts per rank (as ordered in host_list)
+       @param host_processes - all the host records this process has collected
+
+       This function needs to iterate through each dataset and construct
+       a very large single array of each dataset, as well as an index indicating which
+       records are for which host.
+    """
     global comm
     global size
     global rank
     
     h_idx = 0
-    ref = ("procdata","procstat","procobs")
-    datasets = {}
+    retdata = [[],np.zeros(dtype=np.int64, shape=len(host_list))]
     while h_idx < len(host_list):
-        host_data = host_processes[host_list[h_idx]]
-        for dataset in ref:
-            if dataset not in datasets:
-                datasets[dataset] = [[],np.zeros(dtype=np.int64, shape=len(host_list))]
-            datasets[dataset][0].append(host_data.procmon[dataset])
-            datasets[dataset][1][h_idx] = len(host_data.procmon[dataset])
+        host_data = None
+        hostname = host_list[h_idx]
+        if hostname in host_processes:
+            host_data = host_processes[hostname]
+        if host_data is not None:
+            retdata[0].append(host_data.procmon[dataset])
+            retdata[1][h_idx] = host_data.procmon[dataset].size
+        else:
+            retdata[1][h_idx] = 0
+        h_idx += 1
    
-    for dataset in ref:
-        datasets[dataset][0] = np.concatenate(datasets[dataset][0])
-        rank_row_counts = np.zeros(dtype.np.int64, shape=len(rank_hosts))
-        cumsum = 0
-        idx = 0
-        while idx < len(rank_hosts):
-            rank_row_counts[idx] = np.sum(datasets[dataset][1][cumsum:rank_hosts[idx]])
-            cumsum += rank_hosts[idx]
-            idx += 1
-        datasets[dataset].append(rank_row_counts)
+    print "[%d] combining %d %s datasets" % (rank, len(retdata[0]), dataset)
+    if len(retdata[0]) > 0:
+        retdata[0] = np.concatenate(retdata[0])
+    rank_row_counts = np.zeros(dtype=np.int64, shape=len(rank_hosts))
+    cumsum = 0
+    idx = 0
+    while idx < len(rank_hosts):
+        rank_row_counts[idx] = np.sum(retdata[1][cumsum:(cumsum+rank_hosts[idx])])
+        cumsum += rank_hosts[idx]
+        idx += 1
+    retdata.append(rank_row_counts)
 
-    return datasets
+    return retdata
 
 
 def get_processes(filenames, baseline_filenames, query, start_time):
@@ -506,8 +716,10 @@ def get_processes(filenames, baseline_filenames, query, start_time):
 #    baseline_processes = comm.bcast(baseline_processes, root=(size-1))
 
     # build dictionary of hosts and known processes per host
-    hosts = {x:host_processes[x].count_processes() for x in host_processes}
-    print "[%d] type(hosts): %s, %d, %s" % (rank, type(hosts), len(hosts.keys()), type(hosts[hosts.keys()[0]]))
+    hosts = {}
+    for x in host_processes:
+        hosts[x] = host_processes[x].count_processes()
+#hosts = {x:host_processes[x].count_processes() for x in host_processes}
     print "[%d] starting allgather communication" % rank
     allhosts = comm.allgather(hosts)
         
@@ -530,19 +742,81 @@ def get_processes(filenames, baseline_filenames, query, start_time):
     # numpy array of process counts per host in this rank
     host_proc_cnt = np.array( [hosts[x] for x in host_list], dtype=np.int64 )
 
+    complete_host_processes = {}
 
     rank_hosts = identify_hosts(host_list, host_proc_cnt)
-    datasets = divide_data(host_list, rank_hosts, host_processes)
-    for dataset in datasets:
-        print '[%d] getting ready to transmit %s' % (rank, dataset, datasets[dataset][2], rank_hosts)
-    sys.exit(0)
+    for dataset in ['procdata','procstat','procobs','procfd']:
+        print '[%d] getting ready to transmit %s' % (rank, dataset)
+        data = divide_data(host_list, rank_hosts, host_processes, dataset)
+        outbound_counts = data[2]
 
-    print "[%d] data type: %s" % (rank, type(split_data_by_rank[0]))
-    
-    print "[%d] starting all to all" % rank
-    my_data = comm.alltoall(split_data_by_rank)
+        np_type = None
+        if rank == 0:
+            np_type = data[0].dtype
 
-    print "[%d] merging data: %s, %d" % (rank, type(my_data), len(my_data)), [ type(x) for x in my_data ]
+        np_type = comm.bcast(np_type, root=0)
+        mpi_type = generate_mpi_type_simple(np_type)
+
+        # if this process didn't read an hdf5 file, it won't have any data
+        # to send, so put in some place-holder empties
+        if len(data[0]) == 0:
+            data[0] = np.zeros(shape=size, dtype=np_type)
+            outbound_counts = np.array([1] * size, dtype=np.int64)
+
+        data_recv_counts = np.zeros(shape=size, dtype=np.int64)
+        ## transmit the counts via alltoall
+        comm.Alltoallv([outbound_counts, [1]*size, range(size), MPI.LONG], [data_recv_counts, [1]*size, range(size), MPI.LONG])
+
+        recv_data = np.zeros(shape=np.sum(data_recv_counts), dtype=np_type)
+        outbound_offsets = np.hstack((0, np.cumsum(outbound_counts)))[0:-1]
+        data_recv_offsets = np.hstack((0, np.cumsum(data_recv_counts)))[0:-1]
+        print "[%d] data_recv_counts: "% rank, list(outbound_counts), list(data_recv_counts)
+        print "[%d] data_recv_offsets: "% rank, list(outbound_offsets), list(data_recv_offsets)
+        print "[%d] data: "%rank, data[0].size
+        print "[%d] recv_data: "%rank, recv_data.size
+        ## transmit the actual dataset
+        comm.Alltoallv([data[0], outbound_counts, outbound_offsets, mpi_type], [recv_data, data_recv_counts, data_recv_offsets, mpi_type])
+
+        ## prepare to send host-index of the data
+        dset_idx = data[1]
+        outbound_counts = rank_hosts
+        outbound_offsets = np.hstack((0, np.cumsum(outbound_counts)))[0:-1]
+        recv_counts = [outbound_counts[rank]]*size
+        recv_offsets = np.hstack((0, np.cumsum(recv_counts)))[0:-1]
+        recv_idx = np.zeros(shape=sum(recv_counts), dtype=np.int64)
+        comm.Alltoallv([dset_idx, rank_hosts, outbound_offsets, MPI.LONG],[recv_idx, recv_counts, recv_offsets, MPI.LONG])
+
+        ## reconstruct the per-host data structures
+        dataset_base_idx = 0
+        host_base_indices = np.hstack((0, np.cumsum(rank_hosts)))[0:-1]
+        components = {}
+        for rank_idx in xrange(len(rank_hosts)):
+            if dataset_base_idx > data_recv_offsets[rank_idx]:
+                print "WARNING! DANGER! It looks we over-ran into another rank's data! DANGER! WARNING!"
+            if dataset_base_idx < data_recv_offsets[rank_idx]:
+                print "INFO! USEFUL! Moving up %d records, hopefully accounting for data from an empty rank. USEFUL! INFO!" % (data_recv_offsets[rank_idx] - dataset_base_idx)
+            dataset_base_idx = data_recv_offsets[rank_idx]
+            for host_cnt in xrange(rank_hosts[rank]):
+                host_idx = host_base_indices[rank] + host_cnt
+                host = host_list[host_idx]
+                if host not in complete_host_processes:
+                    complete_host_processes[host] = {}
+                if host not in components:
+                    components[host] = []
+                limit = recv_idx[ (rank_idx * rank_hosts[rank]) + host_cnt ]
+
+                components[host].append( recv_data[dataset_base_idx:(dataset_base_idx + limit)] )
+                dataset_base_idx += limit
+        for host in complete_host_processes:
+            complete_host_processes[host][dataset] = np.concatenate( components[host] )
+        del recv_data
+            
+    del host_processes
+    host_processes = {}
+    print "[%d] reducing data" % (rank)
+    for host in complete_host_processes:
+        hostprocs = HostProcesses(host)
+        hostprocs.reduce_data(complete_host_processes[host])
     sys.exit(0)
     processes = None
     for r in xrange(len(my_data)):
@@ -677,7 +951,8 @@ def main(args):
     yesterday = date.today() - timedelta(days=1)
     start_time = datetime.combine(yesterday, time(0,0,0))
     end_time = datetime.combine(date.today(), time(0,0,0))
-    h5_path = "/scratch/proc"
+    h5_path = "/global/projectb/statistics/procmon/genepool"
+#h5_path = "/scratch/proc"
     h5_prefix = "procmon_genepool"
     save_all_processes = False
     qqacct_file = None
