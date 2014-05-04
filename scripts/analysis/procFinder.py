@@ -96,6 +96,7 @@ class HostProcesses:
     def __init__(self, hostname):
         self.hostname = hostname
         self.read_datasets = ['procdata','procstat','procfd','procobs']
+        self.gentype = None
         self.procmon = {
             'procdata': None,
             'procstat': None,
@@ -132,7 +133,6 @@ class HostProcesses:
         return
 
     
-
     def reduce_data(self, datasets):
         if ('procdata' not in datasets or datasets['procdata'] is None) or ('procstat' not in datasets or datasets['procstat'] is None) or ('procfd' not in datasets or datasets['procfd'] is None) or ('procobs' not in datasets or datasets['procobs'] is None):
 
@@ -144,6 +144,13 @@ class HostProcesses:
         ps = datasets['procstat']
         po = datasets['procobs']
         pf = datasets['procfd']
+
+        self.orig_types = {
+            'procdata': pd.dtype,
+            'procstat': ps.dtype,
+            'procobs' : po.dtype,
+            'procfd'  : pf.dtype,
+        }
 
         pd.sort(order=['recTime'])
         ps.sort(order=['recTime'])
@@ -189,6 +196,10 @@ class HostProcesses:
         po = pandas.DataFrame(po)#.sort(['recTime','recTimeUSec'])
         fs = pandas.DataFrame(fsData)#.sort(['recTime','recTimeUSec'])
 
+        pd['hasChildren'] = False
+        parentIdx = pd.query('pid in parentPids').index
+        pd['hasChildren'][parentIdx] = True
+
         pd_group = pd.groupby(['pid','startTime'])
         ps_group = ps.groupby(['pid','startTime'])
         po_group = po.groupby(['pid','startTime'])
@@ -217,6 +228,16 @@ class HostProcesses:
                 'mresidentRateMax': mresidentRate.max(),
                 'nRecords': ps_rec.shape[0],
             }
+            res = ['cpu','iow','ior','io','msize','mresident']
+            resIdx1 = 0
+            resIdx2 = 0
+            while resIdx1 < len(res):
+                resIdx2 = resIdx1 + 1
+                while resIdx2 < len(res):
+                    retData['cor_%sX%s'%(res[resIdx1],res[resIdx2])] = correlation['%sRate'%res[resIdx1]]['%sRate'%res[resIdx2]]
+                    resIdx2 += 1
+                resIdx1 += 1
+                    
             return pandas.Series(retData)
 
         def summarize_procobs(po_rec):
@@ -225,223 +246,99 @@ class HostProcesses:
         def summarize_fs(fs_rec):
             ret = {}
             for fs in monitored_filesystems:
-                ret['%s_write' % fs] = sum(fs_rec.fwrite & fs_rec[fs]) > 0
-                ret['%s_read' % fs] = sum(fs_rec.fread & fs_rec[fs]) > 0
+                ret['fs_%s_write' % fs] = sum(fs_rec.fwrite & fs_rec[fs]) > 0
+                ret['fs_%s_read' % fs] = sum(fs_rec.fread & fs_rec[fs]) > 0
             return pandas.Series(ret)
                 
+        def pd_last_record(x):
+            retRec = x.ix[x.index[-1]]
+            if x.shape[0] > 1:
+                prevRec = x.ix[x.index[-2]]
+                if retRec['exePath'] == 'Unknown':
+                    prevRec = prevRec.copy(True)
+                    prevRec['recTime'] = retRec['recTime']
+                    prevRec['recTimeUSec'] = retRec['recTimeUSec']
+                    return prevRec
+            return retRec
+
         ps_summaries = ps_group.apply(summarize_timeseries)
         po_summaries = po_group.apply(summarize_procobs)
         fs_summaries = fs_group.apply(summarize_fs)
 
-        pd_final = pd_group.last()
+        pd_final = pd_group.apply(pd_last_record)
         ps_final = ps_group.last()
-        return
+        combined = pd_final.join(other=ps_final, how='left', rsuffix='_ps').join(other=ps_summaries,how='left').join(other=fs_summaries, how='left')
+        combined['volatilityScore'] = 0.
+        combined['volatilityScore'] = (ps_summaries['nRecords'] - 1) / po_summaries['nRecords']
+        combined['nObservations'] = po_summaries['nRecords']
+        cols = combined.columns
+        for col in cols:
+            if col.endswith('_ps'):
+                del combined[col]
 
+        combined['host'] = self.hostname
+        self.procmon['processes'] = combined
 
+    def set_baseline(self, baseline, start_time):
+        baseline_ps = pandas.DataFrame(baseline['procstat']).sort(['recTime'])
+        baseline_ps = baseline_ps.groupby(['pid','startTime']).last()
+        processes = self.procmon['processes']
+        processes['startTime_baseline'] = processes.startTime.copy(True)
+        processes['utime_baseline'] = np.zeros(processes.shape[0],dtype=processes.utime.dtype)
+        processes['stime_baseline'] = np.zeros(processes.shape[0],dtype=processes.stime.dtype)
+        processes['io_rchar_baseline'] = np.zeros(processes.shape[0],dtype=processes.io_rchar.dtype)
+        processes['io_wchar_baseline'] = np.zeros(processes.shape[0],dtype=processes.io_wchar.dtype)
+        early_starters = processes.ix[processes.startTime < start_time].index
+        if baseline_ps is not None and not baseline_ps.empty and len(early_starters) > 0:
+            # identify processes which started before start_time
+            processes.utime_baseline[early_starters] = baseline_ps.ix[early_starters].utime
+            processes.stime_baseline[early_starters] = baseline_ps.ix[early_starters].stime
+            processes.io_rchar_baseline[early_starters] = baseline_ps.ix[early_starters].io_rchar
+            processes.io_wchar_baseline[early_starters] = baseline_ps.ix[early_starters].io_wchar
+            processes.startTime_baseline[early_starters] = start_time
+        
+            ## in case the baseline data is missing some things we think should be there
+            processes.utime_baseline[np.invert(processes.utime_baseline.notnull())] = 0
+            processes.stime_baseline[np.invert(processes.stime_baseline.notnull())] = 0
 
-        ## process volatility is the ratio of (#procstat - 1)/(#procobs)
-        ## procstat records are only recorded when a change in counters
-        ## is observed; the "-1" term is to prevent single observation
-        ## processes from getting a perfect score; procobs is recorded for
-        ## all observations
-        unique_processes = np.unique( pd[ ['pid','startTime'] ] )
-        final_pd = np.zeros(dtype=pd.dtype, shape=unique_processes.size)
-        final_ps = np.zeros(dtype=ps.dtype, shape=unique_processes.size)
-        hasChild = np.zeros(dtype=np.bool, shape=unique_processes.size)
-        volatilityScore = np.zeros(dtype=np.float64, shape=unique_processes.size)
-        nObservations = np.zeros(dtype=np.int64, shape=unique_processes.size)
-        duration = ps['recTime'] - ps['startTime']
-        cpu = (ps['utime'] + ps['stime']) / 100.
-        io_sum = (ps['io_rchar'] + ps['io_wchar'])
-        resList = ['cpu','io_rchar','io_wchar','io_char','m_size','m_resident']
-        res_idx1 = 0
-        res_idx2 = 1
-        xcorList =  []
-        xcorType = [('pid',ps['pid'].dtype), ('startTime',ps['startTime'].dtype)]
-        while res_idx1 < len(resList):
-            res_idx2 = res_idx1+1
-            while res_idx2 < len(resList):
-                xcorList.append((res_idx1,res_idx2,))
-                xcorType.append(('%sX%s' % (resList[res_idx1], resList[res_idx2]), np.float64))
-                res_idx2 += 1
-            res_idx1 += 1
-        xcorData = np.zeros(shape=unique_processes.size, dtype=np.dtype(xcorType))
-
-        fread_mask = (stat.S_IRUSR & pf['mode']) > 0
-        fwrite_mask = (stat.S_IWUSR & pf['mode']) > 0
-        fs_masks = {}
-        fs_types = [('pid',ps['pid'].dtype), ('startTime',ps['startTime'].dtype)]
-        for fs in monitored_filesystems:
-            fsq = re.compile(monitored_filesystems[fs])
-            fsmatch = np.vectorize(lambda x: bool(fsq.match(x)))
-            fs_mask = fsmatch(pf['path'])
-            fs_masks[fs] = fs_mask
-            fs_types.extend([('%s_write' % fs, np.bool),('%s_read' % fs, np.bool)])
-        fsData = np.zeros(shape=unique_processes.size, dtype=np.dtype(fs_types))
-
-        # iterate through the list of unique processes and evaluate each
-        # the volatilityScore, observation count, resource consumption
-        # rates, filesystem usage, and rough time-series x-correlation
-        print "[%d] about to iterate through processes for %s" % (rank, self.hostname)
-        for (idx,id) in enumerate(unique_processes):
-            pd_mask = pd[ ['pid','startTime'] ] == id
-            po_mask = po[ ['pid','startTime'] ] == id
-            ps_mask = ps[ ['pid','startTime'] ] == id
-            pf_mask = pf[ ['pid','startTime'] ] == id
-            if id[0] in parentPids:
-                hasChild[idx] = True
-
-            final_pd[idx] = pd[pd_mask][-1]
-            final_ps[idx] = ps[ps_mask][-1]
-                
-            volatilityScore[idx] = ( sum(ps_mask) - 1) / sum(po_mask)
-            nObservations[idx]   = sum(po_mask)
-            cpuRate = np.diff(cpu[ps_mask])/np.diff(duration[ps_mask])
-            io_rcharRate = np.diff(ps[ps_mask]['io_rchar'])/np.diff(duration[ps_mask])
-            io_wcharRate = np.diff(ps[ps_mask]['io_wchar'])/np.diff(duration[ps_mask])
-            io_charRate = np.diff(io_sum[ps_mask])/np.diff(duration[ps_mask])
-            m_sizeRate = np.diff(ps[ps_mask]['m_size'])/np.diff(duration[ps_mask])
-            m_residentRate = np.diff(ps[ps_mask]['m_resident'])/np.diff(duration[ps_mask])
-
-            ## if we have some largish number of observations, try getting
-            ## the correlations between the observed rates for this time
-            ## window
-            if np.sum(ps_mask) > 30:
-                cc = np.corrcoef([cpuRate, io_rcharRate, io_wcharRate, io_charRate, m_sizeRate, m_residentRate])
-                res_idx1 = 0
-                while res_idx1 < len(resList):
-                    res_idx2 = res_idx1 + 1
-                    while res_idx2 < len(resList):
-                        colname = '%sX%s' % (resList[res_idx1], resList[res_idx2])
-                        xcorData[colname][idx] = cc[res_idx1, res_idx2]
-                        res_idx2 += 1
-                    res_idx1 += 1
-            try:
-                xcorData['pid'][idx] = id[0]
-                xcorData['startTime'][idx] = id[1]
-            except Exception, ex:
-                print ex
-                print idx
-                print xcorData[idx]
-                sys.exit(1)
-
-            for fs in fs_masks:
-                fs_read = np.sum(np.logical_and(fread_mask, np.logical_and(pf_mask, fs_masks[fs])))
-                fs_write = np.sum(np.logical_and(fwrite_mask, np.logical_and(pf_mask, fs_masks[fs])))
-                fsData['%s_write' % fs][idx] = fs_write
-                fsData['%s_read' % fs][idx] = fs_read
-            fsData['pid'][idx] = id[0]
-            fsData['startTime'][idx] = id[1]
-        print "[%d] done iterating through processes for %s" % (rank, self.hostname)
-
-
-        return
-        new_ps_types = zip(['cpu','cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate'], [cpu.dtype,cpuRate.dtype,io_rcharRate.dtype,io_wcharRate.dtype,io_charRate.dtype,m_sizeRate.dtype,m_residentRate.dtype])
-        print "[%d] ps[0]: "% rank, ps[0]
-#ps = nprec.append_fields(ps, names=['cpu','cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate'], data=[cpu,cpuRate,io_rcharRate,io_wcharRate,io_charRate,m_sizeRate,m_residentRate])
-#pd = nprec.append_fields(pd, names=['hasChild','volatilityScore','nObservations'], data=[hasChild,volatilityScore,nObservations], usemask=False)
-        ## at this point, I have four needed datasets:
-        ##        ps, pd, xcorData, and fsData
-        ## ps and pd potentially have multiple records for the same process
-        ## and are sorted by recTime to ease selection later, xcorData and
-        ## fsData only have unique processes (for this observation window)
-        tmpdata = {'ps':ps, 'pd':pd, 'xc':xcorData, 'fs':fsData }
-
-
-        ## trim datasets based on user queries
-        idx = None
-        for key in query:
-            for q in query[key]:
-                r = re.compile(q)
-                qmatch = np.vectorize(lambda x:bool(r.match(x)))
-                sq = qmatch(pd[key])
-                if idx is None:
-                    idx = sq
-                else:
-                    idx = idx | sq
-        index = pd[idx][['pid','startTime']]
-        if len(index) == 0:
-            return
-
-        for dataset in tmpdata:
-            data = tmpdata[dataset]
-            mask = np.in1d(data[['pid','startTime']], index)
-            tmpdata[dataset] = data[mask]
-
-
-        return
-        ## concatenate data with existing data
-        self.merge_procdata(tmpdata['pd'])
-        self.merge_procstat(tmpdata['ps'])
-        self.merge_xc(tmpdata['xc'])
-        self.merge_fs(tmpdata['fs'])
-
-    def merge_procdata(self, new_pd):
-        alldata = new_pd
-        if self.procmon['procdata'] is not None and self.procmon['procdata'].size > 0:
-            alldata = np.concatenate((self.procmon['procdata'],new_pd), axis=0)
-
-        alldata.sort(order=['recTime'])
-        unique_processes = np.unique(alldata[['pid','startTime']])
-        trimmeddata = np.zeros(shape=unique_processes.size, dtype=alldata.dtype)
-        for (idx,proc) in enumerate(unique_processes):
-            mask = alldata[['pid','startTime']] == proc
-            trimmeddata[idx] = alldata[mask][-1]
-        self.procmon['procdata'] = trimmeddata
-    
-    def merge_procstat(self, new_ps):
-        alldata = new_ps
-        if self.procmon['procstat'] is not None and self.procmon['procstat'].size > 0:
-            alldata = np.concatenate((self.procmon['procstat'],new_ps), axis=0)
-        alldata.sort(order=['recTime'])
-        unique_processes = np.unique(alldata[['pid','startTime']])
-        trimmeddata = np.zeros(unique_processes.size, dtype=alldata.dtype)
-        for (idx,proc) in enumerate(unique_processes):
-            mask = alldata[['pid','startTime']] == proc
-            trimmeddata[idx] = alldata[mask][-1]
-            for col in ['cpuRate','io_rcharRate','io_wcharRate','io_charRate','m_sizeRate','m_residentRate']:
-                pass
-                if 1 == 0:
-                    t = np.nanmax(alldata[mask][col])
-                    trimmeddata[col][idx] = t
-                    
-        self.procmon['procstat'] = trimmeddata
-
-    def merge_xc(self, new_xc):
-        alldata = new_xc
-        if self.procmon['xc'] is not None and self.procmon['xc'].size > 0:
-            alldata = np.concatenate((self.procmon['xc'], new_xc), axis=0)
-        ## new process data will necessarily be sorted after old data by
-        ## concatenate
-
-        unique_processes = np.unique(alldata[['pid','startTime']])
-        trimmeddata = np.zeros(unique_processes.size, dtype=alldata.dtype)
-        columns = list( set(alldata.dtype.names) - {'pid','startTime'} )
-        for (idx,proc) in enumerate(unique_processes):
-            mask = alldata[['pid','startTime']] == proc
-            trimmeddata[idx] = alldata[mask][-1]
-            for col in columns:
-                maxval = np.nanmax(alldata[mask][col])
-                minval = np.nanmin(alldata[mask][col])
-                if abs(minval) > maxval:
-                    trimmeddata[col][idx] = minval
-                else:
-                    trimmeddata[col][idx] = maxval
-        self.procmon['xc'] = trimmeddata
-
-    def merge_fs(self, new_fs):
-        alldata = new_fs
-        if self.procmon['fs'] is not None and self.procmon['fs'].size > 0:
-            alldata = np.concatenate((self.procmon['fs'], new_fs), axis=0)
-        unique_processes = np.unique(alldata[['pid','startTime']])
-        trimmeddata = np.zeros(unique_processes.size, dtype=alldata.dtype)
-        columns = list( set(alldata.dtype.names) - {'pid','startTime'} )
-        for (idx,proc) in enumerate(unique_processes):
-            mask = alldata[['pid','startTime']] == proc
-            trimmeddata[idx] = alldata[mask][-1]
-            for col in columns:
-                trimmeddata[col][idx] = np.nanmax(alldata[mask][col])
-        self.procmon['fs'] = trimmeddata
+    def generate_nptype(self, processes):
+        if self.gentype is not None:
+            return self.gentype
+        types = []
+        fixedTypes = {
+            'nRecords': np.uint64,
+            'nObservations': np.uint64,
+            'host': '|S48',
+            'script': '|S1024',
+            'execCommand': '|S1024',
+            'command': '|S64',
+            'username': '|S12',
+            'project': '|S20',
+            'job': '|S64',
+        }
+        for col in processes.columns:
+            if col in self.orig_types['procdata'].names:
+                types.append( (col, self.orig_types['procdata'].fields[col][0]) )
+            elif col in self.orig_types['procstat'].names:
+                types.append( (col, self.orig_types['procstat'].fields[col][0]) )
+            elif col == "hasChildren" or col.startswith("fs_"):
+                types.append( (col, bool) )
+            elif col.startswith("cor_") or col.endswith("Max") or col == "volatilityScore":
+                types.append( (col, np.float64) )
+            elif col.endswith('_baseline'):
+                realcol = re.match('(.*)_baseline', col).groups()[0]
+                found_type = np.int64
+                if realcol in self.orig_types['procdata'].names:
+                    found_type = self.orig_types['procdata'].fields[realcol][0]
+                elif realcol in self.orig_types['procstat'].names:
+                    found_type = self.orig_types['procstat'].fields[realcol][0]
+                types.append( (col, found_type) )
+            elif col in fixedTypes:
+                types.append( (col, fixedTypes[col]) )
+            else:
+                print 'missing type for col: ', col
+        self.gentype = np.dtype(types)
+        return self.gentype
 
 
     def count_processes(self):
@@ -471,7 +368,7 @@ def parse_h5(filename, id_processes, query):
         if hostname not in fd:
             continue
 
-# if count > 10:
+#if count > 10:
 #            break        
             
         hostgroup = fd[hostname]
@@ -506,7 +403,7 @@ def identify_scripts(processes):
     """For known scripting interpreter processes, work out what the executed script was."""
     executables = processes.exePath.unique()
     prefixes = ["perl","python","ruby","bash","sh","tcsh","csh","java"]
-    processes['scripts'] = None
+    processes['script'] = None
     for exe in executables:
         executable = os.path.split(exe)[1]
         scriptable = False
@@ -519,14 +416,14 @@ def identify_scripts(processes):
             subset = processes.ix[selection]
             args = subset.cmdArgs.str.split("|")
             scripts = args.apply(lambda x: procmon.Scriptable.Scriptable(executable, x[1::]))
-            processes.scripts[selection] = scripts
+            processes.script[selection] = scripts
 
 def identify_userCommand(processes):
     """ Use a simple heuristic to identify the intended command for each process
         depends on indentify_scripts already having been run """
 
     processes['execCommand'] = processes.exePath.str.split('/').str.get(-1)
-    command = processes.scripts.str.split('/').str.get(-1)
+    command = processes.script.str.split('/').str.get(-1)
     mask = (command == "COMMAND" ) | (command == "") | (np.invert(command.notnull()))
     command[mask] = processes.ix[mask].execCommand
     processes['command'] = command 
@@ -691,70 +588,22 @@ def divide_data(host_list, rank_hosts, host_processes, dataset):
 
     return retdata
 
-
-def get_processes(filenames, baseline_filenames, query, start_time):
-    status = 0
-    processes = None
-
+def mpi_transfer_datasets(root, host_list, rank_hosts, host_processes):
     global comm
-    global size
     global rank
-
-    host_processes = {}
-    rank_files = identify_files(filenames)
-    filenames = rank_files[rank]['file']
-
-    for filename in filenames:
-        parse_h5(filename, host_processes, query)
-
-    baseline_processes = {}
-    if rank == (size - 1):
-        for filename in baseline_filenames:
-            print "[%d] parsing baseline file: %s" % (rank, filename) 
-            parse_h5(filename, baseline_processes, query)
-#print "[%d] starting baseline data bcast" % rank
-#    baseline_processes = comm.bcast(baseline_processes, root=(size-1))
-
-    # build dictionary of hosts and known processes per host
-    hosts = {}
-    for x in host_processes:
-        hosts[x] = host_processes[x].count_processes()
-#hosts = {x:host_processes[x].count_processes() for x in host_processes}
-    print "[%d] starting allgather communication" % rank
-    allhosts = comm.allgather(hosts)
-        
-    for i in range(size):
-        if i == rank:
-            continue
-        for host in allhosts[i]:
-            if host not in hosts:
-                hosts[host] = allhosts[i][host]
-            else:
-                hosts[host] += allhosts[i][host]
-    procsum = 0
-    for host in hosts:
-        procsum += hosts[host]
-    print "[%d] got %d total hosts for %d processes" % (rank, len(hosts.keys()), procsum)
-
-    # master list of hosts sorted alphabetically
-    host_list = sorted(hosts.keys())
-
-    # numpy array of process counts per host in this rank
-    host_proc_cnt = np.array( [hosts[x] for x in host_list], dtype=np.int64 )
+    global size
 
     complete_host_processes = {}
-
-    rank_hosts = identify_hosts(host_list, host_proc_cnt)
     for dataset in ['procdata','procstat','procobs','procfd']:
         print '[%d] getting ready to transmit %s' % (rank, dataset)
         data = divide_data(host_list, rank_hosts, host_processes, dataset)
         outbound_counts = data[2]
 
         np_type = None
-        if rank == 0:
+        if rank == root:
             np_type = data[0].dtype
 
-        np_type = comm.bcast(np_type, root=0)
+        np_type = comm.bcast(np_type, root=root)
         mpi_type = generate_mpi_type_simple(np_type)
 
         # if this process didn't read an hdf5 file, it won't have any data
@@ -810,6 +659,70 @@ def get_processes(filenames, baseline_filenames, query, start_time):
         for host in complete_host_processes:
             complete_host_processes[host][dataset] = np.concatenate( components[host] )
         del recv_data
+    return complete_host_processes
+
+def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data):
+    status = 0
+    processes = None
+    start_time = int(start_time.strftime("%s"))
+
+    global comm
+    global size
+    global rank
+
+    host_processes = {}
+    baseline_processes = {}
+    rank_files = identify_files(filenames)
+    filenames = rank_files[rank]['file']
+
+    for filename in filenames:
+        parse_h5(filename, host_processes, query)
+
+    if rank == (size - 1):
+        for filename in baseline_filenames:
+            print "[%d] parsing baseline file: %s" % (rank, filename) 
+            parse_h5(filename, baseline_processes, query)
+
+    # build dictionary of hosts and known processes per host
+    hosts = {}
+    for x in host_processes:
+        hosts[x] = host_processes[x].count_processes()
+
+    print "[%d] beginning collective hostname comparison" % rank
+    allhosts = comm.allgather(hosts)
+        
+    for i in range(size):
+        if i == rank:
+            continue
+        for host in allhosts[i]:
+            if host not in hosts:
+                hosts[host] = allhosts[i][host]
+            else:
+                hosts[host] += allhosts[i][host]
+    procsum = 0
+    for host in hosts:
+        procsum += hosts[host]
+
+    ## screen out any hosts from the baseline data that aren't in the main
+    ## dataset
+    remove_list = []
+    for host in baseline_processes:
+        if host not in hosts:
+            remove_list.append(host)
+    for host in remove_list:
+        del baseline_processes[host]
+
+    print "[%d] got %d total hosts for %d processes" % (rank, len(hosts.keys()), procsum)
+
+    # master list of hosts sorted alphabetically
+    host_list = sorted(hosts.keys())
+
+    # numpy array of process counts per host in this rank
+    host_proc_cnt = np.array( [hosts[x] for x in host_list], dtype=np.int64 )
+    rank_hosts = identify_hosts(host_list, host_proc_cnt)
+
+    complete_host_processes = mpi_transfer_datasets(0, host_list, rank_hosts, host_processes)
+    baseline_host_processes = mpi_transfer_datasets(size-1, host_list, rank_hosts, baseline_processes)
             
     del host_processes
     host_processes = {}
@@ -817,55 +730,46 @@ def get_processes(filenames, baseline_filenames, query, start_time):
     for host in complete_host_processes:
         hostprocs = HostProcesses(host)
         hostprocs.reduce_data(complete_host_processes[host])
-    sys.exit(0)
-    processes = None
-    for r in xrange(len(my_data)):
-        if my_data[r] is not None:
-            try:
-                (records,processes) = merge_host_data(processes, my_data[r])
-            except:
-                import traceback
-                (a,b,c) = sys.exc_info()
-                exception_strs = traceback.format_exception(a,b,c)
-                for string in exception_strs:
-                    print "[%d] from %d, got %s" % (rank, r, type(my_data[r]))
-                    print "[%d] from %d, shape %d" % (rank, r, my_data[r].shape[0])
-                    print "[%d] from %d, shape %s" % (rank, r, my_data[r].index)
-                    print "[%d] %s\n" % (rank, string)
-        
-    print "[%d] finished merging data" % rank
-    print "[%d] setting baseline data" % rank
-    if processes is not None and not processes.empty: 
-        processes['utime_baseline'] = np.zeros(processes.shape[0],dtype=processes.utime.dtype)
-        processes['stime_baseline'] = np.zeros(processes.shape[0],dtype=processes.stime.dtype)
-        processes['startTime_baseline'] = processes.startTime.copy(True)
-        start_timestamp = int(start_time.strftime("%s"))
-        early_starters = processes.ix[processes.startTime < start_timestamp].index
-        if baseline_processes is not None and not baseline_processes.empty and len(early_starters) > 0:
-            # identify processes which started before start_time
-            processes.utime_baseline[early_starters] = baseline_processes.ix[early_starters].utime
-            processes.stime_baseline[early_starters] = baseline_processes.ix[early_starters].stime
-            processes.startTime_baseline[early_starters] = start_timestamp
-            print processes.startTime_baseline
-        
-            ## in case the baseline data is missing some things we think should be there
-            processes.utime_baseline[np.invert(processes.utime_baseline.notnull())] = 0
-            processes.stime_baseline[np.invert(processes.stime_baseline.notnull())] = 0
-
+        host_processes[host] = hostprocs
+    print "[%d] data reduction complete, starting baseline" % rank
+    for host in host_processes:
+        host_processes[host].set_baseline(baseline_host_processes[host], start_time)
     print "[%d] baselining complete" % rank
 
-    if processes is not None and not processes.empty:
-        ## clean up paths to make equivalent and understandable
-        processes.exePath = processes.exePath.str.replace("^/chos","",case=False)
-        processes.exePath = processes.exePath.str.replace("^/house/tooldirs/jgitools/Linux_x86_64","/jgi/tools",case=False)
-        processes.exePath = processes.exePath.str.replace("^/syscom/os/deb6gp","",case=False)
-        processes.exePath = processes.exePath.str.replace("^/tlphoebe/genepool","/usr/syscom",case=False)
-        processes.cwdPath = processes.cwdPath.str.replace("^/chos","",case=False)
-        processes.cwdPath = processes.cwdPath.str.replace("^/house/tooldirs/jgitools/Linux_x86_64","/jgi/tools",case=False)
-        processes.cwdPath = processes.cwdPath.str.replace("^/syscom/os/deb6gp","",case=False)
-        processes.cwdPath = processes.cwdPath.str.replace("^/tlphoebe/genepool","/usr/syscom",case=False)
+    for host in host_processes:
+        processes = host_processes[host].procmon['processes']
+        identify_scripts(processes)
+        identify_userCommand(processes)
+        identify_users(processes)
+        host_processes[host].procmon['processes'] = integrate_job_data(processes, qqacct_data)
 
-    return (status,processes)
+    ret_processes = {}
+    hosts = host_processes.keys()
+    for host in hosts:
+        processes = host_processes[host].procmon['processes']
+        np_type = host_processes[host].generate_nptype(processes)
+        npprocs = np.zeros(shape=processes.shape[0], dtype=np_type)
+        for col in processes.columns:
+            coltype = npprocs[col].dtype
+            try:
+                if coltype in (np.uint8, np.uint16, np.uint32, np.uint64, np.int8, np.int16, np.int32, np.int64):
+                    nandex = pandas.isnull(processes[col])
+                    if sum(nandex) > 0:
+                        processes[col][nandex] = 0
+                npprocs[col] = processes[col].astype(npprocs[col].dtype, copy=True)
+            except:
+                print '[%d] %s issue setting column %s\n' % (rank, host, col), npprocs[col].dtype, processes[col].dtype
+                print list(processes[col])
+                print processes[col]
+                traceback.print_exc(file=sys.stdout)
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                traceback.print_tb(exc_traceback, limit=1, file=sys.stdout)
+                sys.exit(1)
+                
+        ret_processes[host] = npprocs
+        del host_processes[host]
+
+    return ret_processes
 
 def identify_users(processes):
     uids = processes.realUid.unique()
@@ -908,9 +812,9 @@ def summarize_data(processes, summaries = {
         'executables' : ['exePath'],
         'execUser' : ['username', 'exePath'],
         'execProject' : ['project', 'exePath'],
-        'scripts' : ['scripts', 'exePath', 'execName'],
-        'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
-        'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
+        'script' : ['script', 'exePath', 'execName'],
+        'scriptUser' : ['username', 'script', 'exePath', 'execName'],
+        'scriptProject' : ['project', 'script', 'exePath', 'execName'],
         'projects' : ['project'],
         'users' : ['username']
     }):
@@ -1057,13 +961,34 @@ def main(args):
     print "distributing qqacct data"
     qqacct_data = comm.bcast(qqacct_data, root=0)
     print "getting process data (may take a long time):"
-    (h_status, processes) = get_processes(filenames, baseline_filenames, query, start_time)
+    host_processes = get_processes(filenames, baseline_filenames, query, start_time, qqacct_data)
+
+    local_processes = 0
+    for host in host_processes:
+        local_processes += host_processes[host].size
+    process_cnts = comm.allgather(local_processes)
+
+    print "[%d] about to begin writing processes in parallel (%d global, %d local)" % (rank, sum(process_cnts), local_processes)
+    output = h5py.File('/global/scratch2/sd/dmj/output.h5', 'w', driver='mpio', comm=comm)
+    dset = output.create_dataset('processes', (sum(process_cnts),), dtype=host_processes.values()[0].dtype)
+    offset = sum(process_cnts[0:rank])
+    local_idx = 0
+    for host in host_processes:
+        base = offset + local_idx
+        limit = base + host_processes[host].size
+        local_idx += host_processes[host].size
+
+        dset[base:limit] = host_processes[host][:]
+    output.close()
+        
+
+    sys.exit(0)
+    processes = None
     summaries = None
     if processes is not None and not processes.empty:
         identify_scripts(processes)
         identify_userCommand(processes)
         identify_users(processes)
-        processes = integrate_job_data(processes, qqacct_data)
         summ_index = {
             'command' : ['command', 'execCommand'],
             'commandUser' : ['username','command','execCommand'],
@@ -1073,10 +998,10 @@ def main(args):
             'execUser' : ['username', 'exePath'],
             'execProject' : ['project', 'exePath'],
             'execHost' : ['host','exePath'],
-            'scripts' : ['scripts', 'exePath', 'execName'],
-            'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
-            'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
-            'scriptHost' : ['host','scripts','exePath','execName'],
+            'scripts' : ['script', 'exePath', 'execName'],
+            'scriptUser' : ['username', 'script', 'exePath', 'execName'],
+            'scriptProject' : ['project', 'script', 'exePath', 'execName'],
+            'scriptHost' : ['host','script','exePath','execName'],
             'projects' : ['project'],
             'users' : ['username'],
             'hosts' : ['host'],
