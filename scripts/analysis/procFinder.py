@@ -50,6 +50,7 @@ commands_modifications = {
     r'(.*) \(deleted\)': ('command',r'\1'),
     r'SMcli\..*': ('command','SMcli.<pid>'),
     r'\/opt\/uge\/genepool\/uge\/genepool\/spool\/qmaster\/execd\/.*?\/job_scripts\/\d+': ('script','BATCH_SCRIPT'),
+    r'hudson\d+\.sh': ('command','hudson<unique>.sh'),
 }
 
 def generate_mpi_type_simple(np_dtype):
@@ -279,9 +280,16 @@ class HostProcesses:
         combined['recTime'] = ps_final['recTime']
         combined['recTimeUSec'] = ps_final['recTimeUSec']
         cols = combined.columns
+        null_idx = pandas.isnull(combined['hasChildren'])
+        if np.sum(null_idx) > 0:
+            combined['hasChildren'][null_idx] = False
         for col in cols:
             if col.endswith('_ps'):
                 del combined[col]
+            if col.startswith('fs_'):
+                null_idx = pandas.isnull(combined[col])
+                if np.sum(null_idx) > 0:
+                    combined[col][null_idx] = False
 
         combined['host'] = self.hostname
         self.procmon['processes'] = combined
@@ -371,7 +379,7 @@ def parse_h5(filename, id_processes, query):
         hostnames = base_hostlist
 
     count = 0
-#hostnames = ['mc0211','mc0212','mc0213','mc0170','mc0171']
+#    hostnames = ['msvu1221','sgi02a19','mc0211','mc0212','mc0213','mc0170','mc0171']
     for hostname in hostnames:
         if hostname not in fd:
             continue
