@@ -45,6 +45,13 @@ monitored_filesystems = {
     'local_tmp':'^/tmp/.*'
 }
 
+commands_modifications = {
+    r'iprscan-\d+-\d+-(.*?)-cnk\d+\.(.*)': ('command',r'iprscan-<date>-<id>-\1-<chunk>.\2'),
+    r'(.*) \(deleted\)': ('command',r'\1'),
+    r'SMcli\..*': ('command','SMcli.<pid>'),
+    r'\/opt\/uge\/genepool\/uge\/genepool\/spool\/qmaster\/execd\/.*?\/job_scripts\/\d+': ('script','BATCH_SCRIPT'),
+}
+
 def generate_mpi_type_simple(np_dtype):
     offsets = [0]
     counts  = [np_dtype.itemsize]
@@ -251,14 +258,12 @@ class HostProcesses:
             return pandas.Series(ret)
                 
         def pd_last_record(x):
+            mask = np.invert(x['exePath'].str.match('Unknown'))
             retRec = x.ix[x.index[-1]]
-            if x.shape[0] > 1:
-                prevRec = x.ix[x.index[-2]]
-                if retRec['exePath'] == 'Unknown':
-                    prevRec = prevRec.copy(True)
-                    prevRec['recTime'] = retRec['recTime']
-                    prevRec['recTimeUSec'] = retRec['recTimeUSec']
-                    return prevRec
+            if np.sum(mask) > 0:
+                okData = x[mask]
+                okRec = okData.ix[okData.index[-1]]
+                return okRec
             return retRec
 
         ps_summaries = ps_group.apply(summarize_timeseries)
@@ -271,6 +276,8 @@ class HostProcesses:
         combined['volatilityScore'] = 0.
         combined['volatilityScore'] = (ps_summaries['nRecords'] - 1) / po_summaries['nRecords']
         combined['nObservations'] = po_summaries['nRecords']
+        combined['recTime'] = ps_final['recTime']
+        combined['recTimeUSec'] = ps_final['recTimeUSec']
         cols = combined.columns
         for col in cols:
             if col.endswith('_ps'):
@@ -364,11 +371,12 @@ def parse_h5(filename, id_processes, query):
         hostnames = base_hostlist
 
     count = 0
+#hostnames = ['mc0211','mc0212','mc0213','mc0170','mc0171']
     for hostname in hostnames:
         if hostname not in fd:
             continue
 
-#if count > 10:
+#if count > 30:
 #            break        
             
         hostgroup = fd[hostname]
@@ -428,11 +436,20 @@ def identify_userCommand(processes):
     command[mask] = processes.ix[mask].execCommand
     processes['command'] = command 
 
-def identify_files(filenames):
+    for search in commands_modifications:
+        (column,replace) = commands_modifications[search]
+        searchre = re.compile(search)
+        mask = processes[column].apply(lambda x: False if x is None else bool(searchre.match(x)))
+        if np.sum(mask) > 0:
+            processes['command'][mask] = processes[column][mask].apply(lambda x: searchre.sub(replace, x))
+
+
+def identify_files(filenames, baseline_filenames):
     """Determine which mpi rank should parse which hdf5 files.
 
     Arguments:
     filenames -- list of absolute paths
+    baseline_filenames -- list of absolute paths of files for baseline subtraction
 
     Returns:
     list [mpi.size length] of hashs which include in the 'file' key a
@@ -442,9 +459,7 @@ def identify_files(filenames):
     and mpi.size.  This is because all ranks will calculate this list, and
     all must arrive at the same answer.
 
-    Note 2: this function must ensure that the earliest timestamped files
-    are evaluated by the lowest-order ranks, and that the files are evaluated
-    in order by rank.
+    Note 2: <removed - no longer relevant>
 
     Note 3: the load balancing performed by this function could be improved.
     The size of the file should be proportional to the time taken to parse it,
@@ -456,36 +471,48 @@ def identify_files(filenames):
     global rank
     global size
 
-    used_ranks = size
-    if len(filenames) < size:
-        used_ranks = len(filenames)
+    ## sort the filenames to ensure all ranks have the same idea of the file
+    ## ordering
+    filenames = sorted(filenames)
+    baseline_filenames = sorted(baseline_filenames)
 
     filesizes = [os.path.getsize(x) for x in filenames]
-    tgt_size_per_rank = sum(filesizes) / used_ranks
+    baseline_filesizes = [os.path.getsize(x) for x in baseline_filenames]
+    total_bytes = sum(filesizes) + sum(baseline_filesizes)
+    total_files = len(filenames) + len(baseline_filenames)
 
-    ## spread out files
-    files_per_rank = len(filenames) / size
-    n_ranks_with_one_extra = len(filenames) % size
+    tgt_size_per_rank = total_bytes / size
+    rr_skip = size / total_files
+    expected_files_per_rank = min(1, total_files / size)
+
+    count = []
     rank_files = []
-    f = 0
+    rank_baseline = []
     for i in xrange(size):
-        t = {'file_idx': [], 'size': 0}
-        files_to_add = files_per_rank
-        if i < n_ranks_with_one_extra:
-            files_to_add += 1
-        for j in xrange(files_to_add):
-            t['file_idx'].append(f)
-            t['size'] += filesizes[f]
-            f += 1
-        rank_files.append(t)
+        count.append(0)
+        rank_files.append([])
+        rank_baseline.append([])
+    rank_idx = 0
+    filename_idx = 0
+    baseline_idx = 0
+    while True:
 
-    for r in rank_files:
-        r['file'] = []
-        for idx in r['file_idx']:
-            r['file'].append(filenames[idx])
+        if count[rank_idx] >= expected_files_per_rank and count[(rank_idx+1)%size] < expected_files_per_rank:
+            rank_idx = (rank_idx+1)%size
+        if filename_idx < len(filenames):
+            rank_files[rank_idx].append(filenames[filename_idx])
+            filename_idx += 1
+        elif baseline_idx < len(baseline_filenames):
+            rank_baseline[rank_idx].append(baseline_filenames[baseline_idx])
+            baseline_idx += 1
+        else:
+            break           
+        count[rank_idx] += 1
 
-    print "rank %d files, resid %02.f, %0.2f bytes: ; %d files" % (rank,float(rank_files[rank]['size'] - tgt_size_per_rank)/1024**2, float(rank_files[rank]['size'])/1024**2, len(rank_files[rank]['file']))
-    return rank_files
+        rank_idx = (rank_idx + 1 + rr_skip) % size
+    print "[%d] input h5 files: %d, baseline h5 files: %d" % (rank, len(rank_files[rank]), len(rank_baseline[rank]))
+
+    return (rank_files, rank_baseline)
 
 def identify_hosts(host_list, host_proc_cnt):
     """ Identify which hosts will be processed by each rank.
@@ -511,6 +538,8 @@ def identify_hosts(host_list, host_proc_cnt):
     used_ranks = size
     if len(host_list) < size:
         used_ranks = len(host_list)
+    if used_ranks == 0:
+        return np.empty(shape=0, dtype=np.int64)
 
     rank_host_cnt = np.zeros(dtype=np.int64, shape=used_ranks)
     rank_proc_cnt = np.zeros(dtype=np.int64, shape=used_ranks)
@@ -672,16 +701,27 @@ def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data)
 
     host_processes = {}
     baseline_processes = {}
-    rank_files = identify_files(filenames)
-    filenames = rank_files[rank]['file']
+    (rank_files,rank_baseline_files) = identify_files(filenames, baseline_filenames)
+    filenames = rank_files[rank]
+    baseline_filenames = rank_baseline_files[rank]
+
+    files_root = -1
+    baseline_root = -1
+
+    for idx in xrange(size):
+        if files_root == -1 and len(rank_files[idx]) > 0:
+            files_root = idx
+        if baseline_root == -1 and len(rank_baseline_files[idx]) > 0:
+            baseline_root = idx
+        
+
 
     for filename in filenames:
         parse_h5(filename, host_processes, query)
 
-    if rank == (size - 1):
-        for filename in baseline_filenames:
-            print "[%d] parsing baseline file: %s" % (rank, filename) 
-            parse_h5(filename, baseline_processes, query)
+    for filename in baseline_filenames:
+        print "[%d] parsing baseline file: %s" % (rank, filename) 
+        parse_h5(filename, baseline_processes, query)
 
     # build dictionary of hosts and known processes per host
     hosts = {}
@@ -721,8 +761,8 @@ def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data)
     host_proc_cnt = np.array( [hosts[x] for x in host_list], dtype=np.int64 )
     rank_hosts = identify_hosts(host_list, host_proc_cnt)
 
-    complete_host_processes = mpi_transfer_datasets(0, host_list, rank_hosts, host_processes)
-    baseline_host_processes = mpi_transfer_datasets(size-1, host_list, rank_hosts, baseline_processes)
+    complete_host_processes = mpi_transfer_datasets(files_root, host_list, rank_hosts, host_processes)
+    baseline_host_processes = mpi_transfer_datasets(baseline_root, host_list, rank_hosts, baseline_processes)
             
     del host_processes
     host_processes = {}
@@ -929,6 +969,7 @@ def main(args):
                 query[key].append(value)
         i += 1
 
+    end_time -= timedelta(seconds=1)
     procmon_h5cache = procmon.H5Cache.H5Cache(h5_path, h5_prefix)
     filenames = [ x['path'] for x in procmon_h5cache.query(start_time, end_time) ]
     baseline_filenames = [ x['path'] for x in procmon_h5cache.query(start_time - timedelta(minutes=20), start_time - timedelta(minutes=1)) ]
@@ -969,8 +1010,11 @@ def main(args):
     process_cnts = comm.allgather(local_processes)
 
     print "[%d] about to begin writing processes in parallel (%d global, %d local)" % (rank, sum(process_cnts), local_processes)
-    output = h5py.File('/global/scratch2/sd/dmj/output.h5', 'w', driver='mpio', comm=comm)
-    dset = output.create_dataset('processes', (sum(process_cnts),), dtype=host_processes.values()[0].dtype)
+    output_dtype = host_processes.values()[0].dtype if rank == 0 else None
+    output_dtype = comm.bcast(output_dtype, root=0)
+        
+    output = h5py.File('%s_processes.h5' % save_prefix, 'w', driver='mpio', comm=comm)
+    dset = output.create_dataset('processes', (sum(process_cnts),), dtype=output_dtype)
     offset = sum(process_cnts[0:rank])
     local_idx = 0
     for host in host_processes:
