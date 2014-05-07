@@ -5,8 +5,9 @@ import pandas
 import re
 from StringIO import StringIO
 from procmon import H5Cache
+from procmon import H5Parser
 
-__all__ = ['H5Cache','Scriptable']
+__all__ = ['H5Cache','Scriptable','H5Parser']
 
 procdata_dt = np.dtype([
         ('pid', np.uint),
