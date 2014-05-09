@@ -43,6 +43,7 @@ class RawH5Parser:
             for dset in self.read_datasets:
                 if dset not in hostgroup:
                     continue
+                #nRec = hostgroup[dset].attrs['nRecords']
                 host_counts[host][dset] += hostgroup[dset].len()
                 
         fd.close()
@@ -91,15 +92,22 @@ class RawH5Parser:
                     if dset not in self.datasets:
                         if dset not in self.dset_types:
                             ## get type by reading first entry for dset we can find
-                            self.dset_types[dset] = hostgroup[dset][0].dtype
+                            ltype = hostgroup[dset][0].dtype
+                            newtype = sorted([ (x,ltype.fields[x][0]) for x in ltype.fields ], key=lambda y: ltype.fields[y[0]][1])
+                            newtype.append( ('host', '|S36', ) )
+                            self.dset_types[dset] = newtype
+
                         
                         total = sum([host_counts[x][dset] for x in host_counts])
                         self.datasets[dset] = np.zeros(total, dtype=self.dset_types[dset])
 
                     nRec = hostgroup[dset].attrs['nRecords']
                     limit = offset + nRec
-
-                    self.datasets[dset][offset:limit] = fd[host][dset][0:nRec]
+                    ldata = fd[host][dset][0:nRec]
+                    ltype = ldata.dtype
+                    for col in ltype.names:
+                        self.datasets[dset][offset:limit][col] = ldata[col]
+                    self.datasets[dset][offset:limit]['host'] = host
                     self.host_counts[dset][h_idx] += nRec
             fd.close()
 

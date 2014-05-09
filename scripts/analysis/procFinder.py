@@ -82,6 +82,8 @@ class HostProcesses:
         self.mpi_types = {}
     
     def reduce_data(self, datasets):
+        print self.hostname, np.unique(datasets['procdata']['host'])
+        return
         if ('procdata' not in datasets or datasets['procdata'] is None) or ('procstat' not in datasets or datasets['procstat'] is None) or ('procfd' not in datasets or datasets['procfd'] is None) or ('procobs' not in datasets or datasets['procobs'] is None):
 
             print "[%d] %s missing a dataset! I have: "%(rank,self.hostname),datasets.keys(), 
@@ -144,6 +146,8 @@ class HostProcesses:
         po = pandas.DataFrame(po)#.sort(['recTime','recTimeUSec'])
         fs = pandas.DataFrame(fsData)#.sort(['recTime','recTimeUSec'])
 
+        print "%s: pd" % self.hostname, np.unique(pd['host'])
+
         pd['hasChildren'] = False
         parentIdx = pd.query('pid in parentPids').index
         pd['hasChildren'][parentIdx] = True
@@ -152,6 +156,21 @@ class HostProcesses:
         ps_group = ps.groupby(['pid','startTime'])
         po_group = po.groupby(['pid','startTime'])
         fs_group = fs.groupby(['pid','startTime'])
+
+        pd_groups = np.array(pd_group.groups.keys())
+        ps_groups = np.array(ps_group.groups.keys())
+        po_groups = np.array(po_group.groups.keys())
+        fs_groups= np.array(fs_group.groups.keys())
+
+        print "%s pd: %d" % (self.hostname, pd_groups.size)
+        print "%s ps: %d" % (self.hostname, ps_groups.size)
+        print "%s po: %d" % (self.hostname, po_groups.size)
+        print "%s fs: %d" % (self.hostname, fs_groups.size)
+        print "%s pd U ps: %d" % (self.hostname, (np.union1d(pd_groups, ps_groups)).size)
+        print "%s pd U po: %d" % (self.hostname, (np.union1d(pd_groups, po_groups)).size)
+        print "%s pd U fs: %d" % (self.hostname, (np.union1d(pd_groups, fs_groups)).size)
+
+        return
 
         def summarize_timeseries(ps_rec):
             ps_rec = ps_rec.sort(['recTime'])
@@ -481,11 +500,12 @@ def identify_hosts(host_list, host_proc_cnt):
     print "[%d] rank_hosts: " % rank, rank_host_cnt, rank_proc_cnt
     return rank_host_cnt
 
-def divide_data(host_list, rank_hosts, h5parser, dataset):
-    """Combine datasets into massive single arrays for alltoallv transmission.
-       @param host_list - ordered list of hosts
-       @param rank_hosts - list of how many hosts per rank (as ordered in host_list)
-       @param host_processes - all the host records this process has collected
+def divide_data(host_list, rank_hosts, h5parser, dset_name):
+    """Calculate which rows of the current dataset go to which MPI processes.
+    @param host_list: ordered list of hosts
+    @param rank_hosts: list of number of hosts per rank, sorted like host_list
+    @param h5parser: RawH5Parser object containing parsed procmon data
+    @param dset_name: string of dataset name (procdata, procstat, ...)
 
        This function needs to iterate through each dataset and construct
        a very large single array of each dataset, as well as an index indicating which
@@ -496,30 +516,41 @@ def divide_data(host_list, rank_hosts, h5parser, dataset):
     global rank
     
     h_idx = 0
-    retdata = [None,np.zeros(dtype=np.int64, shape=len(host_list))]
-    if dataset in h5parser.datasets:
-        retdata[0] = h5parser.datasets[dataset]
+    retdata = None
+    perhost_count = np.zeros(shape=len(host_list), dtype=np.int64)
+    perhost_index = np.zeros(shape=len(host_list), dtype=np.int64)
+    perrank_counts = np.zeros(shape=len(rank_hosts), dtype=np.int64)
+    perrank_offsets = np.zeros(shape=len(rank_hosts), dtype=np.int64)
+
+    if dset_name in h5parser.datasets:
+        retdata = h5parser.datasets[dset_name]
 
     while h_idx < len(host_list):
         host_data = None
         hostname = host_list[h_idx]
         if hostname in h5parser.hosts:
             file_idx = h5parser.hosts.index(hostname)
-            retdata[1][h_idx] = h5parser.host_counts[dataset][file_idx]
+            perhost_index[h_idx] = h5parser.host_offsets[dset_name][file_idx]
+            perhost_count[h_idx] = h5parser.host_counts[dset_name][file_idx]
         else:
-            retdata[1][h_idx] = 0
+            perhost_count[h_idx] = 0
         h_idx += 1
    
-    rank_row_offsets = np.zeros(dtype=np.int64, shape=len(rank_hosts))
-    cumsum = 0
+    h_idx = 0
     idx = 0
     while idx < len(rank_hosts):
-        rank_row_offsets[idx] = np.sum(retdata[1][cumsum:(cumsum+rank_hosts[idx])])
-        cumsum += rank_hosts[idx]
+        perrank_offsets[idx] = perhost_index[h_idx]
+        for ii in xrange(rank_hosts[idx]):
+            perhost_index[h_idx+ii] -= perrank_offsets[idx]
+        h_idx += rank_hosts[idx]
         idx += 1
-    retdata.append(rank_row_offsets)
+    datasize = retdata.size if retdata is not None else 0
+    last_rank_cnt = datasize - perrank_offsets[-1]
+    perrank_counts = np.hstack( (np.diff(perrank_offsets),last_rank_cnt,) )
 
-    return retdata
+    perrank = np.column_stack( (perrank_offsets, perrank_counts,) )
+    perhost = np.column_stack( (perhost_index, perhost_count) )
+    return [retdata, perrank, perhost]
 
 def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
     global comm
@@ -527,37 +558,67 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
     global size
 
     complete_host_processes = {}
-    for dataset in ['procdata','procstat','procobs','procfd']:
+    for dataset in ['procdata']:#,'procstat','procobs','procfd']:
         print '[%d] getting ready to transmit %s' % (rank, dataset)
-        data = divide_data(host_list, rank_hosts, h5parser, dataset)
-        outbound_counts = data[2]
+        (send_data, perrank, perhost) = divide_data(host_list, rank_hosts, h5parser, dataset)
 
         np_type = None
         if rank == root:
-            np_type = data[0].dtype
+            np_type = send_data.dtype
 
         np_type = comm.bcast(np_type, root=root)
         mpi_type = generate_mpi_type_simple(np_type)
 
         # if this process didn't read an hdf5 file, it won't have any data
         # to send, so put in some place-holder empties
-        if data[0] is None or len(data[0]) == 0:
-            data[0] = np.zeros(shape=size, dtype=np_type)
-            outbound_counts = np.array([1] * size, dtype=np.int64)
+        if send_data is None or len(send_data) == 0:
+            send_data = np.zeros(shape=size, dtype=np_type)
+            perrank = np.column_stack((
+                np.ones(shape=size, dtype=np.int64),
+                np.arange(start=size, dtype=np.int64),
+            ))
 
-        data_recv_counts = np.zeros(shape=size, dtype=np.int64)
-        ## transmit the counts via alltoall
-        comm.Alltoallv([outbound_counts, [1]*size, range(size), MPI.LONG], [data_recv_counts, [1]*size, range(size), MPI.LONG])
+        print "[%d]: perrank: " % rank, perrank
+        perrank_recv = np.zeros(shape=(size,2), dtype=np.int64)
+        ## transmit the rank indices/counts via alltoall
+        comm.Alltoallv([perrank, [2]*size, range(0,2*size,2), MPI.LONG], [perrank_recv, [2]*size, range(0,2*size,2), MPI.LONG])
 
-        recv_data = np.zeros(shape=np.sum(data_recv_counts), dtype=np_type)
-        outbound_offsets = np.hstack((0, np.cumsum(outbound_counts)))[0:-1]
-        data_recv_offsets = np.hstack((0, np.cumsum(data_recv_counts)))[0:-1]
+        print "[%d]: perrank_recv: " % rank, perrank_recv
+        
+        print "[%d]: perhost: " % rank, perhost.size
+        perhost_rankcnt = rank_hosts.copy() * 2
+        perhost_rankoffset = np.hstack( (0, np.cumsum(perhost_rankcnt)))[0:-1]
+
+        perhost_recv = np.zeros(shape=(size*rank_hosts[rank], 2), dtype=np.int64)
+        perhost_recv_count = np.array([2*rank_hosts[rank]] * size, dtype=np.int64)
+        perhost_recv_offset = np.hstack( (0, np.cumsum(perhost_recv_count)))[0:-1]
+
+        ## transmit the host relative indices/counts via alltoall
+        comm.Alltoallv([perhost, perhost_rankcnt, perhost_rankoffset, MPI.LONG], [perhost_recv, perhost_recv_count, perhost_recv_offset, MPI.LONG])
+        print "[%d]: recv perhost: " % rank, perhost_recv.size
+
+        recv_data = np.zeros(shape=np.sum(perrank_recv[:,1]), dtype=np_type)
+        outbound_counts = perrank[:,1]
+        outbound_offsets = perrank[:,0]
+        data_recv_counts = perrank_recv[:,1]
+        data_recv_offsets = perrank_recv[:,0]
+        #data_recv_offsets = np.hstack((0, np.cumsum(data_recv_counts)))[0:-1]
         print "[%d] data_recv_counts: "% rank, list(outbound_counts), list(data_recv_counts)
         print "[%d] data_recv_offsets: "% rank, list(outbound_offsets), list(data_recv_offsets)
         print "[%d] data: "%rank, data[0].size
         print "[%d] recv_data: "%rank, recv_data.size
         ## transmit the actual dataset
-        comm.Alltoallv([data[0], outbound_counts, outbound_offsets, mpi_type], [recv_data, data_recv_counts, data_recv_offsets, mpi_type])
+        comm.Alltoallv(
+            [send_data, outbound_counts, outbound_offsets, mpi_type],
+            [recv_data, data_recv_counts, data_recv_offsets, mpi_type]
+        )
+
+        ## calculate an index array to reorder the received data into host
+        ## ordered data
+        host_index = np.zeros(shape=recv_data.size, dtype=np.int64)
+        host_counts = 
+
+
 
         ## prepare to send host-index of the data
         dset_idx = data[1]
@@ -575,8 +636,6 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
         for rank_idx in xrange(len(rank_hosts)):
             if dataset_base_idx > data_recv_offsets[rank_idx]:
                 print "WARNING! DANGER! It looks we over-ran into another rank's data! DANGER! WARNING!"
-            if dataset_base_idx < data_recv_offsets[rank_idx]:
-                print "INFO! USEFUL! Moving up %d records, hopefully accounting for data from an empty rank. USEFUL! INFO!" % (data_recv_offsets[rank_idx] - dataset_base_idx)
             dataset_base_idx = data_recv_offsets[rank_idx]
             for host_cnt in xrange(rank_hosts[rank]):
                 host_idx = host_base_indices[rank] + host_cnt
@@ -589,6 +648,7 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
 
                 components[host].append( recv_data[dataset_base_idx:(dataset_base_idx + limit)] )
                 dataset_base_idx += limit
+        # re-assemble the per-host data
         for host in complete_host_processes:
             complete_host_processes[host][dataset] = np.concatenate( components[host] )
         del recv_data
@@ -795,7 +855,7 @@ def main(args):
     start_time = datetime.combine(yesterday, time(0,0,0))
     end_time = datetime.combine(date.today(), time(0,0,0))
     h5_path = "/global/projectb/statistics/procmon/genepool"
-    #h5_path = "/scratch/proc"
+    h5_path = "/scratch/proc"
     h5_prefix = "procmon_genepool"
     save_all_processes = False
     qqacct_file = None
@@ -873,7 +933,7 @@ def main(args):
     filenames = [ x['path'] for x in procmon_h5cache.query(start_time, end_time) ]
     baseline_filenames = [ x['path'] for x in procmon_h5cache.query(start_time - timedelta(minutes=20), start_time - timedelta(minutes=1)) ]
 
-    filenames = sorted(filenames)
+    filenames = [ sorted(filenames)[0] ]
     baseline_filenames = sorted(baseline_filenames)
 
     if len(filenames) == 0:

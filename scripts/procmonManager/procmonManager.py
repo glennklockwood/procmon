@@ -116,7 +116,7 @@ def mkdir_p(path):
         if e.errno == errno.EEXIST and os.path.isdir(path): pass
         else: raise
 
-def register_jamo(config, fname, ftype, sources = None):
+def register_jamo(config, fname, ftype, sources = None, doNothing=False):
     md_final = None
     tape_archival = [1]
     local_purge_days = 180
@@ -131,7 +131,7 @@ def register_jamo(config, fname, ftype, sources = None):
         tape_archival = [1]
         local_purge_days = 180
 
-    retval = subprocess.call(['/bin/setfacl', '-m', 'user:%s:rw-' % jamo_user, fname])
+    retval = subprocess.call(['/bin/setfacl', '-m', 'user:%s:rw-' % config.jamo_user, fname])
     if retval != 0:
         send_email(config, "failed to set acl", fname)
         return None
@@ -158,6 +158,11 @@ def register_jamo(config, fname, ftype, sources = None):
     posted = None
     if sources is None:
         sources = []
+
+    if doNothing:
+        print md_final
+        return None
+
     with config.sdm_lock:
         posted = config.sdm.post('api/metadata/file',
                 file=fname,
@@ -371,8 +376,8 @@ def read_configuration(args):
     parser.add_argument("--jamo_user", help="username for jamo user", type=str)
     parser.add_argument("--use_email", help="Use Email for warnings/errors (or Not)", type=is_True)
     parser.add_argument("--daemonize", help="Daemonize the manager process", type=is_True)
-    args = parser.parse_args(remaining_args)
-    return args
+    args, remaining_args = parser.parse_known_args(remaining_args)
+    return (args, remaining_args)
 
 def daemonize():
     pid = None
@@ -396,7 +401,7 @@ def daemonize():
         fd = devnull
 
 if __name__ == "__main__":
-    config = read_configuration(sys.argv[1:])
+    (config,remaining_args) = read_configuration(sys.argv[1:])
     print config
     if config.use_jamo:
         import sdm_curl
