@@ -43,8 +43,8 @@ class RawH5Parser:
             for dset in self.read_datasets:
                 if dset not in hostgroup:
                     continue
-                #nRec = hostgroup[dset].attrs['nRecords']
-                host_counts[host][dset] += hostgroup[dset].len()
+                nRec = hostgroup[dset].attrs['nRecords']
+                host_counts[host][dset] += nRec #hostgroup[dset].len()
                 
         fd.close()
 
@@ -95,7 +95,7 @@ class RawH5Parser:
                             ltype = hostgroup[dset][0].dtype
                             newtype = sorted([ (x,ltype.fields[x][0]) for x in ltype.fields ], key=lambda y: ltype.fields[y[0]][1])
                             newtype.append( ('host', '|S36', ) )
-                            self.dset_types[dset] = newtype
+                            self.dset_types[dset] = np.dtype(newtype)
 
                         
                         total = sum([host_counts[x][dset] for x in host_counts])

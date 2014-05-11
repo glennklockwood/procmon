@@ -82,8 +82,6 @@ class HostProcesses:
         self.mpi_types = {}
     
     def reduce_data(self, datasets):
-        print self.hostname, np.unique(datasets['procdata']['host'])
-        return
         if ('procdata' not in datasets or datasets['procdata'] is None) or ('procstat' not in datasets or datasets['procstat'] is None) or ('procfd' not in datasets or datasets['procfd'] is None) or ('procobs' not in datasets or datasets['procobs'] is None):
 
             print "[%d] %s missing a dataset! I have: "%(rank,self.hostname),datasets.keys(), 
@@ -157,20 +155,18 @@ class HostProcesses:
         po_group = po.groupby(['pid','startTime'])
         fs_group = fs.groupby(['pid','startTime'])
 
-        pd_groups = np.array(pd_group.groups.keys())
-        ps_groups = np.array(ps_group.groups.keys())
-        po_groups = np.array(po_group.groups.keys())
-        fs_groups= np.array(fs_group.groups.keys())
+        #pd_groups = set(pd_group.groups.keys())
+        #ps_groups = set(ps_group.groups.keys())
+        #po_groups = set(po_group.groups.keys())
+        #fs_groups= set(fs_group.groups.keys())
 
-        print "%s pd: %d" % (self.hostname, pd_groups.size)
-        print "%s ps: %d" % (self.hostname, ps_groups.size)
-        print "%s po: %d" % (self.hostname, po_groups.size)
-        print "%s fs: %d" % (self.hostname, fs_groups.size)
-        print "%s pd U ps: %d" % (self.hostname, (np.union1d(pd_groups, ps_groups)).size)
-        print "%s pd U po: %d" % (self.hostname, (np.union1d(pd_groups, po_groups)).size)
-        print "%s pd U fs: %d" % (self.hostname, (np.union1d(pd_groups, fs_groups)).size)
-
-        return
+        #print "%s pd: %d" % (self.hostname, len(pd_groups))
+        #print "%s ps: %d" % (self.hostname, len(ps_groups))
+        #print "%s po: %d" % (self.hostname, len(po_groups))
+        #print "%s fs: %d" % (self.hostname, len(fs_groups))
+        #print "%s pd U ps: %d" % (self.hostname, len(pd_groups.union(ps_groups)))
+        #print "%s pd U po: %d" % (self.hostname, len(pd_groups.union(po_groups)))
+        #print "%s pd U fs: %d" % (self.hostname, len(pd_groups.union(fs_groups)))
 
         def summarize_timeseries(ps_rec):
             ps_rec = ps_rec.sort(['recTime'])
@@ -525,6 +521,7 @@ def divide_data(host_list, rank_hosts, h5parser, dset_name):
     if dset_name in h5parser.datasets:
         retdata = h5parser.datasets[dset_name]
 
+    last_host_index = 0
     while h_idx < len(host_list):
         host_data = None
         hostname = host_list[h_idx]
@@ -532,24 +529,26 @@ def divide_data(host_list, rank_hosts, h5parser, dset_name):
             file_idx = h5parser.hosts.index(hostname)
             perhost_index[h_idx] = h5parser.host_offsets[dset_name][file_idx]
             perhost_count[h_idx] = h5parser.host_counts[dset_name][file_idx]
+            last_host_index = perhost_index[h_idx] + perhost_count[h_idx]
         else:
             perhost_count[h_idx] = 0
+            perhost_index[h_idx] = last_host_index
         h_idx += 1
    
-    h_idx = 0
-    idx = 0
-    while idx < len(rank_hosts):
-        perrank_offsets[idx] = perhost_index[h_idx]
-        for ii in xrange(rank_hosts[idx]):
-            perhost_index[h_idx+ii] -= perrank_offsets[idx]
-        h_idx += rank_hosts[idx]
-        idx += 1
+    host_base_indices = np.hstack((0,np.cumsum(rank_hosts)))[0:-1]
+    for r_idx in xrange(len(rank_hosts)):
+        h_idx = host_base_indices[r_idx]
+        perrank_offsets[r_idx] = perhost_index[h_idx]
+        for ii in xrange(rank_hosts[r_idx]):
+            perhost_index[h_idx+ii] -= perrank_offsets[r_idx]
+
     datasize = retdata.size if retdata is not None else 0
     last_rank_cnt = datasize - perrank_offsets[-1]
     perrank_counts = np.hstack( (np.diff(perrank_offsets),last_rank_cnt,) )
 
     perrank = np.column_stack( (perrank_offsets, perrank_counts,) )
     perhost = np.column_stack( (perhost_index, perhost_count) )
+
     return [retdata, perrank, perhost]
 
 def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
@@ -557,8 +556,8 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
     global rank
     global size
 
-    complete_host_processes = {}
-    for dataset in ['procdata']:#,'procstat','procobs','procfd']:
+    host_data = {}
+    for dataset in ['procdata','procstat','procobs','procfd']:
         print '[%d] getting ready to transmit %s' % (rank, dataset)
         (send_data, perrank, perhost) = divide_data(host_list, rank_hosts, h5parser, dataset)
 
@@ -578,12 +577,12 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
                 np.arange(start=size, dtype=np.int64),
             ))
 
-        print "[%d]: perrank: " % rank, perrank
+        #print "[%d]: perrank: " % rank, perrank
         perrank_recv = np.zeros(shape=(size,2), dtype=np.int64)
         ## transmit the rank indices/counts via alltoall
         comm.Alltoallv([perrank, [2]*size, range(0,2*size,2), MPI.LONG], [perrank_recv, [2]*size, range(0,2*size,2), MPI.LONG])
 
-        print "[%d]: perrank_recv: " % rank, perrank_recv
+        #print "[%d]: perrank_recv: " % rank, perrank_recv
         
         print "[%d]: perhost: " % rank, perhost.size
         perhost_rankcnt = rank_hosts.copy() * 2
@@ -594,65 +593,145 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
         perhost_recv_offset = np.hstack( (0, np.cumsum(perhost_recv_count)))[0:-1]
 
         ## transmit the host relative indices/counts via alltoall
-        comm.Alltoallv([perhost, perhost_rankcnt, perhost_rankoffset, MPI.LONG], [perhost_recv, perhost_recv_count, perhost_recv_offset, MPI.LONG])
+        comm.Alltoallv(
+            [perhost, perhost_rankcnt, perhost_rankoffset, MPI.LONG], 
+            [perhost_recv, perhost_recv_count, perhost_recv_offset, MPI.LONG]
+        )
         print "[%d]: recv perhost: " % rank, perhost_recv.size
 
         recv_data = np.zeros(shape=np.sum(perrank_recv[:,1]), dtype=np_type)
         outbound_counts = perrank[:,1]
         outbound_offsets = perrank[:,0]
         data_recv_counts = perrank_recv[:,1]
-        data_recv_offsets = perrank_recv[:,0]
+        data_recv_offsets = np.hstack((0, np.cumsum(data_recv_counts)))[0:-1]
         #data_recv_offsets = np.hstack((0, np.cumsum(data_recv_counts)))[0:-1]
         print "[%d] data_recv_counts: "% rank, list(outbound_counts), list(data_recv_counts)
         print "[%d] data_recv_offsets: "% rank, list(outbound_offsets), list(data_recv_offsets)
-        print "[%d] data: "%rank, data[0].size
+        print "[%d] data: "%rank, send_data.size
         print "[%d] recv_data: "%rank, recv_data.size
         ## transmit the actual dataset
+        #if rank == 2:
+        #    objs = [send_data, perrank, perhost]
+        #    cPickle.dump(objs, open("rank2save.p", "wp"))
+
         comm.Alltoallv(
             [send_data, outbound_counts, outbound_offsets, mpi_type],
             [recv_data, data_recv_counts, data_recv_offsets, mpi_type]
         )
 
-        ## calculate an index array to reorder the received data into host
-        ## ordered data
-        host_index = np.zeros(shape=recv_data.size, dtype=np.int64)
-        host_counts = 
-
-
-
-        ## prepare to send host-index of the data
-        dset_idx = data[1]
-        outbound_counts = rank_hosts
-        outbound_offsets = np.hstack((0, np.cumsum(outbound_counts)))[0:-1]
-        recv_counts = [outbound_counts[rank]]*size
-        recv_offsets = np.hstack((0, np.cumsum(recv_counts)))[0:-1]
-        recv_idx = np.zeros(shape=sum(recv_counts), dtype=np.int64)
-        comm.Alltoallv([dset_idx, rank_hosts, outbound_offsets, MPI.LONG],[recv_idx, recv_counts, recv_offsets, MPI.LONG])
-
-        ## reconstruct the per-host data structures
-        dataset_base_idx = 0
         host_base_indices = np.hstack((0, np.cumsum(rank_hosts)))[0:-1]
+        host_counts = perhost_recv[:,1].copy()
+        host_rel_idx = perhost_recv[:,0].copy()
+
+        (remap_idx,byhost_offsets,byhost_count) = reorganize_data(recv_data, perhost_recv, data_recv_offsets, rank, rank_hosts, host_list, dataset)
+        try:
+            recv_data = recv_data[remap_idx]
+        except IndexError, e:
+            objs = [recv_data.size, perhost_recv, data_recv_counts, data_recv_offsets, rank, rank_hosts, host_list, dataset, remap_idx, byhost_offsets, byhost_count]
+            cPickle.dump(objs, open("indexError.%d.p"%rank, "wb"))
+            raise e
+        host_base_indices = np.hstack((0, np.cumsum(rank_hosts)))[0:-1]
+        for h_idx in xrange(rank_hosts[rank]):
+            host = host_list[host_base_indices[rank] + h_idx]
+            base = byhost_offsets[h_idx]
+            limit = base + byhost_count[h_idx]
+            if host not in host_data:
+                host_data[host] = {}
+            host_data[host][dataset] = recv_data[base:limit]
+        continue
+    return host_data
+    if False:
         components = {}
         for rank_idx in xrange(len(rank_hosts)):
-            if dataset_base_idx > data_recv_offsets[rank_idx]:
-                print "WARNING! DANGER! It looks we over-ran into another rank's data! DANGER! WARNING!"
-            dataset_base_idx = data_recv_offsets[rank_idx]
-            for host_cnt in xrange(rank_hosts[rank]):
-                host_idx = host_base_indices[rank] + host_cnt
-                host = host_list[host_idx]
-                if host not in complete_host_processes:
-                    complete_host_processes[host] = {}
+            rank_offset = data_recv_offsets[rank_idx]
+            for ii in xrange(rank_hosts[rank]):
+                h_idx = host_base_indices[rank] + ii
+                host = host_list[h_idx]
+                if host_counts[ii] == 0:
+                    continue
+                base = rank_offset + host_rel_idx[ii]
+                limit = base + host_counts[ii]
                 if host not in components:
                     components[host] = []
-                limit = recv_idx[ (rank_idx * rank_hosts[rank]) + host_cnt ]
-
-                components[host].append( recv_data[dataset_base_idx:(dataset_base_idx + limit)] )
-                dataset_base_idx += limit
-        # re-assemble the per-host data
-        for host in complete_host_processes:
-            complete_host_processes[host][dataset] = np.concatenate( components[host] )
-        del recv_data
+                components[host].append(recv_data[base:limit])
+        for ii in xrange(rank_hosts[rank]):
+            h_idx = host_base_indices[rank] + ii
+            if host not in components:
+                continue
+            if host not in complete_host_processes:
+                complete_host_processes[host] = {}
+            complete_host_processes[host][dataset] = np.concatenate(components[host])
     return complete_host_processes
+
+
+def reorganize_data(recv_data, perhost_recv, perrank_offsets, rank, rank_hosts, host_list, dataset):
+    ## calculate an index array to reorder the received data into host
+    ## ordered data
+    data_host_idx = np.zeros(shape=recv_data.size, dtype=np.int64)
+    host_counts = perhost_recv[:,1].copy()
+    host_rel_idx = perhost_recv[:,0].copy()
+    nranks = len(rank_hosts)
+
+    # reshaping the host_counts array to put all values by host in axis 1
+    # thus allowing an easy (and efficient) summation
+    host_counts = host_counts.reshape((rank_hosts[rank], nranks), order='F')
+    host_rel_idx = host_rel_idx.reshape((rank_hosts[rank], nranks), order='F')
+    byhost_count = np.sum(host_counts, axis=1)
+    byhost_offsets = np.hstack((0,np.cumsum(byhost_count)))[0:-1]
+
+    # now we know (1) how many records are per-host, (2) where they should end up,
+    # (3) by extension how much extra space there is need to populate the
+    # data_host_idx but putting current indices into the positions where they will
+    # eventually need to end up. to do this, iterate through the recv_data array
+    # (kind of) in the order it was sent, populating blocks of the data_host_idx
+    # array as we go.
+    recv_abs_idx = host_rel_idx + perrank_offsets
+    recv_abs_lim = recv_abs_idx + host_counts
+    host_indices = np.mgrid[0:rank_hosts[rank],0:size][0]
+
+
+    #recv_idx = np.dstack( (recv_abs_idx, recv_abs_lim) )
+    local_abs_idx = np.hstack( (0, np.cumsum(host_counts.ravel())))[0:-1]
+    local_abs_idx = local_abs_idx.reshape((rank_hosts[rank], nranks), order='C')  # c ordering because host_counts is re-ordered by earlier transformation
+    local_abs_lim = local_abs_idx + host_counts
+    #local_idx = np.dstack((local_abs_idx, local_abs_lim))
+    all_idx = np.dstack((recv_abs_idx, recv_abs_lim,local_abs_idx, local_abs_lim))
+    def assign(x):
+        data_host_idx[x[2]:x[3]] = np.arange(x[0],x[1])
+        return x
+    np.apply_along_axis(assign, 2, all_idx)
+    return (data_host_idx, byhost_offsets, byhost_count,)
+
+    #data_host_idx = np.argsort(data_host_idx)
+
+    # work out where the gaps are to remap those
+    """recv_gap_idx = recv_abs_idx.reshape(recv_abs_idx.size,order='F')
+    gaps = np.hstack((
+        recv_gap_idx,
+        recv_abs_lim.reshape(recv_abs_lim.size,order='F')[-1]
+    ))
+    gaps = np.diff(gaps) - perhost_recv[:,1]
+    recv_gap_lim = recv_gap_idx + gaps
+    gapsum = np.cumsum(gaps)
+    local_end = np.max(local_abs_lim)
+    local_gap_idx = np.hstack((0,gapsum))[0:-1] + local_end
+    local_gap_lim = gapsum + local_end
+
+    gap_idx = np.dstack((recv_gap_idx, recv_gap_lim, local_gap_idx, local_gap_lim))
+    np.apply_along_axis(assign, 2, gap_idx)
+    """
+    #local_end = np.max(local_abs_lim)
+
+    recv_data = recv_data[data_host_idx] #[0:local_end]
+    host_base_indices = np.hstack((0, np.cumsum(rank_hosts)))[0:-1]
+    for h_idx in xrange(rank_hosts[rank]):
+        host = host_list[host_base_indices[rank] + h_idx]
+        base = byhost_offsets[h_idx]
+        limit = base + byhost_count[h_idx]
+        if host not in host_data:
+            host_data[host] = {}
+        host_data[host][dataset] = recv_data[base:limit]
+
 
 def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data):
     status = 0
@@ -679,8 +758,9 @@ def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data)
             baseline_root = idx
         
     print "[%d] starting input file parsing" % rank
+    #ref_hosts = ["sgi05a01","sgi05a02","sgi05a03","sgi05a04","sgi05a05","sgi05a06","sgi05a07","sgi05a08","sgi05a09"]
     input_parser = procmon.H5Parser.RawH5Parser()
-    input_parser.parse(filenames)
+    input_parser.parse(filenames)#, ref_hosts)
     print "[%d] finished input file parsing: " % rank, input_parser
 
     # build dictionary of hosts and known processes per host
@@ -855,7 +935,7 @@ def main(args):
     start_time = datetime.combine(yesterday, time(0,0,0))
     end_time = datetime.combine(date.today(), time(0,0,0))
     h5_path = "/global/projectb/statistics/procmon/genepool"
-    h5_path = "/scratch/proc"
+    #h5_path = "/scratch/proc"
     h5_prefix = "procmon_genepool"
     save_all_processes = False
     qqacct_file = None
@@ -933,7 +1013,7 @@ def main(args):
     filenames = [ x['path'] for x in procmon_h5cache.query(start_time, end_time) ]
     baseline_filenames = [ x['path'] for x in procmon_h5cache.query(start_time - timedelta(minutes=20), start_time - timedelta(minutes=1)) ]
 
-    filenames = [ sorted(filenames)[0] ]
+    filenames = sorted(filenames)
     baseline_filenames = sorted(baseline_filenames)
 
     if len(filenames) == 0:
