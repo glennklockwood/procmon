@@ -48,6 +48,29 @@ class RawH5Parser:
                 
         fd.close()
 
+    def __detectParents(self, data): 
+        ## identify pids which have ancestors, done by transposing pidv
+        ## vector and subtracting ppid vector, and looking for indices
+        ## that are zero-value
+        ## the underlying assumption is that we won't see any duplication
+        ## of pids (or ppids) at this point
+        def detectChildProcesses(pids, ppids):
+            out = []
+            it = np.nditer([pids, ppids], ['external_loop'], [['readonly'], ['readonly']],
+                op_axes=[range(pids.ndim)+[-1]*ppids.ndim, [-1]*pids.ndim+range(ppids.ndim)])
+            for (lpids, lppids) in it:
+                out.append(np.unique( lpids[np.nonzero(np.subtract(lpids,lppids) == 0)[0]]))
+            return np.unique(np.concatenate(out))
+
+        parentPids = []
+        if data.size > 0:
+            parentPids = detectChildProcesses(data['pid'], data['ppid'])
+        isParent = np.zeros(shape=data.size, dtype=np.int32)
+        for pid in parentPids:
+            mask = data['pid'] == pid
+            isParent[mask] = 1
+        return isParent
+
     def parse(self, filenames, ref_hosts = None):
         """Read all the data from the input h5 files."""
 
@@ -95,9 +118,10 @@ class RawH5Parser:
                             ltype = hostgroup[dset][0].dtype
                             newtype = sorted([ (x,ltype.fields[x][0]) for x in ltype.fields ], key=lambda y: ltype.fields[y[0]][1])
                             newtype.append( ('host', '|S36', ) )
+                            if dset == "procdata":
+                                newtype.append(('isParent', np.int32))
                             self.dset_types[dset] = np.dtype(newtype)
 
-                        
                         total = sum([host_counts[x][dset] for x in host_counts])
                         self.datasets[dset] = np.zeros(total, dtype=self.dset_types[dset])
 
@@ -105,6 +129,8 @@ class RawH5Parser:
                     limit = offset + nRec
                     ldata = fd[host][dset][0:nRec]
                     ltype = ldata.dtype
+                    if dset == "procdata":
+                        self.datasets[dset][offset:limit]['isParent'] = self.__detectParents(ldata)
                     for col in ltype.names:
                         self.datasets[dset][offset:limit][col] = ldata[col]
                     self.datasets[dset][offset:limit]['host'] = host
