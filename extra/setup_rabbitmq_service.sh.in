@@ -35,7 +35,7 @@ make install_bin TARGET_DIR=$SERVICES_BASE/rabbit SBIN_DIR=$SERVICES_BASE/rabbit
 cat <<EOF > $RABBITMQ_CONFIG_FILE.config
 [
     {rabbitmq_management,       [{http_log_dir,          "$RABBITMQ_LOG_BASE/http"},
-                                 {listener,              [{port, $MONITORING_PORT}]}]}
+                                 {listener,              [{port, $MONITORING_PORT},{ip,"127.0.0.1"}]}]}
 ].
 EOF
 
