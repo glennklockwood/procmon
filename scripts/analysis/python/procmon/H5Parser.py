@@ -118,6 +118,7 @@ class RawH5Parser:
                             ltype = hostgroup[dset][0].dtype
                             newtype = sorted([ (x,ltype.fields[x][0]) for x in ltype.fields ], key=lambda y: ltype.fields[y[0]][1])
                             newtype.append( ('host', '|S36', ) )
+                            newtype.append( ('sortidx', np.uint32,) )
                             if dset == "procdata":
                                 newtype.append(('isParent', np.int32))
                             self.dset_types[dset] = np.dtype(newtype)
@@ -144,6 +145,10 @@ class RawH5Parser:
         h_idx = self.hosts.index(host)
         if h_idx < 0:
             return np.empty(shape=0, dtype=self.dset_types[dataset])
+
+    def free(self, dset):
+        if dset in self.datasets and self.datasets[dset] is not None:
+            del self.datasets[dset]
 
     def count_processes(self, host):
         h_idx = self.hosts.index(host)

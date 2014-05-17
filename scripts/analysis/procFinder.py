@@ -121,17 +121,24 @@ class HostProcesses:
         for fs in monitored_filesystems:
             fsq = re.compile(monitored_filesystems[fs])
             fsmatch = np.vectorize(lambda x: bool(fsq.match(x)))
-            fs_mask = fsmatch(pf['path'])
+            if pf.size > 0:
+                fs_mask = fsmatch(pf['path'])
+            else:
+                fs_mask = np.empty(0, dtype=bool)
             fs_masks[fs] = fs_mask
             fs_types.append(('%s' % fs, np.bool,))
-        fsData = np.zeros(shape=pf.size, dtype=np.dtype(fs_types))
-        fsData['pid'] = pf['pid']
-        fsData['startTime'] = pf['startTime']
-        fsData['recTime'] = pf['recTime']
-        fsData['fread'] = (stat.S_IRUSR & pf['mode']) > 0
-        fsData['fwrite'] = (stat.S_IWUSR & pf['mode']) > 0
-        for fs in fs_masks:
-            fsData[fs] = fs_masks[fs]
+        fsData = None
+        if pf.size > 0:
+            fsData = np.zeros(shape=pf.size, dtype=np.dtype(fs_types))
+            fsData['pid'] = pf['pid']
+            fsData['startTime'] = pf['startTime']
+            fsData['recTime'] = pf['recTime']
+            fsData['fread'] = (stat.S_IRUSR & pf['mode']) > 0
+            fsData['fwrite'] = (stat.S_IWUSR & pf['mode']) > 0
+            for fs in fs_masks:
+                fsData[fs] = fs_masks[fs]
+        else:
+            fsData = np.empty(0, dtype=np.dtype(fs_types))
 
         # convert to pandas DataFrames for more efficient
         # grouping and summarization    
@@ -139,6 +146,10 @@ class HostProcesses:
         ps = pandas.DataFrame(ps)#.sort(['recTime','recTimeUSec'])
         po = pandas.DataFrame(po)#.sort(['recTime','recTimeUSec'])
         fs = pandas.DataFrame(fsData)#.sort(['recTime','recTimeUSec'])
+
+        del pd['sortidx']
+        del ps['sortidx']
+        del po['sortidx']
 
         print "%s: pd" % self.hostname, np.unique(pd['host'])
 
@@ -217,13 +228,23 @@ class HostProcesses:
         po_summaries = po_group.apply(summarize_procobs)
         fs_summaries = fs_group.apply(summarize_fs)
 
+        if ps_summaries.shape[0] == 0 or po_summaries.shape[0] == 0:
+            self.procmon['processes'] = np.empty(0)
+            return
+
         pd_final = pd_group.apply(pd_last_record)
         ps_final = ps_group.last()
+
         combined = pd_final.join(other=ps_final, how='left', rsuffix='_ps')
         combined = combined.join(other=ps_summaries,how='left')
         combined = combined.join(other=fs_summaries, how='left')
 
         combined['volatilityScore'] = 0.
+        if 'nRecords' not in po_summaries:
+            po_summaries['nRecords'] = None
+        if 'nRecords' not in ps_summaries:
+            ps_summaries['nRecords'] = None
+
         combined['volatilityScore'] = (ps_summaries['nRecords'] - 1) / po_summaries['nRecords']
         nanmask = pandas.isnull(combined['volatilityScore'])
         combined['volatilityScore'][nanmask] = 0.
@@ -244,15 +265,21 @@ class HostProcesses:
         self.procmon['processes'] = combined
 
     def set_baseline(self, baseline, start_time):
+        if 'processes' not in self.procmon or self.procmon['processes'].shape[0] == 0:
+            return
+
         baseline_ps = pandas.DataFrame(baseline['procstat']).sort(['recTime'])
         baseline_ps = baseline_ps.groupby(['pid','startTime']).last()
         proc = self.procmon['processes']
-        proc['startTime_baseline'] = proc.startTime.copy(True) + proc.startTimeUSec * 10**-6
-        proc['utime_net'] = proc.utime.copy(True)
-        proc['stime_net'] = proc.stime.copy(True)
-        proc['io_rchar_net'] = proc.io_rchar.copy(True)
-        proc['io_wchar_net'] = proc.io_wchar.copy(True)
-        proc['cputime_net'] = proc.cputime.copy(True)
+        try:
+            proc['startTime_baseline'] = proc.startTime.copy(True) + proc.startTimeUSec * 10**-6
+            proc['utime_net'] = proc.utime.copy(True)
+            proc['stime_net'] = proc.stime.copy(True)
+            proc['io_rchar_net'] = proc.io_rchar.copy(True)
+            proc['io_wchar_net'] = proc.io_wchar.copy(True)
+            proc['cputime_net'] = proc.cputime.copy(True)
+        except AttributeError, e:
+            print '[%d] isnot working missing something?: %s' % (rank, self.hostname), e, proc.columns, proc.shape, proc
 
         broken = proc.ix[proc.startTime == 0].index
         early_starters = proc.ix[proc.startTime < start_time].index
@@ -480,6 +507,9 @@ def identify_hosts(host_list, host_proc_cnt):
 
     ## if there are fewer hosts than ranks, we'll assign one host per rank and
     ## leave the higher numbered ranks idle, otherwise use them all
+    if rank == 0:
+        print "host proc cnts: ", list(host_proc_cnt)
+        print "n hosts: ", len(host_list)
     used_ranks = size
     if len(host_list) < size:
         used_ranks = len(host_list)
@@ -491,31 +521,24 @@ def identify_hosts(host_list, host_proc_cnt):
     totalprocs = sum(host_proc_cnt)
     goal_procs_per_rank = totalprocs / used_ranks
 
-    ## load balancing by assigning a set of hosts per rank trying to optimize
-    ## the same number of total processes per rank (the processes within each
-    ## host)
-    print "[%d] ranks: %d, hosts: %d, goal_processes_per_rank: %d" % (rank, used_ranks, len(host_list), goal_procs_per_rank)
-    h_idx = 0
-    for lrank in xrange(used_ranks):
-        t = {'host': [], 'size': 0}
-        done = False
-        cnt = 0
-        while not done and h_idx < len(host_list):
-            proc_count = host_proc_cnt[h_idx]
-            operand = proc_count #if lrank < used_ranks/2 else 0
-            done = cnt > 0 and rank_proc_cnt[lrank] + operand > goal_procs_per_rank
-            if not done:
-                rank_host_cnt[lrank] += 1
-                rank_proc_cnt[lrank] += proc_count
-                h_idx += 1
-                cnt += 1
-    lrank = used_ranks-1
-    while h_idx < len(host_list):
-        proc_count = host_proc_cnt[h_idx]
-        rank_host_cnt[lrank] += 1
-        rank_proc_cnt[lrank] += proc_count       
-        h_idx += 1
+    rank_host_cnt[:] = len(host_list) / used_ranks
+    rank_host_cnt[0:len(host_list)%used_ranks] += 1
 
+    ## implement really crappy optimization
+    iter = 0
+    while True:
+        h_idx = 0
+        for r_idx in xrange(used_ranks):
+            rank_proc_cnt[r_idx] = np.sum(host_proc_cnt[h_idx:h_idx+rank_host_cnt[r_idx]])
+            h_idx += rank_host_cnt[r_idx]
+        maxidx = np.argmax(rank_proc_cnt)
+        minidx = np.argmin(rank_proc_cnt)
+        iter += 1
+        if rank_host_cnt[minidx] <= 0 or (iter < 10000 and rank_proc_cnt[maxidx] > goal_procs_per_rank*1.3):
+            rank_host_cnt[minidx] += 1
+            rank_host_cnt[maxidx] -= 1
+        else:
+            break
 
     print "[%d] rank_hosts: " % rank, rank_host_cnt, rank_proc_cnt
     return rank_host_cnt
@@ -638,7 +661,11 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
         )
         print "[%d]: recv perhost: " % rank, perhost_recv.size
 
-        recv_data = np.zeros(shape=np.sum(perrank_recv[:,1]), dtype=np_type)
+        try:
+            recv_data = np.zeros(shape=np.sum(perrank_recv[:,1]), dtype=np_type)
+        except MemoryError, e:
+            print "[%d] MemoryError on allocate: %d" % (rank, np.sum(perrank_recv[:,1])), perrank_recv[:,1], np_type
+            raise e
         outbound_counts = perrank[:,1]
         outbound_offsets = perrank[:,0]
         data_recv_counts = perrank_recv[:,1]
@@ -658,12 +685,18 @@ def mpi_transfer_datasets(root, host_list, rank_hosts, h5parser):
             [recv_data, data_recv_counts, data_recv_offsets, mpi_type]
         )
 
+        # clean up useless memory a bit
+        del send_data
+        h5parser.free(dataset)
+
         host_base_indices = np.hstack((0, np.cumsum(rank_hosts)))[0:-1]
         host_counts = perhost_recv[:,1].copy()
         host_rel_idx = perhost_recv[:,0].copy()
 
         (remap_idx,byhost_offsets,byhost_count) = reorganize_data(recv_data, perhost_recv, data_recv_offsets, rank, rank_hosts, host_list, dataset)
         try:
+            #recv_data['sortidx'] = remap_idx
+            #recv_data.sort(order=['sortidx'])
             recv_data = recv_data[remap_idx]
         except IndexError, e:
             objs = [recv_data.size, perhost_recv, data_recv_counts, data_recv_offsets, rank, rank_hosts, host_list, dataset, remap_idx, byhost_offsets, byhost_count]
@@ -738,7 +771,11 @@ def reorganize_data(recv_data, perhost_recv, perrank_offsets, rank, rank_hosts, 
     def assign(x):
         data_host_idx[x[2]:x[3]] = np.arange(x[0],x[1])
         return x
-    np.apply_along_axis(assign, 2, all_idx)
+    try:
+        np.apply_along_axis(assign, 2, all_idx)
+    except IndexError, e:
+        print "[%d] failed to Index: all_idx: %d" % (rank, all_idx.size), all_idx
+        raise e
     return (data_host_idx, byhost_offsets, byhost_count,)
 
 def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data):
@@ -825,6 +862,8 @@ def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data)
 
     for host in host_processes:
         processes = host_processes[host].procmon['processes']
+        if processes.shape[0] == 0:
+            continue
         identify_scripts(processes)
         identify_userCommand(processes)
         identify_users(processes)
@@ -834,6 +873,8 @@ def get_processes(filenames, baseline_filenames, query, start_time, qqacct_data)
     hosts = host_processes.keys()
     for host in hosts:
         processes = host_processes[host].procmon['processes']
+        if processes.shape[0] == 0:
+            continue
         np_type = host_processes[host].generate_nptype(processes)
         npprocs = np.zeros(shape=processes.shape[0], dtype=np_type)
         for col in processes.columns:
@@ -1062,14 +1103,20 @@ def main(args):
         
     output = h5py.File('%s_processes.h5' % save_prefix, 'w', driver='mpio', comm=comm)
     dset = output.create_dataset('processes', (sum(process_cnts),), dtype=output_dtype)
-    offset = sum(process_cnts[0:rank])
-    local_idx = 0
+    host_offset = sum(process_cnts[0:rank])
+    local_offset = 0
     for host in host_processes:
-        base = offset + local_idx
-        limit = base + host_processes[host].size
-        local_idx += host_processes[host].size
+        h5_base = host_offset + local_offset
+        local_offset += host_processes[host].size
 
-        dset[base:limit] = host_processes[host][:]
+        hproc_base = 0
+        while hproc_base < host_processes[host].size:
+            # write 10000 records at a time
+            nrec = min(10000, host_processes[host].size - hproc_base)
+            dset[h5_base:(h5_base+nrec)] = host_processes[host][hproc_base:(hproc_base+nrec)]
+            hproc_base += nrec
+            h5_base += nrec
+
     output.close()
         
 
