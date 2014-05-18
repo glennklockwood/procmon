@@ -228,12 +228,12 @@ class HostProcesses:
         po_summaries = po_group.apply(summarize_procobs)
         fs_summaries = fs_group.apply(summarize_fs)
 
-        if ps_summaries.shape[0] == 0 or po_summaries.shape[0] == 0:
-            self.procmon['processes'] = np.empty(0)
-            return
-
         pd_final = pd_group.apply(pd_last_record)
         ps_final = ps_group.last()
+        
+        if pd_final.shape[0] == 0 or ps_final.shape[0] == 0 or ps_summaries.shape[0] == 0 or po_summaries.shape[0] == 0:
+            self.procmon['processes'] = np.empty(0)
+            return
 
         combined = pd_final.join(other=ps_final, how='left', rsuffix='_ps')
         combined = combined.join(other=ps_summaries,how='left')
@@ -245,7 +245,11 @@ class HostProcesses:
         if 'nRecords' not in ps_summaries:
             ps_summaries['nRecords'] = None
 
-        combined['volatilityScore'] = (ps_summaries['nRecords'] - 1) / po_summaries['nRecords']
+        try:
+            combined['volatilityScore'] = (ps_summaries['nRecords'] - 1) / po_summaries['nRecords']
+        except ValueError, e:
+            print "[%d] %s failed to get volatilityScore: " % (rank, self.hostname), ps_summaries.shape, po_summaries.shape
+            combined['volatilityScore'] = None
         nanmask = pandas.isnull(combined['volatilityScore'])
         combined['volatilityScore'][nanmask] = 0.
 
