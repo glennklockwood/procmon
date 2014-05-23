@@ -12,6 +12,15 @@ from mpi4py import MPI
 
 import procmon
 
+werenull = 0
+cpu_sum = 0.
+group_cpu_sum = 0.
+global_rows = 0
+found_groups = 0
+groups_rows = 0
+
+## TODO, add support for commandRemaps like (('command','bwa',),('cmdArgs',r'\S+\s+(\S+)\s*.*')) = ('bwa ',r'\1',)
+
 procmonInstallBase = ''
 procmon_h5cache = None
 if 'PROCMON_DIR' in os.environ:
@@ -127,6 +136,84 @@ class Config:
             setattr(config, 'dimensions', [])
         config.dimensions.append(add)
 
+    def __add_generalization(self, config, listargs):
+        add = {
+            'other_category': False,
+            'ignore_category': False,
+        }
+        def_eval_order = []
+
+        def add_category(name, regexes):
+            if 'categories' not in add:
+                add['categories'] = {}
+            add['categories'][name] = regexes
+            def_eval_order.append(name)
+
+        def add_csv_categories(filename, transpose=False):
+            category_data = np.loadtxt(v, str, delimiter=',')
+            if transpose:
+                category_data = np.transpose(category_data)
+            for cat in category_data[:]:
+                cat = filter(lambda x: len(x) > 0, cat)
+                if len(cat) > 1:
+                    add_category(cat[0], map(lambda x: '^'+x.strip()+'$', sorted(cat[1:])))
+
+        for (k,v) in listargs:
+            if k == "name":
+                add[k] = v
+            elif k == "column":
+                add[k] = v
+            elif k == "other_category" or k == "ignore_category":
+                add[k] = bool(v)
+            elif k == "eval_order":
+                add[k] = [ v_.strip() for v_ in v.split(",") ]
+            elif k == "csvFileTranspose":
+                add_csv_categories(v, True)
+            elif k == "csvFile":
+                add_csv_categories(v, False)
+            else:
+                regexes = [ "^" + v_.strip() + "$" for v_ in v.split(",") ]
+                add_category(k, regexes)
+
+        if 'eval_order' in add:
+            for value in def_eval_order:
+                if value not in add['eval_order']:
+                    add['eval_order'].append(value)
+        else:
+            add['eval_order'] = def_eval_order
+        if not hasattr(config, 'generalizations'):
+            config.generalizations = []
+        config.generalizations.append(add)
+
+    def __add_analysis(self, config, listargs):
+        add = { 'axes': [] }
+        for (k,v) in listargs:
+            if k == 'name':
+                add[k] = v
+            if k == "axes":
+                add['axisNames'] = [ x.strip() for x in v.split(",") ]
+            if k.startswith('axis'):
+                match = re.match('axis(\d+)', k)
+                if match is None:
+                    continue
+                pos = int(match.groups()[0])
+                while len(add['axes']) <= pos:
+                    add['axes'].append(None)
+                add['axes'][pos] = [ v_.strip() for v_ in v.split(',') ]
+        if not hasattr(config, 'analyses'):
+            config.analyses = []
+        config.analyses.append(add)
+
+    def __add_commandRemap(self, config, listargs):
+        add = []
+        for (k,v) in listargs:
+            col,search = eval(k)
+            replace = eval(v)
+            add.append( (col,re.compile(search),replace,) )
+        if not hasattr(config, 'commandRemap'):
+            config.commandRemap = []
+        config.commandRemap.extend(add) 
+
     def read_configuration(self, args):
         global procmonInstallBase
         yesterday = date.today() - timedelta(days=1)
@@ -145,16 +232,24 @@ class Config:
         }
         if args.config and os.path.exists(args.config):
             config = SafeConfigParser(None, Config.multidict)
+            config.optionxform = str  # make options case sensitive
             config.read([args.config])
             for section in config.sections():
                 if section.startswith("summary"):
                     self.__add_summary(args, config.items(section))
                 if section.startswith("dimension"):
                     self.__add_dimension(args, config.items(section))
+                if section.startswith("generalization"):
+                    self.__add_generalization(args, config.items(section))
+                if section.startswith("workloadAnalysis"):
+                    self.__add_analysis(args, config.items(section))
+                if section.startswith("commandRemap"):
+                    self.__add_commandRemap(args, config.items(section))
 
         parser = argparse.ArgumentParser(parents=[parser])
         parser.set_defaults(**defaults)
         parser.add_argument('-o','--output', type=str, help="Specify output summary filename", default='output.h5')
+        parser.add_argument('-s','--summary', type=str, help="Summary dataset to merge", default="useful")
         parser.add_argument('files', metavar='N', type=str, nargs='+', help='Processes h5 files to summarize')
         args = parser.parse_args(remaining_args, args)
         return args
@@ -170,6 +265,13 @@ def choose_processes(rank, size, count):
     return (start,end)
 
 def summarizeH5(filename, config):
+    global werenull
+    global cpu_sum
+    global group_cpu_sum
+    global global_rows
+    global found_groups
+    global groups_rows
+
     comm = MPI.COMM_WORLD
     mpi_rank = comm.Get_rank()
     mpi_size = comm.Get_size()
@@ -196,12 +298,51 @@ def summarizeH5(filename, config):
         data = dset[base_idx:limit]
         print "[%d] read %d:%d of %d" % (mpi_rank, base_idx, limit, end)
         base_idx = limit
+
+        cpu_nan = np.isnan(data['cputime_net'])
+        if np.sum(cpu_nan) > 0:
+            print "cpu_nan", data[cpu_nan]
+
+        data = data[np.invert(cpu_nan)]
+
+        ## remap any commands:
+        for cmdR in config.commandRemap:
+            column, search, replace = cmdR
+            searchfxn = np.vectorize(lambda x: search.match(x) is not None)
+            mask = searchfxn(data[column])
+            if np.sum(mask) > 0:
+                searchrep = np.vectorize(lambda x: search.sub(replace, x))
+                data['command'][mask] = searchrep(data[column][mask])
+
+        #mask = data['command'] == "pb"
+        #if np.sum(mask) > 0:
+        #    print data['exePath'][mask]
+        #    print data['cmdArgs'][mask]
         
         ancestors = data['isParent'] == 1
         highVol   = np.greater_equal(data['volatilityScore'], 0.1)
         highCpu   = np.greater_equal(data['cputime_net'], data['duration']*0.5)
         useful = highVol | ~ancestors | highCpu
-        l_useful_summary = summarizeData_pd(data[useful], config)
+
+        data = data[useful]
+
+        global_rows += data.size
+
+        ## if there are any negative durations, fix those
+        negDuration = data['duration'] < 0.
+        if np.sum(negDuration) > 0:
+            data['duration'][negDuration] = 0. ## this simply isn't true, and is an artifact of procmon scanning
+
+        for dim in config.dimensions:
+            nanmask = data[dim['column']] == "nan"
+            if np.sum(nanmask) > 0:
+                print "null %s: " % dim['column'], np.sum(nanmask)
+                data[dim['column']][nanmask] = "Unknown"
+
+        cpu_sum += np.sum(data['cputime_net'])
+
+
+        l_useful_summary = summarizeData_pd(data, config)
 
         if useful_summary is None:
             useful_summary = l_useful_summary
@@ -212,6 +353,12 @@ def summarizeH5(filename, config):
     #print "about to convert summary to numpy"
     #useful_summary = convert_np(useful_summary.reset_index(), config)
     #print "done.  about to write output %s" % config.output
+    print "found %d null values (set to zero!)" % werenull
+    print "cpu_sum %f" % cpu_sum
+    print "group_cpu_sum %f" % group_cpu_sum
+    print "total rows: ", global_rows
+    print "group rows: ", groups_rows
+    print "groups: ", found_groups
     useful_summary.to_hdf(config.output, 'useful')
     #output = h5py.File(config.output, 'w')
     #dset = output.create_dataset('useful', (useful_summary.size,), dtype=useful_summary.dtype)
@@ -241,21 +388,32 @@ def convert_np(summary, config):
     return data
 
 def summaryFunc(data, config):
+    global werenull
+    global group_cpu_sum
+    global groups_rows
     ret = {}
-
+    groups_rows += data.shape[0]
     for s in config.summaries:
+        empty = pd.isnull(data[s['column']])
+        if np.sum(empty) > 0:
+            data[s['column']][empty] = 0
+            werenull += np.sum(empty)
         hist = np.histogram(np.array(data[s['column']]), bins=s['bins'])
         sum = data[s['column']].sum()
         count = np.sum(np.invert(pd.isnull(data[s['column']])))
         ret['%s_count'%s['identifier']] = count
         ret['%s_sum'%s['identifier']] = sum
-        ret['%s_histogram'%s['identifier']] = hist[0]
+        for idx in xrange(len(s['bins'])-1):
+            ret['%s_%d_hist' % (s['identifier'], idx)] = hist[0][idx]
+    group_cpu_sum += np.sum(data['cputime_net'])
     return pd.Series(ret)
 
 
 def summarizeData_pd(data, config):
+    global found_groups
     data = pd.DataFrame(data)
     groups = data.groupby([dim['column'] for dim in config.dimensions])
+    found_groups += len(groups.groups)
     summary = groups.apply(summaryFunc, config)
     return summary
 

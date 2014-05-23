@@ -105,10 +105,11 @@ class HostProcesses:
             'procfd'  : pf.dtype,
         }
 
-        pd.sort(order=['recTime'])
-        ps.sort(order=['recTime'])
-        po.sort(order=['recTime'])
-        pf.sort(order=['recTime'])
+        pd.sort(order=['pid','startTime','recTime'])
+        ps.sort(order=['pid','startTime','recTime'])
+        po.sort(order=['pid','startTime','recTime'])
+        pf.sort(order=['pid','startTime','recTime'])
+
 
         ## detect which filesystems were written to and which were read from
         fs_masks = {}
@@ -140,6 +141,7 @@ class HostProcesses:
         else:
             fsData = np.empty(0, dtype=np.dtype(fs_types))
 
+        
         # convert to pandas DataFrames for more efficient
         # grouping and summarization    
         pd = pandas.DataFrame(pd)#.sort(['recTime','recTimeUSec'])

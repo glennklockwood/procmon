@@ -49,22 +49,9 @@ class RawH5Parser:
         fd.close()
 
     def __detectParents(self, data): 
-        ## identify pids which have ancestors, done by transposing pidv
-        ## vector and subtracting ppid vector, and looking for indices
-        ## that are zero-value
-        ## the underlying assumption is that we won't see any duplication
-        ## of pids (or ppids) at this point
-        def detectChildProcesses(pids, ppids):
-            out = []
-            it = np.nditer([pids, ppids], ['external_loop'], [['readonly'], ['readonly']],
-                op_axes=[range(pids.ndim)+[-1]*ppids.ndim, [-1]*pids.ndim+range(ppids.ndim)])
-            for (lpids, lppids) in it:
-                out.append(np.unique( lpids[np.nonzero(np.subtract(lpids,lppids) == 0)[0]]))
-            return np.unique(np.concatenate(out))
-
         parentPids = []
         if data.size > 0:
-            parentPids = detectChildProcesses(data['pid'], data['ppid'])
+            parentPids = np.unique(np.intersect1d(data['pid',data['ppid']]))
         isParent = np.zeros(shape=data.size, dtype=np.int32)
         for pid in parentPids:
             mask = data['pid'] == pid

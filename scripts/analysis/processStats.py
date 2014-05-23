@@ -30,6 +30,7 @@ housemon = np.vectorize(lambda x: bool(ishousemon.match(x)))
 base_idx = 0
 useful_commands = np.empty(shape=0, dtype='|S64')
 not_commands = np.empty(shape=0, dtype='|S64')
+hosts = np.empty(shape=0, dtype='|S64')
 parentBins = np.zeros(50, np.int64)
 leafBins = np.zeros(50, np.int64)
 durBins = np.zeros(22, np.int64)
@@ -51,6 +52,8 @@ while base_idx < dset_count:
         indices = {}
         for (idx,col) in enumerate(data.dtype.names):
             indices[col] = idx
+    hosts = np.unique(np.concatenate((data['host'], hosts)))
+    continue
 
     singleton = data['nObservations'] == 1
     ancestors = data['isParent'] == 1
@@ -86,6 +89,8 @@ while base_idx < dset_count:
     useful_commands = np.unique(np.concatenate((data['command'][useful], useful_commands)))
     not_commands = np.unique(np.concatenate((data['command'][notuseful], not_commands)))
 
+print "hosts:" , hosts
+sys.exit(0)
 print "USEFUL!"
 print useful_commands.size, list(useful_commands)
 print "\nNOT USEFUL!"
