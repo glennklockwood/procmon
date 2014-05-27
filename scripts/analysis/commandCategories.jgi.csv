@@ -20,7 +20,7 @@ jgi.KmerNormalize (ECC),,blast[pxn],bowtie2,merauder4.pl,align2.BBSplitter,pplac
 ,,,,ApplyGapPatches,,,,pls2fasta,chmod,ps,,,,
 ,,,,CloseUnipathGaps,,,,FilterReads,md5sum,top,,,,
 ,,,,spades,,,,FilterReads-P,btdownloadheadless,htop,,,,
-,,,,crass,,,,,h5repack,more,,,,
+,,,,crass,,,,GenomeAnalysisTK.jar,h5repack,more,,,,
 ,,,,cufflinks,,,,,bzip2,less,,,,
 ,,,,CommonPather,,,,,pbzip2,make,,,,
 ,,,,sga,,,,,unpigz,sort,,,,

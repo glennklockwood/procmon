@@ -4,13 +4,14 @@ import re
 import argparse
 from ConfigParser import SafeConfigParser
 from datetime import date,datetime,timedelta,time
-import pandas as pd
+import re
 
 import h5py
 import numpy as np
 from mpi4py import MPI
 
 import procmon
+import procmon.Scriptable
 
 werenull = 0
 cpu_sum = 0.
@@ -214,6 +215,17 @@ class Config:
             config.commandRemap = []
         config.commandRemap.extend(add) 
 
+    def __prepare_summary_dtype(self, config):
+        dtype_list = []
+        for dim in config.dimensions:
+            dtype_list.append((dim['name'], dim['type'],))
+        for s in config.summaries:
+            name = s['identifier']
+            dtype_list.append(('%s_count' % name,np.uint64,))
+            dtype_list.append(('%s_sum' % name, np.float64))
+            dtype_list.append(('%s_histogram' % name, '%du8' % (len(s['bins']) - 1)))
+        config.summaryDtype = np.dtype(dtype_list)
+
     def read_configuration(self, args):
         global procmonInstallBase
         yesterday = date.today() - timedelta(days=1)
@@ -246,6 +258,8 @@ class Config:
                 if section.startswith("commandRemap"):
                     self.__add_commandRemap(args, config.items(section))
 
+        self.__prepare_summary_dtype(args)
+
         parser = argparse.ArgumentParser(parents=[parser])
         parser.set_defaults(**defaults)
         parser.add_argument('-o','--output', type=str, help="Specify output summary filename", default='output.h5')
@@ -263,6 +277,155 @@ def choose_processes(rank, size, count):
     if (rank == size-1):
         end == count
     return (start,end)
+
+def sumSummaries(data):
+    item = np.zeros(1, dtype=data.dtype)
+    for col in data.dtype.names:
+        if col.endswith('_count') or col.endswith('_sum'):
+            item[col] = np.sum(data[col])
+        elif col.endswith('_histogram'):
+            item[col] = np.sum(data[col], axis=0)
+    return item
+
+def mergeSummaries(a, b, config):
+    columns = [dim['name'] for dim in config.dimensions]
+    data = np.concatenate([a,b])
+    return mergeDataset(data, columns)
+
+def mergeDataset(data, keys):
+    data.sort(order=keys)
+    groups = np.unique(data[keys])
+    ret = np.zeros(groups.size, dtype=data.dtype)
+    startIdx = 0
+    endIdx = 0
+    retIdx = 0
+    lastItem = None
+    while endIdx < data.size:
+        if data[keys][endIdx] != lastItem:
+            if endIdx != 0:
+                item = data[startIdx]
+                if endIdx-startIdx > 1:
+                    item = sumSummaries(data[startIdx:endIdx])
+                    for c in keys:
+                        item[c] = data[c][startIdx]
+                ret[retIdx] = item
+                retIdx += 1
+            lastItem = data[keys][endIdx]
+            startIdx = endIdx
+        endIdx += 1
+    item = data[startIdx]
+    if endIdx - startIdx > 1:
+        item = sumSummaries(data[startIdx:endIdx])
+        for c in keys:
+            item[c] = data[c][startIdx]
+    ret[retIdx] = item
+    retIdx += 1
+    return ret
+
+def mpiMergeDataset(data, keys, comm, mpi_rank, mpi_size):
+    ## the goal here is to have each rank merge a segment of the data
+    ## then transmit that data globally
+    data.sort(order=keys)  ## assume all ranks have the same data
+    groups = np.unique(data[keys])
+    (gStart,gEnd) = choose_processes(mpi_rank, mpi_size, groups.size)
+    sMask = data[keys] == groups[gStart]
+    dataStart = np.min(np.nonzero(sMask)[0])
+    dataEnd = data.size
+    if gEnd < groups.size:
+        eMask = data[keys] == groups[gEnd]
+        dataEnd = np.min(np.nonzero(eMask)[0])
+    myData = mergeDataset(data[dataStart:dataEnd], keys)
+    allsizes = comm.allgather(myData.size)
+    counts = np.array(allsizes)
+    offsets = np.hstack((0, np.cumsum(counts)))[0:-1]
+    alldata = np.zeros(np.sum(allsizes), dtype=data.dtype)
+    mpi_dtype = generate_mpi_type_simple(myData.dtype)
+    comm.Allgatherv(
+        [myData, myData.size, mpi_dtype],
+        [alldata, counts, offsets, mpi_dtype]
+    )
+    return alldata
+
+
+def mpiMergeSummaries(summary, config, comm, mpi_rank, mpi_size):
+    print "[%d] Starting mpi merge with %d items" % (mpi_rank, summary.size)
+    columns = [dim['name'] for dim in config.dimensions]
+    allsizes = comm.allgather(summary.size)
+    mpi_dtype = generate_mpi_type_simple(summary.dtype)
+    alldata = np.zeros(np.sum(allsizes), dtype=summary.dtype)
+    counts = np.array(allsizes)
+    offsets = np.hstack((0, np.cumsum(counts)))[0:-1]
+    comm.Allgatherv(
+        [summary, summary.size, mpi_dtype],
+        [alldata, counts, offsets, mpi_dtype]
+    )
+    print "[%d] received data, starting sort" % mpi_rank
+    alldata.sort(order=columns)
+    groups = np.unique(alldata[columns])
+    print "[%d] have %d groups, starting masking and selection" % (mpi_rank, groups.size)
+    (gStart,gEnd) = choose_processes(mpi_rank, mpi_size, groups.size)
+    sMask = alldata[columns] == groups[gStart]
+    dataStart = np.min(np.nonzero(sMask)[0])
+    dataEnd = alldata.size
+    if gEnd < groups.size:
+        eMask = alldata[columns] == groups[gEnd]
+        dataEnd = np.min(np.nonzero(eMask)[0])
+    print "[%d] finished masking, starting merge" % (mpi_rank)
+    myData = mergeSummaries(alldata[dataStart:dataEnd], np.empty(0, dtype=summary.dtype), config)
+    print "[%d] merge complete" % mpi_rank
+    return myData
+
+def identify_scripts(processes):
+    """For known scripting interpreter processes, work out what the executed script was."""
+    executables = np.unique(processes['exePath'])
+    scripts = np.zeros(processes.size, 'S1024')
+
+    prefixes = ["perl","python","ruby","bash","sh","tcsh","csh","java"]
+    for exe in executables:
+        executable = os.path.split(exe)[1]
+        scriptable = False
+        for prefix in prefixes:
+            pattern = "^%s.*" % prefix
+            if re.match(pattern, executable) is not None:
+                scriptable = True
+        if scriptable:
+            selection = processes['exePath'] == exe
+            if np.sum(selection) == 0:
+                continue
+            indices = np.nonzero(selection)[0]
+            for idx in indices:
+                args = (processes['cmdArgs'][idx]).split("|")
+                script = procmon.Scriptable.Scriptable(executable, args[1::])
+                scripts[idx] = script
+    processes['script'] = scripts
+    return scripts
+
+def identify_userCommand(processes, scripts):
+    """ Use a simple heuristic to identify the intended command for each process
+        depends on indentify_scripts already having been run """
+
+    execCommand = np.zeros(processes.size, 'S1024')
+    command = np.zeros(processes.size, 'S1024')
+    getExecCommand = np.vectorize(lambda x: x.split('/')[-1])
+    execCommand = getExecCommand(processes['exePath'])
+    command[:] = getExecCommand(scripts)
+    mask = (command == "COMMAND") | (command == "")
+    command[mask] = execCommand[mask]
+    processes['command'] = command
+    processes['execCommand'] = execCommand
+    return (command,execCommand)
+
+def fixType(rawdata):
+    dtype_list = []
+    for key in rawdata.dtype.fields:
+        if key in ('script','execCommand','command'):
+            dtype_list.append( (key, 'S1024',) )
+        else:
+            dtype_list.append( (key, rawdata.dtype.fields[key][0],) )
+    data = np.zeros(rawdata.size, dtype=np.dtype(dtype_list))
+    for col in rawdata.dtype.names:
+        data[col] = rawdata[col]
+    return data
 
 def summarizeH5(filename, config):
     global werenull
@@ -292,6 +455,8 @@ def summarizeH5(filename, config):
     base_idx = start
 
     useful_summary = None
+    nonuseful_summary = None
+    useful_summary_padded = None
     while base_idx < end:
         limit = base_idx + 10000
         limit = min(limit, end)
@@ -299,17 +464,24 @@ def summarizeH5(filename, config):
         print "[%d] read %d:%d of %d" % (mpi_rank, base_idx, limit, end)
         base_idx = limit
 
-        cpu_nan = np.isnan(data['cputime_net'])
-        if np.sum(cpu_nan) > 0:
-            print "cpu_nan", data[cpu_nan]
-
-        data = data[np.invert(cpu_nan)]
+        ## repair some defects in the current system...
+        data['cputime_net'] = (data['utime_net'] + data['stime_net'])/100.
+        scripts = identify_scripts(data)
+        (command,execCommand) = identify_userCommand(data, scripts)
 
         ## remap any commands:
         for cmdR in config.commandRemap:
             column, search, replace = cmdR
             searchfxn = np.vectorize(lambda x: search.match(x) is not None)
-            mask = searchfxn(data[column])
+            mask = None
+            if column == "script":
+                mask = searchfxn(scripts)
+            elif column == "command":
+                mask = searchfxn(command)
+            elif column == "execCommand":
+                mask = searchfxn(execCommand)
+            else:
+                mask = searchfxn(data[column])
             if np.sum(mask) > 0:
                 searchrep = np.vectorize(lambda x: search.sub(replace, x))
                 data['command'][mask] = searchrep(data[column][mask])
@@ -322,11 +494,21 @@ def summarizeH5(filename, config):
         ancestors = data['isParent'] == 1
         highVol   = np.greater_equal(data['volatilityScore'], 0.1)
         highCpu   = np.greater_equal(data['cputime_net'], data['duration']*0.5)
+        reallyHighCpu = np.greater_equal(data['cputime_net'], 86400*16) ## just ignore single process that used more than 1 day of cpu
         useful = highVol | ~ancestors | highCpu
-
-        data = data[useful]
+        if np.sum(reallyHighCpu) > 0:
+            print "[%d] FOUND %d really high cpu records." % (rank, np.sum(reallyHighCpu))
+            useful &= ~reallyHighCpu ## screen out the really high cpu records
+        reallyHighDuration = np.greater_equal(data['duration'], 86700)
+        if np.sum(reallyHighDuration) > 0:
+            print "[%d] FOUND %d really high duration records. " % (rank, np.sum(reallyHighDuration))
+            useful &= ~reallyHighDuration
 
         global_rows += data.size
+
+        scriptMask = data["command"] == "8224698"
+        if np.sum(scriptMask) > 0:
+            print data[scriptMask]
 
         ## if there are any negative durations, fix those
         negDuration = data['duration'] < 0.
@@ -341,14 +523,45 @@ def summarizeH5(filename, config):
 
         cpu_sum += np.sum(data['cputime_net'])
 
+        cmdMask = data['command'] == "blastal"
+        if np.sum(cmdMask) > 0:
+            print data[cmdMask]
 
-        l_useful_summary = summarizeData_pd(data, config)
 
+        l_useful_summary = summarizeData(data[useful], config)
         if useful_summary is None:
             useful_summary = l_useful_summary
         else:
-            useful_summary = l_useful_summary.combineAdd(useful_summary)
-        print "Summary shape: ", useful_summary.shape
+            useful_summary = mergeSummaries(useful_summary, l_useful_summary, config)
+        print "[%d] useful summary shape: " % mpi_rank, useful_summary.shape
+
+        l_nonuseful_summary = summarizeData(data[np.invert(useful)], config)
+        if nonuseful_summary is None:
+            nonuseful_summary = l_nonuseful_summary
+        else:
+            nonuseful_summary = mergeSummaries(nonuseful_summary, l_nonuseful_summary, config)
+        print "[%d] nonuseful summary shape: " % mpi_rank, nonuseful_summary.shape
+        if nonuseful_summary.size == 0:
+            nonuseful_summary = None
+
+        old_duration = data['duration'].copy()
+        zerodur_mask = old_duration == 0.
+        temp_duration = old_duration.copy()
+        old_cputime = data['cputime_net'].copy()
+        temp_duration[zerodur_mask] = 1.0
+        # pad duration to try to account for procmon random sampling
+        data['duration'] += np.random.uniform(low = 0.0, high = 30.0, size = data.size)
+
+        # adjust a few of the rate counters based on average usage
+        data['cputime_net'] += (data['cputime_net']/temp_duration)*(data['duration'] - old_duration)
+        data['cputime_net'][zerodur_mask] = old_cputime[zerodur_mask]
+
+        l_useful_summary_padded = summarizeData(data[useful], config)
+        if useful_summary_padded is None:
+            useful_summary_padded = l_useful_summary_padded
+        else:
+            useful_summary_padded = mergeSummaries(useful_summary_padded, l_useful_summary_padded, config)
+        print "[%d] useful padded summary shape: " % mpi_rank, useful_summary_padded.shape
 
     #print "about to convert summary to numpy"
     #useful_summary = convert_np(useful_summary.reset_index(), config)
@@ -359,62 +572,78 @@ def summarizeH5(filename, config):
     print "total rows: ", global_rows
     print "group rows: ", groups_rows
     print "groups: ", found_groups
-    useful_summary.to_hdf(config.output, 'useful')
-    #output = h5py.File(config.output, 'w')
-    #dset = output.create_dataset('useful', (useful_summary.size,), dtype=useful_summary.dtype)
-    #dset[:] = useful_summary[:]
-    #output.close()
+    if useful_summary is not None:
+        useful_summary = mpiMergeSummaries(useful_summary, config, comm, mpi_rank, mpi_size)
+    if nonuseful_summary is not None:
+        nonuseful_summary = mpiMergeSummaries(nonuseful_summary, config, comm, mpi_rank, mpi_size)
+    if useful_summary_padded is not None:
+        useful_summary_padded = mpiMergeSummaries(useful_summary_padded, config, comm, mpi_rank, mpi_size)
 
-def convert_np(summary, config):
-    types = []
-    for dim in config.dimensions:
-        types.append((dim['column'], dim['type'],))
-    for s in config.summaries:
-        types.append(('%s_count'%s['identifier'], np.uint64,))
-        types.append(('%s_sum'%s['identifier'], np.float64,))
-        types.append(('%s_histogram'%s['identifier'], '%di8' % (len(s['bins'])-1),))
-    mtype = np.dtype(types)
-    data = np.zeros(shape=summary.shape[0], dtype=mtype)
-    for dim in config.dimensions:
-        data[dim['column']] = summary[dim['column']]
-    for s in config.summaries:
-        count = '%s_count' % s['identifier']
-        sumcol = '%s_sum' % s['identifier']
-        histogram = '%s_histogram' % s['identifier']
-        data[count] = summary[count]
-        data[sumcol] = summary[sumcol]
-        for idx,hist in enumerate(summary[histogram]):
-            data[histogram][idx] = np.array(hist, 'i8')
-    return data
+    output = h5py.File(config.output, 'w', driver='mpio', comm=comm)
+    def writeSummary(name, summary, comm, mpi_rank, mpi_size):
+        allsizes = comm.allgather(summary.size)
+        dset = output.create_dataset(name, (np.sum(allsizes),), dtype=summary.dtype)
+        offsets = np.hstack((0,np.cumsum(allsizes)))[0:-1]
+        start = offsets[mpi_rank]
+        end = start + summary.size
+        dset[start:end] = summary[:]
+    if useful_summary is not None:
+        writeSummary('useful', useful_summary, comm, mpi_rank, mpi_size)
+    if useful_summary_padded is not None:
+        writeSummary('usefulpadded', useful_summary_padded, comm, mpi_rank, mpi_size)
+    if nonuseful_summary is not None:
+        writeSummary('nonuseful', nonuseful_summary, comm, mpi_rank, mpi_size)
+    output.close()
 
 def summaryFunc(data, config):
     global werenull
     global group_cpu_sum
     global groups_rows
-    ret = {}
-    groups_rows += data.shape[0]
+    ret = np.zeros(1, dtype=config.summaryDtype)
+    groups_rows += data.size
     for s in config.summaries:
-        empty = pd.isnull(data[s['column']])
+        empty = np.isnan(data[s['column']])
         if np.sum(empty) > 0:
             data[s['column']][empty] = 0
             werenull += np.sum(empty)
         hist = np.histogram(np.array(data[s['column']]), bins=s['bins'])
-        sum = data[s['column']].sum()
-        count = np.sum(np.invert(pd.isnull(data[s['column']])))
+        sum = np.nansum(data[s['column']])
+        count = np.nansum(np.invert(np.isnan(data[s['column']])))
         ret['%s_count'%s['identifier']] = count
         ret['%s_sum'%s['identifier']] = sum
-        for idx in xrange(len(s['bins'])-1):
-            ret['%s_%d_hist' % (s['identifier'], idx)] = hist[0][idx]
+        ret['%s_histogram'%s['identifier']] = hist[0]
     group_cpu_sum += np.sum(data['cputime_net'])
-    return pd.Series(ret)
+    return ret
 
 
-def summarizeData_pd(data, config):
+def summarizeData(data, config):
     global found_groups
-    data = pd.DataFrame(data)
-    groups = data.groupby([dim['column'] for dim in config.dimensions])
-    found_groups += len(groups.groups)
-    summary = groups.apply(summaryFunc, config)
+    columns = [dim['column'] for dim in config.dimensions]
+    scolumns = [dim['name'] for dim in config.dimensions]
+
+    data.sort(order=columns)
+    lastItem = None
+    startIdx = 0
+    endIdx = 0
+    groupIdx = 0
+    nGroups = np.unique(data[columns]).size
+    summary = np.zeros(nGroups, dtype=config.summaryDtype)
+    while endIdx < data.size:
+        if data[columns][endIdx] != lastItem:
+            if endIdx != 0:
+                summary[groupIdx] = summaryFunc(data[startIdx:endIdx], config)
+                for (cIdx,col) in enumerate(columns):
+                    summary[scolumns[cIdx]][groupIdx] = data[col][startIdx]
+                groupIdx += 1
+            startIdx = endIdx
+            lastItem = data[columns][endIdx]
+        endIdx += 1
+    if endIdx != startIdx:
+        summary[groupIdx] = summaryFunc(data[startIdx:endIdx], config)
+        for (cIdx,col) in enumerate(columns):
+            summary[scolumns[cIdx]][groupIdx] = data[col][startIdx]
+        groupIdx += 1
+
     return summary
 
 
