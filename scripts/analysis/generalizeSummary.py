@@ -18,13 +18,14 @@ def main(args):
 	dataset = []
 	for filename in config.files:
 		fd = h5py.File(filename, 'r')
-		dset = fd['useful'][:]
+		dset = fd[config.summary][:]
 		dataset.append(dset)
 		fd.close()
 	dataset = np.concatenate(dataset)
 
 	login_mask = np.zeros(dataset.size, dtype=bool)
 	gens = {}
+	print "TOTAL CPU_SUM: ", np.sum(dataset['cpu_sum'])
 	## perform any needed generalizations
 	for gen in config.generalizations:
 		print "Starting on generalization: " + gen['name']
@@ -47,9 +48,9 @@ def main(args):
 			overall_mask |= mask
 			print "; (%d)" % np.sum(overall_mask)
 			gens[col][mask] = "category_%s" % catname
-		#if gen['other_category']:
-		#	overall_mask = np.invert(overall_mask)
-		#	gens[col][overall_mask] = "category:other"
+		if gen['other_category']:
+			overall_mask = np.invert(overall_mask)
+			gens[col][overall_mask] = "category_other"
 		print "have %s entries: " % col, np.unique(gens[col])
 
 	print
@@ -69,7 +70,7 @@ def main(args):
 					index_cols.append(idxcol)
 		remove_list = []
 		for col in analysis_data.dtype.names:
-			if col.endswith("_sum") or col.endswith("_count") or col.endswith("_hist") or col in index_cols:
+			if col.endswith("_sum") or col.endswith("_count") or col.endswith("_histogram") or col in index_cols:
 				pass
 			else:
 				remove_list.append(col)
@@ -95,19 +96,22 @@ def main(args):
 		print analysis_data.dtype.names
 		analysis_data = workloadAnalysis_pd.mpiMergeDataset(analysis_data, index_cols, comm, mpi_rank, mpi_size)
 		print "done. went from %d to %d entries" % (count, analysis_data.size)
+		print "[%d] cpu_sum after: " % mpi_rank, np.sum(analysis_data['cpu_sum'])
+
 		for col in index_cols:
 			print col, np.unique(analysis_data[col])
 
 		print "starting axis summarizations:"
 		for idx,axis in enumerate(analysis['axes']):
 			dtype_list = []
-			for name in analysis_data.dtype.names:
+			for (colidx,name) in enumerate(analysis_data.dtype.names):
 				if name in axis or name.endswith("_sum") or name.endswith("_count") or name.endswith("_histogram"):
-					dtype_list.append( (name, analysis_data[name].dtype,) )
+					dtype_list.append( (name, analysis_data.dtype[colidx],) )
 			axis_data = np.zeros(analysis_data.size, dtype=np.dtype(dtype_list))
 			for name in axis_data.dtype.names:
-				axis_data[name] = analysis_data[name].copy()
+				axis_data[name][:] = analysis_data[name].copy()
 			axis_data = workloadAnalysis_pd.mpiMergeDataset(axis_data, axis, comm, mpi_rank, mpi_size)
+			print "[%d] %s cpu_sum after axis summarization: " % (mpi_rank, analysis['axisNames'][idx]), np.sum(axis_data['cpu_sum'])
 			print "completed axis %s with %d records, writing data" % (analysis['axisNames'][idx], axis_data.size)
 			if mpi_rank == 0:
 				dset = fd.create_dataset('%s_%s' % (analysis['name'], analysis['axisNames'][idx]), (axis_data.size,), dtype=axis_data.dtype)

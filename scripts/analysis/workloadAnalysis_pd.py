@@ -15,8 +15,10 @@ import procmon.Scriptable
 
 werenull = 0
 cpu_sum = 0.
+selected_cpu_sum = 0.
 group_cpu_sum = 0.
 global_rows = 0
+selected_rows = 0
 found_groups = 0
 groups_rows = 0
 
@@ -100,6 +102,11 @@ class Config:
             add['bins'] = bins
         else:
             raise ValueError('Bins not specified for summary')
+        if 'units' in args:
+            add['units'] = args['units']
+        else:
+            add['units'] = ''
+            
         if not hasattr(config, 'summary'):
             setattr(config, 'summary', {})
         config.summary[add['identifier']] = add
@@ -274,8 +281,9 @@ def choose_processes(rank, size, count):
     count_per_rank = count / size
     start = rank*count_per_rank
     end = (rank+1)*count_per_rank
-    if (rank == size-1):
-        end == count
+    if rank == (size-1):
+        end = count
+    print "[%d] choose_processes: size: %d, count: %d, start: %d, end: %d" % (rank, size, count, start, end)
     return (start,end)
 
 def sumSummaries(data):
@@ -334,6 +342,7 @@ def mpiMergeDataset(data, keys, comm, mpi_rank, mpi_size):
     if gEnd < groups.size:
         eMask = data[keys] == groups[gEnd]
         dataEnd = np.min(np.nonzero(eMask)[0])
+    print "[%d] mpiMerge myRange: %d, %d, %d; %d, %d, %d" % (mpi_rank, dataStart, dataEnd, data.size, gStart, gEnd, groups.size)
     myData = mergeDataset(data[dataStart:dataEnd], keys)
     allsizes = comm.allgather(myData.size)
     counts = np.array(allsizes)
@@ -430,8 +439,10 @@ def fixType(rawdata):
 def summarizeH5(filename, config):
     global werenull
     global cpu_sum
+    global selected_cpu_sum
     global group_cpu_sum
     global global_rows
+    global selected_rows
     global found_groups
     global groups_rows
 
@@ -497,18 +508,14 @@ def summarizeH5(filename, config):
         reallyHighCpu = np.greater_equal(data['cputime_net'], 86400*16) ## just ignore single process that used more than 1 day of cpu
         useful = highVol | ~ancestors | highCpu
         if np.sum(reallyHighCpu) > 0:
-            print "[%d] FOUND %d really high cpu records." % (rank, np.sum(reallyHighCpu))
+            print "[%d] FOUND %d really high cpu records." % (mpi_rank, np.sum(reallyHighCpu))
             useful &= ~reallyHighCpu ## screen out the really high cpu records
         reallyHighDuration = np.greater_equal(data['duration'], 86700)
         if np.sum(reallyHighDuration) > 0:
-            print "[%d] FOUND %d really high duration records. " % (rank, np.sum(reallyHighDuration))
+            print "[%d] FOUND %d really high duration records. " % (mpi_rank, np.sum(reallyHighDuration))
             useful &= ~reallyHighDuration
 
         global_rows += data.size
-
-        scriptMask = data["command"] == "8224698"
-        if np.sum(scriptMask) > 0:
-            print data[scriptMask]
 
         ## if there are any negative durations, fix those
         negDuration = data['duration'] < 0.
@@ -522,11 +529,8 @@ def summarizeH5(filename, config):
                 data[dim['column']][nanmask] = "Unknown"
 
         cpu_sum += np.sum(data['cputime_net'])
-
-        cmdMask = data['command'] == "blastal"
-        if np.sum(cmdMask) > 0:
-            print data[cmdMask]
-
+        selected_cpu_sum += np.sum(data[useful]['cputime_net'])
+        selected_rows += np.sum(useful)
 
         l_useful_summary = summarizeData(data[useful], config)
         if useful_summary is None:
@@ -534,6 +538,7 @@ def summarizeH5(filename, config):
         else:
             useful_summary = mergeSummaries(useful_summary, l_useful_summary, config)
         print "[%d] useful summary shape: " % mpi_rank, useful_summary.shape
+        continue
 
         l_nonuseful_summary = summarizeData(data[np.invert(useful)], config)
         if nonuseful_summary is None:
@@ -568,8 +573,10 @@ def summarizeH5(filename, config):
     #print "done.  about to write output %s" % config.output
     print "found %d null values (set to zero!)" % werenull
     print "cpu_sum %f" % cpu_sum
+    print "selected_cpu_sum %f" % selected_cpu_sum
     print "group_cpu_sum %f" % group_cpu_sum
     print "total rows: ", global_rows
+    print "selected rows: ", selected_rows
     print "group rows: ", groups_rows
     print "groups: ", found_groups
     if useful_summary is not None:

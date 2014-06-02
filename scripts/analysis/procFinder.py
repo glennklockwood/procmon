@@ -45,9 +45,9 @@ process_dt_list = [
         ('origStartTime',np.uint64),
         ('startTime_baseline', np.float64),
         ('execName', 'S256'),
-        ('command', 'S64'),
-        ('execCommand','S64'),
-        ('script','S64'),
+        ('command', 'S256'),
+        ('execCommand','S256'),
+        ('script','S1024'),
         ('cmdArgBytes', np.uint64),
         ('cmdArgs', 'S1024'),
         ('exePath', 'S1024'),
@@ -548,11 +548,11 @@ def identify_userCommand(processes):
         depends on indentify_scripts already having been run """
 
     getExecCommand = np.vectorize(lambda x: x.split('/')[-1])
-    processes['execCommand'][:] = getExecCommand(processes['exePath'])
+    processes['execCommand'] = getExecCommand(processes['exePath'])
     command = getExecCommand(processes['script'])
-    mask = (command[:] == "COMMAND") | (command == "")
+    mask = (command == "COMMAND") | (command == "")
     command[mask] = processes['execCommand'][mask]
-    processes['command'][:] = command[:]
+    processes['command'] = command
 
     for search in commands_modifications:
         (column,replace) = commands_modifications[search]
