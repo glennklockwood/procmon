@@ -7,11 +7,11 @@ OPTION ( USE_REDUCER_HDF5 "Use hdf5 I/O for reducer" ON )
 OPTION ( BUILD_ONLY_PROCMON "Only build the procmon sensor" OFF )
 OPTION ( BUILD_STATIC_PROCMON "Build the procmon sensor statically" OFF )
 OPTION ( BUILD_PROCMON_COLLECTION_TOOLS "Build the full procmon collection tools suite" ON )
+OPTION ( PROCMON_DAEMONIZE_NOSETSID "Build procmon sensor to not call setsid" OFF )
 
 IF ( BUILD_ONLY_PROCMON )
     SET ( BUILD_PROCMON_COLLECTION_TOOLS OFF )
 ENDIF ( BUILD_ONLY_PROCMON )
-
 
 SET ( PROCMON_FREQUENCY 30 CACHE STRING "Default number of seconds between procmon polling intervals" )
 SET ( PROCMON_INTIAL_PHASE 30 CACHE STRING "Default number of seconds for altered polling frequency initial phase" )
@@ -93,6 +93,10 @@ ENDIF ( USE_RABBITMQ_C )
 ADD_EXECUTABLE( procmon procmon.cpp ProcIO.procmon.cpp )
     SET_TARGET_PROPERTIES( procmon PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
 INSTALL_TARGETS( /bin procmon)
+
+IF ( PROCMON_DAEMONIZE_NOSETSID )
+    append_compile_flags_to_target( procmon -DNOSETSID=1 )
+ENDIF ( PROCMON_DAEMONIZE_NOSETSID )
 
 IF ( BUILD_SECURED )
     ADD_EXECUTABLE( procmon.secured procmon.cpp ProcIO.procmon.cpp )

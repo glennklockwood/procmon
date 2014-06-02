@@ -37,17 +37,23 @@
 
 struct all_data_t {
     int *pids;
+    int *keepflag;
     procstat *tmp_procStat;
+    procdata *tmp_procData;
     procstat *procStat;
     procdata *procData;
     procfd *procFD;
     int n_pids;
+    int n_keepflag;
     int n_tmp_procStat;
+    int n_tmp_procData;
     int n_procStat;
     int n_procData;
     int n_procFD;
     int capacity_pids;
+    int capacity_keepflag;
     int capacity_tmp_procStat;
+    int capacity_tmp_procData;
     int capacity_procStat;
     int capacity_procData;
     int capacity_procFD;
@@ -379,18 +385,14 @@ Arguments:
          pid: pid in /proc to examine
       tgtGid: if a gid for monitoring is known, then that gid should be specified
     statData: procstat datastruct to begin populating
-     gidList: if monitoring-gid is unknown, array to populate for further analysis
-gidListLimit: integral limit of ints in gidList
 
-Effects: populates some fields in statData; if tgtGid < 0 AND gidList!=NULL 
-AND gidListLimit > 0 then gidList will be populated with the process gids up 
-to gidListLimit entries
+Effects: populates some fields in statData;
 
 Returns: number of Groups matching tgtGid criteria (all groups match if 
 tgtGid < 0); -1 for file error error
 
 */
-int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int gidListLimit) {
+int parseProcStatus(int pid, int tgtGid, procstat* statData) {
 	char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
@@ -453,10 +455,8 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
 						statData->cpusAllowed = atoi(sptr);
 					} else if (stage > 0 && strcmp(label, "Groups") == 0) {
                         int gid = atoi(sptr);
-                        if (tgtGid > 0 && tgtGid == gid) {
+                        if (tgtGid == gid) {
                             retVal++;
-                        } else if (tgtGid < 0 && gidList != NULL && stage != gidListLimit) {
-                            gidList[retVal++] = gid;
                         }
                     }
 					nextStage++;
@@ -474,7 +474,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int g
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory
  */
-int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pageSize, time_t boottime) {
+int searchProcFs(int ppid, int tgtGid, int tgtSid, int tgtPgid, int maxfd, long clockTicksPerSec, long pageSize, time_t boottime) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char buffer[BUFFER_SIZE];
@@ -488,6 +488,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	int nstart = 0;
 	struct timeval before;
 	int foundParent;
+    int readStatFirst = (tgtSid > 0 || tgtGid > 0) ? 1 : 0;
 
 	if (gettimeofday(&before, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
@@ -517,6 +518,15 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	}
 	closedir(procDir);
 
+    if (npids >= all_data.capacity_keepflag || all_data.keepflag == NULL) {
+        int talloc = npids > 511 ? npids*2 : 512;
+        all_data.keepflag = (int*) realloc(all_data.keepflag, sizeof(int)*talloc);
+        if (all_data.keepflag == NULL) {
+            fprintf(stderr, "FAILED to allocate memory for procid flag cache for %d pids (%lu bytes)\n", talloc, sizeof(int)*talloc);
+            return -1;
+        }
+        all_data.capacity_keepflag = talloc;
+    }
     if (npids > all_data.capacity_tmp_procStat || all_data.tmp_procStat == NULL) {
         int talloc = npids > 511 ? npids*2 : 512;
         all_data.tmp_procStat = (procstat*) realloc(all_data.tmp_procStat, sizeof(procstat)*talloc);
@@ -526,18 +536,39 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
         }
         all_data.capacity_tmp_procStat = talloc;
     }
+    if (readStatFirst && (npids > all_data.capacity_tmp_procData || all_data.tmp_procData == NULL)) {
+        int talloc = npids > 511 ? npids * 2 : 512;
+        all_data.tmp_procData = (procdata *) realloc(all_data.tmp_procData, sizeof(procdata)*talloc);
+        if (all_data.tmp_procData == NULL) {
+            fprintf(stderr, "FAILED to allocate memory for initial procdata cache for %d pids (%lu bytes)\n", talloc, sizeof(procdata)*talloc);
+            return -1;
+        }
+        all_data.capacity_tmp_procData = talloc;
+    }
     procstat *procStats = all_data.tmp_procStat;
+    procdata  *procDatas = all_data.tmp_procData;
 	memset(procStats, 0, sizeof(procstat)*npids);
+    memset(all_data.keepflag, 0, sizeof(int)*npids);
+    if (readStatFirst) {
+        memset(procDatas, 0, sizeof(procdata)*npids);
+    }
 
-	for (idx = 0; idx < npids; idx++) {
-		tgt_pid = all_data.pids[idx];	
-		procStats[idx].state = parseProcStatus(tgt_pid, tgtGid, &(procStats[idx]), NULL, 0);
-	}
+
+    if (readStatFirst) {
+        for (idx = 0; idx < npids; idx++) {
+            tgt_pid = all_data.pids[idx];	
+		    parseProcStat(tgt_pid, &(procStats[idx]), &(procDatas[idx]), boottime, clockTicksPerSec);
+        }
+    } else {
+        for (idx = 0; idx < npids; idx++) {
+            tgt_pid = all_data.pids[idx];	
+            all_data.keepflag[idx] = parseProcStatus(tgt_pid, tgtGid, &(procStats[idx]));
+        }
+    }
 
 	/* === Discover processes of interest === 
 	 * Phase 1:  find target parent process, and all the processes with the target
-	 * gid (if applicable).  Mark each process that is found by overloading the
-	 * state field.
+	 * gid (if applicable).  Mark each process that is found by setting keepflags.
 	 * store interesting pids in the pids array, and their procstat indices in the
 	 * indices array */
 	int indices[npids];
@@ -545,8 +576,12 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	foundParent = 0;
     ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
-		if (procStats[idx].pid == ppid || procStats[idx].state > 0) {
-			procStats[idx].state = 1;
+		if (procStats[idx].pid == ppid ||
+            all_data.keepflag[idx] > 0 ||
+            (tgtSid > 0 && procStats[idx].session == tgtSid) ||
+            (tgtPgid > 0 && procStats[idx].pgrp == tgtPgid)
+        ) {
+			all_data.keepflag[idx] = 1;
 			all_data.pids[ntargets] = procStats[idx].pid;
 			indices[ntargets++] = idx;
 		}
@@ -559,7 +594,7 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 	}
 	/* === Discover processes of interest ===
 	 * Phase 2: loop through all processes looking to find previously 
-	 * undiscovered (state == 0) pids which inherit from any of the already-
+	 * undiscovered (keepflag == 0) pids which inherit from any of the already-
 	 * found processes (indices/pids up to ntargets); interate until covergence
 	 */
 	nstart = 0;
@@ -569,9 +604,9 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		nNewTargets = ntargets;
 		for (idx = 0; idx < npids; idx++) {
 			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
-				if (procStats[idx].ppid == all_data.pids[innerIdx] && procStats[idx].state == 0) {
+				if (procStats[idx].ppid == all_data.pids[innerIdx] && all_data.keepflag[idx] == 0) {
 					all_data.pids[nNewTargets] = procStats[idx].pid;
-					procStats[idx].state = 1;
+					all_data.keepflag[idx] = 1;
 					indices[nNewTargets] = idx;
 					nNewTargets++;
 					nchange++;
@@ -621,7 +656,12 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
     for (idx = 0; idx < ntargets; idx++) {
         memcpy(&(all_data.procStat[idx]), &(procStats[indices[idx]]), sizeof(procstat));
     }
-
+    /* if using session id matching, copy procDatas as well */
+    if (readStatFirst) {
+        for (idx = 0; idx < ntargets; idx++) {
+            memcpy(&(all_data.procData[idx]), &(procDatas[indices[idx]]), sizeof(procdata));
+        }
+    }
 
 	/* for each pid, capture:
 	 *   io data, stat values, exe, cwd
@@ -632,8 +672,13 @@ int searchProcFs(int ppid, int tgtGid, int maxfd, long clockTicksPerSec, long pa
 		procstat* statData = &(all_data.procStat[idx]);
         procdata* temp_procData = &(all_data.procData[idx]); 
 
-		/* read stat */
-		parseProcStat(tgt_pid, statData, temp_procData, boottime, clockTicksPerSec);
+        if (readStatFirst) { 
+            /* read status */
+            parseProcStatus(tgt_pid, tgtGid, statData);
+        } else {
+		    /* read stat */
+		    parseProcStat(tgt_pid, statData, temp_procData, boottime, clockTicksPerSec);
+        }
 
         /* populate time records */
         temp_procData->recTime = before.tv_sec;
@@ -743,10 +788,12 @@ static void daemonize() {
 	}
 	umask(077);
 
+#ifndef NOSETSID
 	sid = setsid();
 	if (sid < 0) {
 		exit(1);
 	}
+#endif
 
 	if ((chdir("/")) < 0) {
 		exit(1);
@@ -858,7 +905,7 @@ static void *reader_thread_start(void *) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
         if (cleanUpFlag == 0) {
-		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
+		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->tgtSid, config->tgtPgid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
         }
         if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Reader failed to unlock token.", err);
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait in late-loop", err);
@@ -1047,7 +1094,7 @@ int main(int argc, char** argv) {
         retCode = search_procfs_count;
 #else
         if (cleanUpFlag == 0) {
-		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
+		    retCode = searchProcFs(config->targetPPid, config->tgtGid, config->tgtSid, config->tgtPgid, config->maxfd, config->clockTicksPerSec, config->pageSize, config->boottime);
         }
 #endif
 		if (retCode <= 0) {

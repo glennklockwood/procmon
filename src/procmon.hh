@@ -28,7 +28,6 @@
 #endif
 
 time_t getBootTime();
-int parseProcStatus(int pid, int tgtGid, procstat* statData, int* gidList, int gidListLimit);
 int fileFillBuffer(FILE* fp, char* buffer, int buffSize, char** sptr, char** ptr, char** eptr);
 
 class ProcmonException : public std::exception {
@@ -65,6 +64,8 @@ public:
 
     /* Derived monitoring inputs */
     int tgtGid;
+    int tgtSid;
+    int tgtPgid;
     long clockTicksPerSec;
     long pageSize;
     time_t boottime;
@@ -152,6 +153,8 @@ public:
             {"ppid", required_argument, 0, 'p'},
             {"group_min", required_argument, 0, 'g'},
             {"group_max", required_argument, 0, 'G'},
+            {"sid", optional_argument, 0, 's'},
+            {"pgid", optional_argument, 0, 'l'},
             {"fd_max", required_argument, 0, 'W'},
             {"identifier", required_argument, 0, 'I'},
             {"subidentifier", required_argument, 0, 'S'},
@@ -174,7 +177,7 @@ public:
             { 0, 0, 0, 0},
         };
         int c;
-        string getopt_str = "chVvdf:i:F:p:W:g:G:I:S:o:q:D:";
+        string getopt_str = "chVvdf:i:F:p:W:g:G:s::l::I:S:o:q:D:";
 #ifdef USE_AMQP
         getopt_str += "H:P:E:Q:U:Y:R:";
 #endif
@@ -288,6 +291,28 @@ public:
                         usage(1);
                     }
                     break;
+                case 's':
+                    if (optarg != NULL) {
+                        tgtSid = atoi(optarg);
+                        if (tgtSid <= 1) {
+                            cerr << "specified sid must be at least 1!" << endl;
+                            usage(1);
+                        }
+                    } else {
+                        tgtSid = getsid(getpid());
+                    }
+                    break;
+                case 'l':
+                    if (optarg != NULL) {
+                        tgtPgid = atoi(optarg);
+                        if (tgtPgid <= 1) {
+                            cerr << "specified pgid must be at least 1!" << endl;
+                            usage(1);
+                        }
+                    } else {
+                        tgtPgid = getpgid(getpid());
+                    }
+                    break;
                 case 'I': identifier = string(optarg); break;
                 case 'S': subidentifier = string(optarg); break;
                 case 'o': outputTextFilename = string(optarg); break;
@@ -348,9 +373,8 @@ public:
                 gid_range_min = gid_range_max;
                 gid_range_max = temp;
             }
-            procstat self;
-            int processGids[64];
-            int foundGroups = parseProcStatus(getpid(),-1,&self,processGids,64);
+            gid_t processGids[512];
+            int foundGroups = getgroups(512, processGids);
             for (int i = 0; i < foundGroups; i++) {
                 if (processGids[i] >= gid_range_min && processGids[i] <= gid_range_max) {
                     tgtGid = processGids[i];
@@ -358,7 +382,6 @@ public:
                 }
             }
         }
-
 	}
 
     void usage(int err_code) {
@@ -386,12 +409,20 @@ public:
         printf("                                          seconds)\n");
         printf("  -F [ --initialfrequency ] integer (=%02d) Time elapsed between measurements\n", DEFAULT_INITIAL_PHASE_FREQUENCY);
         printf("                                          during initial phase (in seconds)\n");
+        printf("\n");
+        printf("Process Matching Options:\n");
         printf("  -p [ --ppid ] integer (=%d)              Parent process ID of monitorying\n", 1);
         printf("                                          hierarchy\n");
         printf("  -g [ --group_min ] integer              Minimum group id in GridEngine gid\n");
         printf("                                          range (second group process ident)\n");
         printf("  -G [ --group_max ] integer              Maximum group id in GridEngine gid\n");
         printf("                                          range (second group process ident)\n");
+        printf("  -s [ --sid ] [optional session_id]      Track any process matching the \n");
+        printf("                                          specified session id. Use self with just -s\n");
+        printf("  -l [ --pgrp ] [optional process grp]    Track any process matching the \n");
+        printf("                                          specified pgrp id. Use self with just -l\n");
+        printf("\n");
+        printf("Process Context Options:\n");
         printf("  -I [ --identifier ] string (=%s)    identifier for tagging data\n", DEFAULT_IDENTIFIER);
         printf("  -S [ --subidentifier ] string (=%s)\n", DEFAULT_SUBIDENTIFIER);
         printf("                                          secondary identifier for tagging\n");
