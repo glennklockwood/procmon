@@ -82,6 +82,7 @@ public:
 #ifdef USE_AMQP
     /* AMQP options */
     std::string mqServer;
+    std::vector<std::string> mqServers;
     unsigned int mqPort;
 	std::string mqVHost;
 	std::string mqUser;
@@ -357,9 +358,19 @@ public:
             outputFlags |= OUTPUT_TYPE_HDF5;
         }
 #endif
+#ifdef USE_AMQP
+        char *servers = strdup(mqServer.c_str());
+        char *token = strtok(servers, ",");
+        while (token != NULL) {
+            mqServers.push_back(string(token));
+            token = strtok(NULL, ",");
+        }
+        free(servers);
+        mqServer = mqServers[rand()  % mqServers.size()];
         if (mqServer != "" && mqServer != "__NONE__") {
             outputFlags |= OUTPUT_TYPE_AMQP;
         }
+#endif
 
         if (outputFlags == 0) {
             cout << "No output mechanism specified (text, hdf5, or AMQP)" << endl;
