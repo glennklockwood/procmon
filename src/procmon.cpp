@@ -455,7 +455,7 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData) {
 						statData->cpusAllowed = atoi(sptr);
 					} else if (stage > 0 && strcmp(label, "Groups") == 0) {
                         int gid = atoi(sptr);
-                        if (tgtGid == gid) {
+                        if (tgtGid > 0 && tgtGid == gid) {
                             retVal++;
                         }
                     }
@@ -488,7 +488,7 @@ int searchProcFs(int ppid, int tgtGid, int tgtSid, int tgtPgid, int maxfd, long 
 	int nstart = 0;
 	struct timeval before;
 	int foundParent;
-    int readStatFirst = (tgtSid > 0 || tgtGid > 0) ? 1 : 0;
+    int readStatFirst = (tgtSid > 0 || tgtPgid > 0) ? 1 : 0;
 
 	if (gettimeofday(&before, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
@@ -552,7 +552,6 @@ int searchProcFs(int ppid, int tgtGid, int tgtSid, int tgtPgid, int maxfd, long 
     if (readStatFirst) {
         memset(procDatas, 0, sizeof(procdata)*npids);
     }
-
 
     if (readStatFirst) {
         for (idx = 0; idx < npids; idx++) {
