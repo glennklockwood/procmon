@@ -361,12 +361,13 @@ public:
 #ifdef USE_AMQP
         char *servers = strdup(mqServer.c_str());
         char *token = strtok(servers, ",");
+        srand(getpid() | time(NULL));
         while (token != NULL) {
             mqServers.push_back(string(token));
             token = strtok(NULL, ",");
         }
         free(servers);
-        mqServer = mqServers[rand()  % mqServers.size()];
+        mqServer = mqServers[rand() % mqServers.size()];
         if (mqServer != "" && mqServer != "__NONE__") {
             outputFlags |= OUTPUT_TYPE_AMQP;
         }

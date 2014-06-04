@@ -763,10 +763,15 @@ int searchProcFs(int ppid, int tgtGid, int tgtSid, int tgtPgid, int maxfd, long 
 static void craylock() {
     int fd = open("/tmp/procmon", O_CREAT, S_IRWXU);
     int lock;
+    int rand_pause = 0;
     if (fd < 0) {
         exit(0);
     }
-    lock = flock(fd, LOCK_EX | LOCK_NB);
+    /*srand(getpid() | time(NULL));
+    rand_pause = rand() % 30;
+    sleep(rand_pause);*/
+    
+    lock = flock(fd, LOCK_EX);
     if (lock < 0) {
         exit(0);
     }
@@ -1038,8 +1043,6 @@ int main(int argc, char** argv) {
     if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
 
 #endif
-
-	std::cout << "hostname: " << config->hostname << "; identifier: " << config->identifier << "; subidentifier: " << config->subidentifier << std::endl;
 
     std::vector<ProcIO*> outputMethods;
     if (config->outputFlags & OUTPUT_TYPE_TEXT) {
