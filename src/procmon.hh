@@ -50,6 +50,7 @@ public:
     int frequency;
     int initialFrequency;
     int initialPhase;
+    char *check_mpi;
     bool daemonize;
     bool verbose;
     bool craylock;
@@ -77,6 +78,7 @@ public:
 #ifdef USE_HDF5
     std::string outputHDF5Filename;
 #endif
+    bool noOutput;
     string pidfile;
 
 #ifdef USE_AMQP
@@ -101,6 +103,7 @@ public:
         initialPhase = DEFAULT_INITIAL_PHASE;
         clockTicksPerSec = 0;
         pageSize = 0;
+        check_mpi = NULL;
         daemonize = false;
         verbose = false;
         craylock = false;
@@ -125,6 +128,7 @@ public:
 		identifier = DEFAULT_IDENTIFIER;
 		subidentifier = DEFAULT_SUBIDENTIFIER;
         pidfile = "";
+        noOutput = false;
 
         /* Setup Context-derived values */
         char buffer[BUFFER_SIZE];
@@ -157,8 +161,10 @@ public:
             {"sid", optional_argument, 0, 's'},
             {"pgid", optional_argument, 0, 'l'},
             {"fd_max", required_argument, 0, 'W'},
+            {"mpirank", required_argument, 0, 'm'},
             {"identifier", required_argument, 0, 'I'},
             {"subidentifier", required_argument, 0, 'S'},
+            {"nooutput", no_argument, 0, 'n'},
             {"outputtext", required_argument, 0, 'o'},
             {"pid", required_argument, 0, 'q'},
 #ifdef USE_HDF5
@@ -178,7 +184,7 @@ public:
             { 0, 0, 0, 0},
         };
         int c;
-        string getopt_str = "chVvdf:i:F:p:W:g:G:s::l::I:S:o:q:D:";
+        string getopt_str = "chVvdm:nf:i:F:p:W:g:G:s::l::I:S:o:q:D:";
 #ifdef USE_AMQP
         getopt_str += "H:P:E:Q:U:Y:R:";
 #endif
@@ -203,6 +209,7 @@ public:
                 case 'c': craylock = true; break;
                 case 'v': verbose = true; break;
                 case 'd': daemonize = true; break;
+                case 'm': check_mpi = strdup(optarg); break;
                 case 'f':
                     frequency = atoi(optarg);
                     if (frequency <= 0) {
@@ -316,6 +323,7 @@ public:
                     break;
                 case 'I': identifier = string(optarg); break;
                 case 'S': subidentifier = string(optarg); break;
+                case 'n': noOutput = true; break;
                 case 'o': outputTextFilename = string(optarg); break;
 #ifdef USE_HDF5
                 case 'O':
@@ -373,6 +381,9 @@ public:
         }
 #endif
 
+        if (noOutput) {
+            outputFlags = OUTPUT_TYPE_NONE;
+        }
         if (outputFlags == 0) {
             cout << "No output mechanism specified (text, hdf5, or AMQP)" << endl;
             usage(1);
