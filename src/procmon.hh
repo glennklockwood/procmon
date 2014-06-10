@@ -62,6 +62,8 @@ public:
 #endif
     std::string identifier;
     std::string subidentifier;
+    char *identifier_env;
+    char *subidentifier_env;
 
     /* Derived monitoring inputs */
     int tgtGid;
@@ -111,6 +113,10 @@ public:
         outputFlags = DEFAULT_OUTPUT_FLAGS;
         tgtGid = 0;
         maxfd = 0;
+        identifier_env = NULL;
+        subidentifier_env = NULL;
+        tgtSid = 0;
+        tgtPgid = 0;
 #ifdef SECURED
         target_uid = -1;
         target_gid = -1;
@@ -164,6 +170,8 @@ public:
             {"mpirank", required_argument, 0, 'm'},
             {"identifier", required_argument, 0, 'I'},
             {"subidentifier", required_argument, 0, 'S'},
+            {"identifier_env", required_argument, 0, 'x'},
+            {"subidentifier_env", required_argument, 0, 'X'},
             {"nooutput", no_argument, 0, 'n'},
             {"outputtext", required_argument, 0, 'o'},
             {"pid", required_argument, 0, 'q'},
@@ -184,7 +192,7 @@ public:
             { 0, 0, 0, 0},
         };
         int c;
-        string getopt_str = "chVvdm:nf:i:F:p:W:g:G:s::l::I:S:o:q:D:";
+        string getopt_str = "chVvdm:nf:i:F:p:W:g:G:s::l::I:S:x:X:o:q:D:";
 #ifdef USE_AMQP
         getopt_str += "H:P:E:Q:U:Y:R:";
 #endif
@@ -323,6 +331,8 @@ public:
                     break;
                 case 'I': identifier = string(optarg); break;
                 case 'S': subidentifier = string(optarg); break;
+                case 'x': identifier_env = strdup(optarg); break;
+                case 'X': subidentifier_env = strdup(optarg); break;
                 case 'n': noOutput = true; break;
                 case 'o': outputTextFilename = string(optarg); break;
 #ifdef USE_HDF5

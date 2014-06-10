@@ -109,7 +109,4 @@ typedef struct _procobs {
     unsigned long startTimeUSec;
 } procobs;
 
-
-
-
 #endif

@@ -65,17 +65,20 @@ public:
             count = 0;
             return 0;
         }
+        memset(&(data[capacity]), 0, sizeof(T)*(talloc-capacity));
         capacity = talloc;
+        return capacity;
     }
 
     inline size_t check_capacity(size_t t_capacity) {
-        if (data == NULL || t_capacity < capacity) {
+        if (data == NULL || t_capacity > capacity) {
             resize(t_capacity);
         }
         return capacity;
     }
 
     void zero() {
+        printf("about to zero out %lu for %d elements (%lu bytes)\n", data, capacity, sizeof(T)*capacity);
         bzero(data, sizeof(T) * capacity);
         count = 0;
     }
@@ -101,8 +104,6 @@ mempool<procstat> global_procStat;
 mempool<procdata> global_procData;
 mempool<procfd>   global_procFD;
 
-ProcmonConfig *config = NULL;
-
 void sig_handler(int signum) {
 	/* if we receive any trapped signal, just set the cleanUpFlag
 	 * this will break the infinite loop and cause the message
@@ -111,6 +112,44 @@ void sig_handler(int signum) {
 	cleanUpFlag = 1;
 }
 
+static int cmp_procstat_ident(const void *p1, const void *p2) {
+    procstat *a = (procstat *) p1;
+    procstat *b = (procstat *) p2;
+    int cmp = 0;
+    if ((cmp = strncmp(a->identifier, b->identifier, IDENTIFIER_SIZE)) != 0) {
+        return cmp;
+    }
+    if ((cmp = strncmp(a->subidentifier, b->subidentifier, IDENTIFIER_SIZE)) != 0) {
+        return cmp;
+    }
+    return a->pid - b->pid;
+}
+
+static int cmp_procdata_ident(const void *p1, const void *p2) {
+    procdata *a = (procdata *) p1;
+    procdata *b = (procdata *) p2;
+    int cmp = 0;
+    if ((cmp = strncmp(a->identifier, b->identifier, IDENTIFIER_SIZE)) != 0) {
+        return cmp;
+    }
+    if ((cmp = strncmp(a->subidentifier, b->subidentifier, IDENTIFIER_SIZE)) != 0) {
+        return cmp;
+    }
+    return a->pid - b->pid;
+}
+
+static int cmp_procfd_ident(const void *p1, const void *p2) {
+    procfd *a = (procfd *) p1;
+    procfd *b = (procfd *) p2;
+    int cmp = 0;
+    if ((cmp = strncmp(a->identifier, b->identifier, IDENTIFIER_SIZE)) != 0) {
+        return cmp;
+    }
+    if ((cmp = strncmp(a->subidentifier, b->subidentifier, IDENTIFIER_SIZE)) != 0) {
+        return cmp;
+    }
+    return a->pid - b->pid;
+}
 
 int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
 	char *ptr = NULL;
@@ -207,8 +246,8 @@ int parseProcIO(int pid, procdata* procData, procstat* statData) {
 	char* label = NULL;
 	int rbytes = 0;
 	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
-    char filename[BUFFER_SIZE];
-    char lbuffer[LBUFFER_SIZE];
+    char filename[BUFFER_SIZE] = "";
+    char lbuffer[LBUFFER_SIZE] = "";
     FILE* fp = NULL;
 
     snprintf(filename, BUFFER_SIZE, "/proc/%d/io", pid);
@@ -543,8 +582,6 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData) {
  *   save all contents in-memory
  */
 int searchProcFs(ProcmonConfig *config) {
-//config->targetPPid, config->tgtGid, config->tgtSid, config->tgtPgid, config->maxfd, config->check_mpi, config->clockTicksPerSec, config->pageSize, config->boottime);
-//int searchProcFs(int ppid, int tgtGid, int tgtSid, int tgtPgid, int maxfd, const char *check_mpi, long clockTicksPerSec, long pageSize, time_t boottime) {
 	DIR* procDir;
 	struct dirent* dptr;
 	char buffer[BUFFER_SIZE];
@@ -558,7 +595,12 @@ int searchProcFs(ProcmonConfig *config) {
 	int nstart = 0;
 	struct timeval before;
 	int foundParent;
+    bool procEnv = false;
     int readStatFirst = (config->tgtSid > 0 || config->tgtPgid > 0) ? 1 : 0;
+
+    if (config->check_mpi != NULL || config->identifier_env != NULL || config->subidentifier_env != NULL) {
+        procEnv = true;
+    }
 
 	if (gettimeofday(&before, NULL) != 0) {
 		fprintf(stderr, "FAILED to get time (before)\n");
@@ -774,6 +816,7 @@ int searchProcFs(ProcmonConfig *config) {
         /* if fd tracking is enabled and there is enough room to store any more
            fd information, then parse it!
         */
+        int start_fdidx = fdidx;
         int n_fd = global_procFD.capacity - fdidx;
         if (config->maxfd < n_fd) {
             n_fd = config->maxfd;
@@ -782,17 +825,38 @@ int searchProcFs(ProcmonConfig *config) {
         if (n_fd > 0) {
             parse_fds(tgt_pid, n_fd, global_procFD.data, &fdidx, statData);
         }
+        std::map<std::string, std::string> env;
+        std::map<std::string, std::string>::iterator it;
+        std::string my_identifier(config->identifier);
+        std::string my_subidentifier(config->subidentifier);
 
-        if (config->check_mpi != NULL) {
-            std::map<std::string, std::string> env;
-            std::map<std::string, std::string>::iterator it;
-            int mpi_rank = -1;
+        if (procEnv) {
             parseProcEnvironment(tgt_pid, env);
+        }
+
+        if (config->identifier_env != NULL && (it = env.find(config->identifier_env)) != env.end()) {
+            my_identifier = (*it).second;
+        }
+        if (config->subidentifier_env != NULL && (it = env.find(config->subidentifier_env)) != env.end()) {
+            my_subidentifier = (*it).second;
+        }
+        if (config->check_mpi != NULL) {
+            int mpi_rank = -1;
             if ((it = env.find(config->check_mpi)) != env.end()) {
                 const char *rank_str = (*it).second.c_str();
                 mpi_rank = atoi(rank_str);
             }
             statData->rtPriority = mpi_rank;
+        }
+
+        printf("statData: %lu\n", statData);
+        snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
+        snprintf(statData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
+        snprintf(temp_procData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
+        snprintf(temp_procData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
+        for (int l_fdidx = start_fdidx; l_fdidx < fdidx; l_fdidx++) {
+            snprintf(global_procFD.data[l_fdidx].identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
+            snprintf(global_procFD.data[l_fdidx].subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         }
 	}
 
@@ -801,6 +865,11 @@ int searchProcFs(ProcmonConfig *config) {
     global_procData.count = ntargets;
     global_procFD.count = fdidx;
     search_procfs_count = ntargets;
+
+    /* sort by identifier/subidentifier/pid */
+    qsort(global_procStat.data, global_procStat.count, sizeof(procstat), cmp_procstat_ident);
+    qsort(global_procData.data, global_procData.count, sizeof(procdata), cmp_procdata_ident);
+    qsort(global_procFD.data, global_procFD.count, sizeof(procfd), cmp_procfd_ident);
 
 	return ntargets;
 }
@@ -887,7 +956,7 @@ void display_perms_ownership(const char *thread_id) {
     }
 }
 
-bool perform_setuid(const char *id) {
+bool perform_setuid(ProcmonConfig *config, const char *id) {
     bool dropped_privs = false;
     uid_t tgt_uid = getuid();
     gid_t tgt_gid = getgid();
@@ -921,9 +990,10 @@ bool perform_setuid(const char *id) {
 
 pthread_mutex_t token_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_barrier_t rbarrier;
-static void *reader_thread_start(void *) {
+static void *reader_thread_start(void *t_config) {
     int retCode = 0;
     int err = 0;
+    ProcmonConfig *config = (ProcmonConfig *) t_config;
 
     if (config->verbose) display_perms_ownership("R, initial");
 
@@ -1017,10 +1087,50 @@ void pidfile(const string& pidfilename) {
     exit(1);
 }
 
+unsigned int write_procstat(ProcIO* output, procstat *data, int count) {
+    return output->write_procstat(data, count);
+}
+unsigned int write_procdata(ProcIO *output, procdata *data, int count) {
+    return output->write_procdata(data, count);
+}
+unsigned int write_procfd(ProcIO *output, procfd *data, int count) {
+    return output->write_procfd(data, count);
+}
+bool set_context(ProcIO *output, const std::string& host, const std::string& identifier, const std::string &subidentifier) {
+    return output->set_context(host, identifier, subidentifier);
+}
+
+template<typename T>
+void writeOutput(ProcmonConfig *config, ProcIO *output, T *data, int count, unsigned int (*write_data)(ProcIO *, T*, int))  {
+    const char *last_ident = NULL;
+    const char *last_subident = NULL;
+    int sidx = 0;
+    int i = 0;
+    for (i = 0; i < count; i++) {
+        T *datum = &(data[i]);
+        if (last_ident == NULL || last_subident == NULL
+            || strncmp(datum->identifier, last_ident, IDENTIFIER_SIZE) != 0
+            || strncmp(datum->subidentifier, last_subident, IDENTIFIER_SIZE) != 0)
+        {
+            last_ident = datum->identifier;
+            last_subident = datum->subidentifier;
+            if (i != 0) {
+                set_context(output, config->hostname, data[sidx].identifier, data[sidx].subidentifier);
+                write_data(output, &(data[sidx]), i - sidx);
+            }
+            sidx = i;
+        }
+    }
+    if (i > 0) {
+        set_context(output, config->hostname, data[sidx].identifier, data[sidx].subidentifier);
+        write_data(output, &(data[sidx]), i - sidx);
+    }
+}
+
 int main(int argc, char** argv) {
 	int retCode = 0;
 	struct timeval startTime;
-    config = new ProcmonConfig(argc, argv);
+    ProcmonConfig *config = new ProcmonConfig(argc, argv);
     if (getuid() == 0) {
 #ifdef SECURED
         if (config->target_uid <= 0) {
@@ -1060,7 +1170,7 @@ int main(int argc, char** argv) {
     if (pthread_mutex_lock(&token_lock) != 0) {
         /* handle error */
     }
-    retCode = pthread_create(&reader_thread, NULL, reader_thread_start, NULL);
+    retCode = pthread_create(&reader_thread, NULL, reader_thread_start, config);
     if (retCode != 0) {
         errno = retCode;
         perror("Failed to start reader thread. Bailing out.");
@@ -1145,16 +1255,42 @@ int main(int argc, char** argv) {
             cleanUpFlag = 1;
 		} else  {
             for (std::vector<ProcIO*>::iterator iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
-
-                if (global_procStat.count > 0) {
-                    (*iter)->write_procstat(global_procStat.data, global_procStat.count);
+                /*
+                const char *last_ident = NULL;
+                const char *last_subident = NULL;
+                int sidx = 0;
+                int i = 0;
+                for (i = 0; i < global_procStat.count; i++) {
+                    procstat *temp_ps = &(global_procStat.data[i]);
+                    if (last_ident == NULL || last_subident == NULL
+                        || strncmp(temp_ps->identifier, last_ident, IDENTIFIER_SIZE) != 0
+                        || strncmp(temp_ps->subidentifier, last_subident, IDENTIFIER_SIZE) != 0)
+                    {
+                        last_ident = temp_ps->identifier;
+                        last_subident = temp_ps->subidentifier;
+                        if (i != 0) {
+                            (*iter)->set_context(config->hostname, global_procStat.data[sidx].identifier, global_procStat.data[sidx].subidentifier);
+                            (*iter)->write_procstat(&(global_procStat.data[sidx]), i - sidx);
+                        }
+                        sidx = i;
+                    }
                 }
+                if (i > 0) {
+                    (*iter)->set_context(config->hostname, global_procStat.data[sidx].identifier, global_procStat.data[sidx].subidentifier);
+                    (*iter)->write_procstat(&(global_procStat.data[sidx]), i - sidx);
+                }
+
                 if (global_procData.count > 0) {
                     (*iter)->write_procdata(global_procData.data, global_procData.count);
                 }
                 if (global_procFD.count > 0) {
                     (*iter)->write_procfd(global_procFD.data, global_procFD.count);
                 }
+                */
+                printf("writing output!\n");
+                writeOutput(config, *iter, global_procStat.data, global_procStat.count, write_procstat);
+                writeOutput(config, *iter, global_procData.data, global_procData.count, write_procdata);
+                writeOutput(config, *iter, global_procFD.data, global_procFD.count, write_procfd);
             }
         }
 
