@@ -1181,7 +1181,7 @@ int main(int argc, char** argv) {
     if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait", err);
     if (config->verbose) display_perms_ownership("W, before W perms-set");
 
-    dropped_privs = perform_setuid("R");
+    dropped_privs = perform_setuid(config, "R");
 
     if (!dropped_privs) {
         cap_t empty = cap_init();
