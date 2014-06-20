@@ -6,6 +6,11 @@ module load python
 module load openmpi
 module load mkl
 module load hdf5-parallel/1.8.12
+set -ex
+
+if [ $NERSC_HOST != "genepool" ]; then
+    exit
+fi
 
 INSTALLDIR=${1:-"undef"}
 if [ $INSTALLDIR == "undef" ]; then

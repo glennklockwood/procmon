@@ -1,7 +1,4 @@
-import numexpr
-numexpr.set_num_threads(1)
 import numpy as np
-import pandas
 import re
 from StringIO import StringIO
 from procmon import H5Cache

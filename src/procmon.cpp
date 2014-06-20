@@ -78,7 +78,6 @@ public:
     }
 
     void zero() {
-        printf("about to zero out %lu for %d elements (%lu bytes)\n", data, capacity, sizeof(T)*capacity);
         bzero(data, sizeof(T) * capacity);
         count = 0;
     }
@@ -849,7 +848,6 @@ int searchProcFs(ProcmonConfig *config) {
             statData->rtPriority = mpi_rank;
         }
 
-        printf("statData: %lu\n", statData);
         snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
         snprintf(statData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         snprintf(temp_procData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
@@ -1287,7 +1285,6 @@ int main(int argc, char** argv) {
                     (*iter)->write_procfd(global_procFD.data, global_procFD.count);
                 }
                 */
-                printf("writing output!\n");
                 writeOutput(config, *iter, global_procStat.data, global_procStat.count, write_procstat);
                 writeOutput(config, *iter, global_procData.data, global_procData.count, write_procdata);
                 writeOutput(config, *iter, global_procFD.data, global_procFD.count, write_procfd);
