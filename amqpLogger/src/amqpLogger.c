@@ -96,11 +96,35 @@ int amqpLogger_setidentifiers(amqpLogger *log, char const *identifier,
     char const *subidentifier) {
 
     char *dotptr;
+    if (identifier == NULL || strlen(identifier) == 0 ||
+        subidentifier == NULL || strlen(subidentifier) == 0) {
+
+        char *job_id = getenv("JOB_ID"); // gridengine
+        char *task_id = NULL;
+        if (job_id == NULL) {
+            job_id = getenv("PBS_JOBID"); // torque
+        }
+        if (job_id == NULL) {
+            job_id = getenv("SLURM_JOB_ID"); // slurm
+        }
+        if (job_id != NULL) {
+            char *task_id = getenv("SGE_TASK_ID");
+            if (task_id == NULL) {
+                task_id = getenv("PBS_ARRAYID");
+            }
+            if (task_id == NULL) {
+                task_id = getenv("SLURM_ARRAY_TASK_ID");
+            }
+        }
+    }
 
     if (identifier == NULL || strlen(identifier) == 0) {
         char *job_id = getenv("JOB_ID"); // gridengine
         if (job_id == NULL) {
             job_id = getenv("PBS_JOBID");
+        }
+        if (job_id == NULL) {
+            job_id = getenv("SLURM_JOB_ID");
         }
         if (job_id != NULL) {
             snprintf(log->identifier, HEADER_BUFFER_SIZE, "%s", job_id);
@@ -114,6 +138,9 @@ int amqpLogger_setidentifiers(amqpLogger *log, char const *identifier,
         char *job_id = getenv("JOB_ID"); // gridengine
         if (job_id == NULL) {
             job_id = getenv("PBS_JOBID");
+        }
+        if (job_id == NULL) {
+            job_id = getenv("SLURM_JOB_ID");
         }
         if (job_id != NULL) {
             char *task_id = getenv("SGE_TASK_ID");
@@ -147,6 +174,7 @@ int amqpLogger_setidentifiers(amqpLogger *log, char const *identifier,
     if (dotptr != NULL) {
         *dotptr = 0;
     }
+    return 0;
 }
 
 int amqpLogger_log(amqpLogger *log, time_t logtime, char const *tag,
@@ -327,6 +355,9 @@ int _amqp_open(amqpState *amqp) {
         return -1;
     }
 
+    if (amqp->output_warnings) {
+        fprintf(stderr, "INFO: opening connection\n");
+    }
 	amqp->conn = amqp_new_connection();
 	amqp->socket = amqp_tcp_socket_new(amqp->conn);
 	istatus = amqp_socket_open(amqp->socket, AMQPLOGGER_SERVER, AMQPLOGGER_PORT);
@@ -443,6 +474,9 @@ void _amqp_close(amqpState *amqp) {
              3) destroy the conn struct
              4) mark the connection as closed
         */
+        if (amqp->output_warnings) {
+            fprintf(stderr, "INFO: closing connection\n");
+        }
 		istatus = _amqp_eval_status(amqp,
             amqp_channel_close(amqp->conn, 1, AMQP_REPLY_SUCCESS)
         );
