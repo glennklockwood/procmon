@@ -416,6 +416,12 @@ public:
             }
         }
 	}
+    ~ProcmonConfig() {
+        if (check_mpi != NULL) {
+            free(check_mpi);
+            check_mpi = NULL;
+        }
+    }
 
     void usage(int err_code) {
         printf("procmon - NERSC process monitor");

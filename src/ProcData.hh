@@ -109,4 +109,11 @@ typedef struct _procobs {
     unsigned long startTimeUSec;
 } procobs;
 
+typedef struct _genericobs {
+    char identifier[IDENTIFIER_SIZE];
+    char subidentifier[IDENTIFIER_SIZE];
+    unsigned long recTime;
+    unsigned long recTimeUSec;
+} genericobs;
+
 #endif
