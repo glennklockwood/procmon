@@ -12,68 +12,40 @@
 #include "ProcData.hh"
 #include "ProcCache.hh"
 
+#include <nclq.hh>
+
 #include <boost/program_options.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/regex.hpp>
 
-#define T_INTEGER 0
-#define T_DOUBLE 1
-#define T_STRING 2
-#define T_CHAR 3
-#define T_BOOL 4
-#define T_MEMORY 5
-#define T_USER 6
-#define T_GROUP 7
-#define T_TICKS 8
-#define T_UNDEF 9
+class qpDataSource : public nclq::DataSource {
+    const vector<nclq::VarDescriptor> symbols;
+    Cache<procdata> *pd;
+    Cache<procstat> *ps;
+    Cache<procfd>   *fd;
 
-typedef long intType;
+    bool iterateOverPS;
+    bool iterateOverPD;
+    bool iterateOverFD;
 
-union _DataRep {
-    double d;
-    intType i;
-    string s;
-    char c;
-    bool b;
-} DataRep;
+    int pid;
 
-class Data {
-    unsigned char type;
-    DataRep data;
-    bool set;
+    /* need variables to keep state in each cache and track current
+       position in cache arrays for each datatype */
 
+    void prepareQuery(nclq::Expression *expr);
     public:
-    Data() {
-        set = false;
-    }
+    qpDataSource(Cache<procdata>*, Cache<procstat>*, Cache<procfd>*);
+    ~qpDataSource();
 
-    void setValue(intType value, unsigned char t_type=T_INTEGER) {
-        data.i = value;
-        set = true;
-        type = t_type;
-    }
-    void setValue(double value, unsigned char t_type=T_DOUBLE) {
-        data.d = value;
-        set = true;
-        type = t_type;
-    }
-
-    void setValue(const char* value, unsigned char t_type=T_STRING) {
-        data.s = value;
-        set = true;
-        type = t_type;
-    }
-    void setValue(std::string& value, unsigned char t_type=T_STRING) {
-        data.s = value;
-        set = true;
-        type = t_type;
-    }
-    void setValue(bool value, unsigned char t_type=T_BOOL) {
-        b_value = value;
-        set = true;
-        type = t_type;
-    }
+    virtual const vector<nclq::VarDescriptor> &getSymbols() const;
+    virtual bool getNext();
+    virtual bool setValue(int idx, nclq::Data *data, nclq::SymbolType outputType);
+    virtual int size();
+    virtual void outputValue(ostream& out, int idx);
+    virtual void prepareQuery(vector<nclq::Expression *>& declarations,
+            vector<nclq::Expression *>& queries, 
+            vector<nclq::Expression *>& output);
 };
+
 
 struct ProcessData {
     procstat *ps;
@@ -356,85 +328,6 @@ struct ProcessData {
     }
 };
 
-typedef struct _VarDescriptor {
-    char name[30];
-    unsigned char type;
-    unsigned char outputType;
-    void (*evalFxn)(ProcessData *, Data *);
-} VarDescriptor;
-
-/*
-qacctVariablesBasic describes all the variables that are defined
-either in the accounting logs or are parsed from the categories/resources
-field of the GE logs
-*/
-static const unsigned int maxVarSize = 64;
-static const VarDescriptor qVariablesBasic[maxVarSize] = {
-    { "identifier",            T_STRING,     T_STRING,      ProcessData::setIdentifier}, // 0
-    { "subidentifier",         T_STRING,     T_STRING,      ProcessData::setSubidentifier }, // 1
-    { "hostname",              T_STRING,     T_STRING,      ProcessData::setHostname }, // 2
-    { "execName",              T_STRING,     T_STRING,      ProcessData::setExecName }, // 3
-    { "cmdArgs",               T_STRING,     T_STRING,      ProcessData::setCmdArgs }, // 4
-    { "cmdArgBytes",           T_MEMORY,     T_INTEGER,     ProcessData::setCmdArgBytes }, // 5
-    { "exePath",               T_STRING,     T_STRING,      ProcessData::setExePath }, // 6
-    { "cwdPath",               T_STRING,     T_STRING,      ProcessData::setCwdPath }, // 7
-    { "obsTime",               T_INTEGER,    T_INTEGER,     ProcessData::setObsTime }, // 8
-    { "startTime",             T_INTEGER,    T_INTEGER,     ProcessData::setStartTime }, // 9
-    { "pid",                   T_INTEGER,    T_INTEGER,     ProcessData::setPid }, // 10
-    { "ppid",                  T_INTEGER,    T_INTEGER,     ProcessData::setPpid }, // 11
-    { "pgrp",                  T_INTEGER,    T_INTEGER,     ProcessData::setPgrp }, // 12
-    { "session",               T_INTEGER,    T_INTEGER,     ProcessData::setSession }, // 13
-    { "tty",                   T_INTEGER,    T_INTEGER,     ProcessData::setTty }, // 14
-    { "tpgid",                 T_INTEGER,    T_INTEGER,     ProcessData::setTpgid }, // 15
-    { "realUid",               T_USER,       T_INTEGER,     ProcessData::setRealUid }, // 16
-    { "effUid",                T_USER,       T_INTEGER,     ProcessData::setEffUid }, // 17
-    { "realGid",               T_GROUP,      T_INTEGER,     ProcessData::setRealGid }, // 18
-    { "effGid",                T_GROUP,      T_INTEGER,     ProcessData::setEffGid }, // 19
-    { "flags",                 T_INTEGER,    T_INTEGER,     ProcessData::setFlags }, // 20
-    { "utime",                 T_TICKS,      T_INTEGER,     ProcessData::setUtime }, // 21
-    { "stime",                 T_TICKS,      T_INTEGER,     ProcessData::setStime }, // 22
-    { "priority",              T_INTEGER,    T_INTEGER,     ProcessData::setPriority }, // 23
-    { "nice",                  T_INTEGER,    T_INTEGER,     ProcessData::setNice }, //24
-    { "numThreads",            T_INTEGER,    T_INTEGER,     ProcessData::setNumThreads }, // 25
-    { "vsize",                 T_INTEGER,    T_INTEGER,     ProcessData::setVsize }, // 26
-    { "rss",                   T_MEMORY,     T_INTEGER,     ProcessData::setRss }, // 27
-    { "rsslim",                T_MEMORY,     T_INTEGER,     ProcessData::setRsslim }, // 28
-    { "signal",                T_INTEGER,    T_INTEGER,     ProcessData::setSignal }, // 29
-    { "blocked",               T_INTEGER,    T_INTEGER,     ProcessData::setBlocked }, // 30
-    { "sigignore",             T_INTEGER,    T_INTEGER,     ProcessData::setSigignore }, //31
-    { "sigcatch",              T_INTEGER,    T_INTEGER,     ProcessData::setSigcatch }, //32
-    { "rtPriority",            T_INTEGER,    T_INTEGER,     ProcessData::setRtPriority }, //33
-    { "policy",                T_INTEGER,    T_INTEGER,     ProcessData::setPolicy }, // 34
-    { "delayacctBlkIOTicks",   T_INTEGER,    T_INTEGER,     ProcessData::setDelayacctBlk }, // 35
-    { "guestTime",             T_INTEGER,    T_INTEGER }, //36
-    { "vmpeak",                T_MEMORY,     T_INTEGER }, //37
-    { "rsspeak",               T_MEMORY,     T_INTEGER }, //38
-    { "cpusAllowed",           T_INTEGER,    T_INTEGER}, //39
-    { "io_rchar",              T_MEMORY,     T_INTEGER}, //40
-    { "io_wchar",              T_MEMORY,     T_INTEGER}, //41
-    { "io_syscr",              T_INTEGER,    T_INTEGER}, //42
-    { "io_syscw",              T_INTEGER,    T_INTEGER}, //43
-    { "io_readBytes",          T_MEMORY,     T_INTEGER}, //44
-    { "io_writeBytes",         T_MEMORY,     T_INTEGER}, //45
-    { "io_cancelledWriteBytes",T_MEMORY,     T_INTEGER}, //46
-    { "m_size",                T_MEMORY,     T_INTEGER}, //47
-    { "m_resident",            T_MEMORY,     T_INTEGER}, //48
-    { "m_share",               T_MEMORY,     T_INTEGER}, //49
-    { "m_text",                T_MEMORY,     T_INTEGER}, //50
-    { "m_data",                T_MEMORY,     T_INTEGER}, //51
-    { "stateSince",            T_INTEGER,    T_INTEGER}, //52
-    { "stateAge",              T_INTEGER,    T_INTEGER}, //53
-    { "delta_stime",           T_TICKS,      T_INTEGER}, //54
-    { "delta_utime",           T_TICKS,      T_INTEGER}, //55
-    { "delta_ioread",          T_MEMORY,     T_INTEGER}, //56
-    { "delta_iowrite",         T_MEMORY,     T_INTEGER}, //57
-    { "cputicks",              T_TICKS,      T_INTEGER}, //58
-    { "delta_cputicks",        T_TICKS,      T_INTEGER}, //59
-    { "io",                    T_MEMORY,     T_INTEGER}, //60
-    { "delta_io",              T_MEMORY,     T_INTEGER}, //61
-    { "age",                   T_INTEGER,    T_INTEGER}, //62
-    { "state",                 T_CHAR,       T_CHAR}, //63
-};
 
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
