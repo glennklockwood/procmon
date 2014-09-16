@@ -206,7 +206,7 @@ template <typename T> class CacheNode {
         memset(local_map, -1, sizeof(int)*nRecords);
         for (int i = 0; i < curr_data->count; i++) {
             for (int j = 0; j < prev_data->count; j++) {
-                if (curr_data->data[i].pid == prev_data->data[j].pid && curr_data->data[i].startTime == prev_data->data[j].startTime) {
+                if (curr_data->data[i].equivRecord(prev_data->data[j])) {
                     local_map[i] = j;
                 }
             }
