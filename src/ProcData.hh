@@ -25,6 +25,9 @@ typedef struct _procdata {
     unsigned long startTimeUSec;
     unsigned int pid;
     unsigned int ppid;
+    bool equivRecord(const struct _procdata &other) const {
+        return pid == other.pid && startTime == other.startTime;
+    }
 } procdata;
 
 typedef struct _procstat {
@@ -83,6 +86,9 @@ typedef struct _procstat {
     unsigned long m_share;
     unsigned long m_text;
     unsigned long m_data;
+    bool equivRecord(const struct _procstat &other) const {
+        return pid == other.pid && startTime == other.startTime;
+    }
 } procstat;
 
 typedef struct _procfd {
@@ -97,6 +103,9 @@ typedef struct _procfd {
     char path[BUFFER_SIZE];
 	int fd;
 	unsigned int mode;
+    bool equivRecord(const struct _procfd &other) const {
+        return pid == other.pid && startTime == other.startTime && fd == other.fd;
+    }
 } procfd;
 
 typedef struct _procobs {
@@ -107,6 +116,16 @@ typedef struct _procobs {
     unsigned long recTimeUSec;
     unsigned long startTime;
     unsigned long startTimeUSec;
+    bool equivRecord(const struct _procstat &other) const {
+        return pid == other.pid && startTime == other.startTime;
+    }
 } procobs;
+
+typedef struct _genericobs {
+    char identifier[IDENTIFIER_SIZE];
+    char subidentifier[IDENTIFIER_SIZE];
+    unsigned long recTime;
+    unsigned long recTimeUSec;
+} genericobs;
 
 #endif

@@ -282,10 +282,76 @@ def usage():
     print "  --args        Display command-line arguments (up to 1024 characters)"
     print "  --cwd         Disploy working directories" 
     print "  --help        Display this help message"
+    print "  --host <host> --identifier <job> [--subidentifier <task>] --start YYYYMMDDHHMMSS [--end YYYYMMDDHHMMSS]"
     print "Query:"
     print "   All remaining arguments will be passed to qqacct;  see qqacct manpage"
     print "   for more details."
     sys.exit(0)
+
+class Config:
+    """ Read configuration from config file and command line. """
+
+    def __init__(self, args):
+        """ Construct ConfigParser class by parsing args/configs """
+        self.config = self.read_configuration(args)
+
+    def __split_args(self, arg_str, splitRegex):
+        """ Internal utility fxn for splitting arg values
+
+            @param arg_str string representation of argument values
+            @param splitRegex string representation of splitting regex
+            @return list of split strings
+        """
+        items = re.split(splitRegex, arg_str)
+        ret_items = []
+        for item in items:
+            item = item.strip()
+            if len(item) > 0:
+                ret_items.append(item)
+        return ret_items
+
+    def split_path(self, arg_str):
+        """ Split paths delimited by newlines or colons.
+
+            @param arg_str string representation of argument values
+            @return list of 
+        """
+        return self.__split_args(arg_str, '[:\n]')
+
+    def parse_datetime(self, arg_str):
+        return datetime.strptime(arg_str, '%Y%m%d%H%M%S')
+
+    def read_configuration(self, args):
+        global procmonInstallBase
+
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument('-f', '--config', help="Specify configuration file instead of default at $PROCMON_DIR/etc/workloadAnalysis.conf", default='%s/etc/workloadAnalysis.conf' % procmonInstallBase, metavar="FILE")
+        args, remaining_args = parser.parse_known_args()
+        defaults = {
+            "h5_path": "%s/var/procmon" % procmonInstallBase,
+            "h5_prefix": "procmon",
+            "base_hostlist": "",
+            "host": None,
+            "identifier": None,
+            "subidentifier": None,
+            "start": None,
+            "end": None,
+            "args": False,
+            "no-color": False,
+            "cwd": False,
+        }
+        if args.config and os.path.exists(args.config):
+            config = SafeConfigParser()
+            config.read([args.config])
+
+        parser = argparse.ArgumentParser(parents=[parser])
+        parser.set_defaults(**defaults)
+        parser.add_argument('-o','--output', type=str, help="Specify output summary filename", default='output.h5')
+        parser.add_argument('files', metavar='N', type=str, nargs='+', help='Processes h5 files to summarize')
+        args = parser.parse_args(remaining_args, args)
+        return args
+
+
 
 h5cache = procmon.H5Cache.H5Cache('/global/projectb/statistics/procmon/genepool', 'procmon_genepool')
 args = []
@@ -296,6 +362,11 @@ enable_color = True
 show_cmdline_args = False
 show_cwd = False
 save_h5 = None
+host=None
+identifier=None
+subidentifier=None
+start=None
+end=None
 while idx < len(sys.argv):
     if sys.argv[idx] == "--qs":
         enable_qs = True
@@ -315,6 +386,27 @@ while idx < len(sys.argv):
         show_cwd = True
     elif sys.argv[idx] == "--help":
         usage()
+    elif sys.argv[idx] == "--host":
+        if len(sys.argv) > idx:
+            idx += 1
+            host = sys.argv[idx]
+        else:
+            usage()
+            sys.exit(1)
+    elif sys.argv[idx] == "--identifier":
+        if len(sys.argv) > idx:
+            idx += 1
+            identifier = sys.argv[idx]
+        else:
+            usage()
+            sys.exit(1)
+    elif sys.argv[idx] == "--subidentifier":
+        if len(sys.argv) > idx:
+            idx += 1
+            subidentifier = sys.argv[idx]
+        else:
+            usage()
+            sys.exit(1)
     else:
         args.append(sys.argv[idx])
     idx += 1

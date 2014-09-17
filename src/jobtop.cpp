@@ -289,6 +289,14 @@ class DisplayAge: public DisplayData {
         mvprintw(y, x, "%*d", width, (time(NULL) - data->recTime));
     }
 };
+class DisplayMpiRank: public DisplayData {
+    public:
+    DisplayMpiRank(): DisplayData("&MPI", 4, true, 0.0) {
+    }
+    virtual void display(int y, int x, PrintData *data) {
+        mvprintw(y, x, "%*d", width, data->mpiRank);
+    }
+};
 class DisplayUser: public DisplayData {
     public:
     DisplayUser() : DisplayData("&USER", 8, true, 0.0) {
@@ -335,6 +343,15 @@ class DisplayCpuRate: public DisplayData {
     }
     virtual void display(int y, int x, PrintData *data) {
         mvprintw(y, x, "%0.1f", width, data->rate_cpu);
+    }
+};
+class DisplayCpuTotal: public DisplayData {
+    public:
+    DisplayCpuTotal() : DisplayData("CPU", 15, true, 0.0) {
+    }
+    virtual void display(int y, int x, PrintData *data) {
+        char buffer[1024];
+        mvprintw(y, x, "%s", format_time(data->total_cpu, buffer, 1024, width));
     }
 };
 class DisplayState: public DisplayData {
@@ -410,82 +427,114 @@ class DisplayThreads: public DisplayData {
 };
 
 bool sortHostname(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->hostname < b->hostname;
 }
 bool sortHostnameRev(PrintData *a, PrintData *b) {
-    return a->hostname > b->hostname;
+    if (a == NULL || b == NULL) return false;
+    return !sortHostname(a, b);
 }
 bool sortUsername(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->username < b->username;
 }
 bool sortUsernameRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->username > b->username;
 }
 bool sortRSS(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->rss < b->rss;
 }
 
 bool sortRSSRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->rss > b->rss;
 }
 
 bool sortVMem(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->vmem < b->vmem;
 }
 
 bool sortCpuRate(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->rate_cpu < b->rate_cpu;
 }
 bool sortCpuRateRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortCpuRate(a, b);
+}
+bool sortMpiRank(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
+    return a->mpiRank < b->mpiRank;
+}
+bool sortMpiRankRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
+    return !sortMpiRank(a, b);
 }
 
 bool sortThreads(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->threads < b->threads;
 }
 bool sortThreadsRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortThreads(a,b);
 }
 
 bool sortTotalIORead(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->total_ioRead < b->total_ioRead;
 }
 bool sortTotalIOReadRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortTotalIORead(a,b);
 }
 bool sortTotalIOWrite(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->total_ioWrite < b->total_ioWrite;
 }
 bool sortTotalIOWriteRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortTotalIOWrite(a,b);
 }
 bool sortPid(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->pid < b->pid;
 }
 bool sortPidRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortPid(a,b);
 }
 bool sortAge(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->recTime < b->recTime;
 }
 bool sortAgeRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortAge(a,b);
 }
 bool sortPPid(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->ppid < b->ppid;
 }
 bool sortPPidRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return !sortPPid(a,b);
 }
 
 bool sortVMemRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->vmem > b->vmem;
 }
 
 bool sortDuration(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->wallTime < b->wallTime;
 }
 bool sortDurationRev(PrintData *a, PrintData *b) {
+    if (a == NULL || b == NULL) return false;
     return a->wallTime > b->wallTime;
 }
 
@@ -534,6 +583,8 @@ class TopCurses {
         columns.push_back(new DisplayIOWTotal());
         columns.push_back(new DisplayIOWRate());
         columns.push_back(new DisplayThreads());
+        columns.push_back(new DisplayMpiRank());
+        columns.push_back(new DisplayCpuTotal());
     }
 
     void printScreen() {
@@ -583,10 +634,11 @@ class TopCurses {
         int extra = xlim;
         for (auto it = columns.begin(), end = columns.end(); it != end; it++) {
              extra -= (*it)->baseWidth;
+             extra--; // for the space padding
         }
         for (auto it = columns.begin(), end = columns.end(); it != end; it++) {
             if (!(*it)->widthFixed && extra > 0) {
-                //(*it)->width = (*it)->baseWidth + (*it)->widthCoefficient * extra;
+                (*it)->width = (*it)->baseWidth + (*it)->widthCoefficient * extra;
             } else {
                 (*it)->width = (*it)->baseWidth;
             }
@@ -645,6 +697,8 @@ class TopCurses {
                 case 'U': sortFunction = sortUsernameRev; break;
                 case '5': sortFunction = sortCpuRate; break;
                 case '%': sortFunction = sortCpuRateRev; break;
+                case 'm': sortFunction = sortMpiRank; break;
+                case 'M': sortFunction = sortMpiRankRev; break;
                 case 'p': sortFunction = sortPid; break;
                 case 'P': sortFunction = sortPidRev; break;
                 case 'i': sortFunction = sortPPid; break;
@@ -787,6 +841,7 @@ class TopCurses {
             d->state = ps->state;
             d->total_ioRead = ps->io_rchar;
             d->total_ioWrite = ps->io_wchar;
+            d->mpiRank = ps->rtPriority;
             currData->records.push_back(d);
             printData.push_back(d);
         }
@@ -869,7 +924,7 @@ int main(int argc, char **argv) {
     const char *req_subidentifier = "*";
 
 
-    screen = new TopCurses("genepool", req_identifier, req_subidentifier);
+    screen = new TopCurses(getenv("NERSC_HOST"), req_identifier, req_subidentifier);
     signal(SIGTERM, sig_handler);
     pthread_t screen_thread, monitor_thread;
     int retCode = pthread_create(&screen_thread, NULL, screen_start, screen);

@@ -31,6 +31,7 @@ void sig_handler(int signum) {
 
 static void daemonize();
 void run_server();
+void run_zeromq_server();
 void *server_thread(void *args);
 
 void usage(int exitstatus) {
@@ -265,7 +266,11 @@ int main(int argc, char **argv) {
         signal(SIGPIPE, SIG_IGN);
         amqpLogger_log(&logger, 0, "amqpLogger", "amqpLogger server starting");
         unlink(SOCKET_PATH);
+#ifdef HAVE_ZEROMQ
+        run_zeromq_server();
+#else
         run_server();
+#endif
         unlink(SOCKET_PATH);
     } else {
         int ret;
@@ -303,6 +308,25 @@ static void daemonize() {
     freopen("/dev/null", "r", stdin);
     freopen("/dev/null", "w", stdout);
     freopen("/dev/null", "w", stderr);
+}
+
+void run_zeromq_server() {
+    /*
+    void *context = zmq_ctx_new();
+    void *clients;
+    char buffer[1024];
+    if (context == NULL) {
+        fprintf("ERROR: couldn't create zmq context!");
+        exit(1);
+    }
+    clients = zmq_socket(context, ZMQ_PULL);
+    if (clients == NULL) {
+        fprintf("ERROR: couldn't create zmq socket!");
+        exit(1);
+    }
+    snprintf(buffer, 1024, "ipc://%s", SOCKET_PATH);
+    zmq_bind(clients, buffer);
+    */
 }
 
 void run_server() {
