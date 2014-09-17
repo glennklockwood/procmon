@@ -14,6 +14,7 @@ import re
 import shutil
 import argparse
 from ConfigParser import SafeConfigParser
+import syslog
 
 procmonInstallBase = ''
 if 'PROCMON_DIR' in os.environ:
@@ -116,6 +117,34 @@ def mkdir_p(path):
         if e.errno == errno.EEXIST and os.path.isdir(path): pass
         else: raise
 
+def archive_hpss(config, fname, ftype, sources = None, doNothing=false):
+    (somepath,core_fname) = os.path.split(fname)
+    with config.hpss_lock:
+        newpath = "%s/%s/archiving/%s" % (config.base_prefix, config.group, core_fname)
+        try:
+            shutil.copy2(fname, newpath);
+            os.chmod(newpath, 0444)
+        except:
+            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s", (fname, newpath, get_exception()))
+            send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
+            return 1
+
+        prodfileRegex = re.compile('%s\.(\d+)\.h5')
+        for a_fname in os.listdir("%s/%s/archiving" % (config.base_prefix, config.group):
+            match = prodfileRegex.match(a_fname)
+            hpssPath = "%s/other" % config.h5_prefix
+            if match is not None:
+                file_dt = datetime.strptime(match.group(0), "%Y%m%d%H%M%S")
+                hpssPath = "%s/%s/%s" % (config.h5_prefix, file_dt.year, file_dt.month)
+            cmd=["hsi","put -P -d %s/%s/archiving/%s : %s/%s" % (config.base_prefix, config.group, a_fname, hpssPath, a_fname)]
+            retval = subprocess.call(cmd)
+            if retval == 0:
+                syslog.syslog(LOG_INFO, "successfully archived %s to %s/%s" % (a_fname, hpssPath, a_fname))
+            else:
+                syslog.syslog(LOG_ERR, "failed to archive %s, %d" % (a_fname, retval))
+                send_email(config, "failed to archive", "%s, %d" % (a_fname, retval))
+
+
 def register_jamo(config, fname, ftype, sources = None, doNothing=False):
     md_final = None
     tape_archival = [1]
@@ -133,6 +162,7 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
 
     retval = subprocess.call(['/bin/setfacl', '-m', 'user:%s:rw-' % config.jamo_user, fname])
     if retval != 0:
+        syslog.syslog(syslog.LOG_ERR, "failed to set acl on %s" % fname)
         send_email(config, "failed to set acl", fname)
         return None
 
@@ -152,6 +182,7 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
         md_final = {}
         md_final['procmon'] = metadata
     else:
+        syslog.syslog(syslog.LOG_ERR, "failed to read file stats: %s" % fname)
         send_email(config, "failed to read file stats", fname)
         return None
     
@@ -162,7 +193,6 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
     if doNothing:
         print md_final
         return None
-
     with config.sdm_lock:
         posted = config.sdm.post('api/metadata/file',
                 file=fname,
@@ -173,6 +203,7 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
                 metadata=md_final,
         )
     if posted is None or 'metadata_id' not in posted:
+        syslog.syslog(LOG_ERR, "failed to register with jamo: %s; %s" % (fname, ftype, ))
         send_email(config, "failed to register with jamo", "%s\n%s\n" % (fname, ftype, ))
     return posted
 
@@ -188,6 +219,7 @@ def reduce_files(config, timeobj, filenames):
         reducer_args.extend(['-i', f])
     retval = subprocess.call(reducer_args, stdin=None, stdout=None, stderr=None)
     if retval != 0:
+        syslog.syslog(LOG_ERR, "reducer failed! retcode: %d; cmd: %s" % (retval, " ".join(reducer_args)))
         send_email(config, "reducer failed!", "retcode: %d\ncmd: %s" % (retval, " ".join(reducer_args)))
         return 1
     (currpath, product_fname) = os.path.split(product_output)
@@ -204,6 +236,7 @@ def reduce_files(config, timeobj, filenames):
             shutil.move(f, newpath);
             os.chmod(newpath, 0444)
         except:
+            syslog.syslog(LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
             send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
             return 1
         if config.use_jamo:
@@ -216,16 +249,20 @@ def reduce_files(config, timeobj, filenames):
         shutil.move(product_output, final_product)
         os.chmod(final_product, 0444)
     except:
+        syslog.syslog(LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
         send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, get_exception()))
         return 1
 
     if config.use_jamo:
         register_jamo(config, final_product, "procmon_reduced_h5", sources)
+    if config.use_hpss:
+        archive_hpss(config, final_product, "procmon_reduced_h5", sources)
 
     try:
         shutil.move(bad_output, final_badoutput)
         os.chmod(final_badoutput, 0444)
     except:
+        syslog.syslog(LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
         send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, get_exception()))
         return 1
 
@@ -235,18 +272,21 @@ def reduce_files(config, timeobj, filenames):
 
 def main_loop(config):
     # create pid directory
+    syslog.syslog(LOG_INFO, "procmonManager: attempting to create directory %s/%s" % (config.base_pid_path, config.group))
     mkdir_p("%s/%s" % (config.base_pid_path, config.group))
 
     # create working directory
     mkdir_p("%s/%s" % (config.base_prefix, config.group))
     mkdir_p("%s/%s/processing" % (config.base_prefix, config.group))
     mkdir_p("%s/%s/collecting" % (config.base_prefix, config.group))
+    mkdir_p("%s/%s/archiving" % (config.base_prefix, config.group))
     os.chdir("%s/%s" % (config.base_prefix, config.group))
 
     file_prefix = "%s/%s/collecting/procMuxer" % (config.base_prefix, config.group)
 
     last_rotation = None
 
+    syslog.syslog(syslog.LOG_WARNING, "starting management of %s ProcMuxer group on %s" % (config.group, socket.gethostname()))
     send_email(config, "%s starting" % config.group, "starting management of %s ProcMuxer group on %s" % (config.group, socket.gethostname()))
     ## enter into perpetual loop
     reduce_threads = {}
@@ -330,6 +370,7 @@ def read_configuration(args):
     parser.add_argument('-f', '--config', help="Specify configuration file instead of default at $PROCMON_DIR/etc/procmonManager.conf", default='%s/etc/procmonManager.conf' % procmonInstallBase, metavar="FILE")
     args, remaining_args = parser.parse_known_args()
     defaults = {
+        "group": "procman_prod",
         "num_procmuxers": 2,
         "procMuxerPath": "%s/sbin/ProcMuxer" % procmonInstallBase,
         "reducer_path": "%s/sbin/PostReducer" % procmonInstallBase,
@@ -344,9 +385,11 @@ def read_configuration(args):
         "email_originator": None,
         "use_email": False,
         "use_jamo": False,
+        "use_hpss": False,
         "jamo_url": None,
         "jamo_token": None,
         "jamo_user": None,
+        "logfacility": "local4",
     }
     if args.config and os.path.exists(args.config):
         config = SafeConfigParser()
@@ -376,6 +419,8 @@ def read_configuration(args):
     parser.add_argument("--jamo_user", help="username for jamo user", type=str)
     parser.add_argument("--use_email", help="Use Email for warnings/errors (or Not)", type=is_True)
     parser.add_argument("--daemonize", help="Daemonize the manager process", type=is_True)
+    parser.add_argument("--use_hpss", help="Use HPSS (or Not)", type=is_True)
+    parser.add_argument("--logfacility", help="syslog facility to use", type=str)
     args, remaining_args = parser.parse_known_args(remaining_args)
     return (args, remaining_args)
 
@@ -393,8 +438,15 @@ def daemonize():
     elif pid > 0:
         # this is the parent, exit out
         sys.exit(0)
+
     os.umask(022)
     os.chdir("/")
+    os.setsid()
+
+    pid = os.fork()
+    if pid > 0:
+        sys.exit(0)
+
     devnull = open(os.devnull, "rw")
     for fd in (sys.stdin, sys.stdout, sys.stderr):
         fd.close()
@@ -407,6 +459,17 @@ if __name__ == "__main__":
         import sdm_curl
         config.sdm      = sdm_curl.Curl(config.jamo_url, appToken=config.jamo_token)
         config.sdm_lock = threading.Lock()
+    logFacility = syslog.LOG_LOCAL4
+    if config.logfacility is not None:
+        logFacility = config.logfacility.strip()
+        try: 
+            logFacility = re.search('([\d\w]+)', logFacility).group(0)
+            logFacility = eval "syslog.LOG_%s" % logFacility
+        except:
+            logFacility = syslog.LOG_LOCAL4
+            pass
+    syslog.openlog(logoption=syslog.LOG_PID, facility=logFacility)
+
     if config.daemonize:
         daemonize()
     try:
@@ -418,4 +481,5 @@ if __name__ == "__main__":
         str_stack2 = '\n'.join(traceback.format_stack())
         print '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
         send_email(config, 'PROCMON FAILURE', '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2))
+        syslog.syslog(syslog.LOG_ERR, "PROCMONMANAGER FAILURE: stopped managing, %", str_exc)
     

@@ -16,4 +16,5 @@ jamo_url          = @JAMO_URL@
 jamo_token        = @JAMO_TOKEN@
 jamo_user         = @JAMO_USER@
 use_email         = @MANAGER_USE_EMAIL@
+use_hpss          = @USE_HPSS@
 daemonize         = True
