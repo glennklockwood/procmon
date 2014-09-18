@@ -60,7 +60,9 @@ def get_exception():
     str_exc = traceback.format_exc()
     str_tb = '\n'.join(traceback.format_tb(exc_traceback))
     str_stack2 = '\n'.join(traceback.format_stack())
-    return '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
+    s = '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
+    s = filter(lambda x: x != '\u0000', s)
+    return s.decode('unicode_escape').encode('ascii','ignore')
 
 def start_procMuxer(config, group=None, id=None, prefix=None, pidfile=None):
     args = [config.procMuxerPath, '-c', '60', '-d']
@@ -125,8 +127,9 @@ def archive_hpss(config, fname, ftype, sources = None, doNothing=False):
             shutil.copy2(fname, newpath);
             os.chmod(newpath, 0444)
         except:
-            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s", (fname, newpath, get_exception()))
-            send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
+            except_string = get_exception()
+            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s", (fname, newpath, except_string))
+            send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
 
         prodfileRegex = re.compile('%s\.(\d+)\.h5')
@@ -206,6 +209,13 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
         send_email(config, "failed to register with jamo", "%s\n%s\n" % (fname, ftype, ))
     return posted
 
+def reduce_files_wrapper(config, timeobj, filenames):
+    try:
+        reduce_files(config, timeobj, filenames)
+    except:
+        except_string = get_exception()
+        syslog.syslog(syslog.LOG_ERR, "reducer thread failure: %s" % except_string)
+        send_email(config, "reducer thread failure: %s" % except_string)
 
 def reduce_files(config, timeobj, filenames):
     """Runs the reducer on the files.  Then moves files to final destination,
@@ -232,11 +242,14 @@ def reduce_files(config, timeobj, filenames):
         (somepath,fname) = os.path.split(f)
         newpath = "%s/%s" % (config.target_scratch, fname)
         try:
+            syslog.syslog(syslog.LOG_ERR, "about to move %s to %s " % (f, newpath))
             shutil.move(f, newpath);
+            syslog.syslog(syslog.LOG_ERR, "about to chmod %s " % (newpath))
             os.chmod(newpath, 0444)
         except:
-            syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
-            send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
+            except_string = get_exception()
+            syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+            send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
         if config.use_jamo:
             response = register_jamo(config, newpath, "procmon_stripe_h5")
@@ -244,25 +257,27 @@ def reduce_files(config, timeobj, filenames):
                 sources.append(response['metadata_id'])
 
 
+    if config.use_hpss:
+        archive_hpss(config, product_output, "procmon_reduced_h5", sources)
     try:
         shutil.move(product_output, final_product)
         os.chmod(final_product, 0444)
     except:
-        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
-        send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, get_exception()))
+        except_string = get_exception()
+        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+        send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, except_string))
         return 1
 
     if config.use_jamo:
         register_jamo(config, final_product, "procmon_reduced_h5", sources)
-    if config.use_hpss:
-        archive_hpss(config, final_product, "procmon_reduced_h5", sources)
 
     try:
         shutil.move(bad_output, final_badoutput)
         os.chmod(final_badoutput, 0444)
     except:
-        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
-        send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, get_exception()))
+        except_string = get_exception()
+        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+        send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, except_string))
         return 1
 
     if config.use_jamo:
@@ -355,7 +370,7 @@ def main_loop(config):
                     processing_files.append(new_filename)
 
                 ## create a thread to manage the reduction of the files
-                reduce_thread = threading.Thread(target=reduce_files, args=(config, fc_time, processing_files,))
+                reduce_thread = threading.Thread(target=reduce_files_wrapper, args=(config, fc_time, processing_files,))
                 reduce_thread.start()
 #reduce_threads[fc_time] = reduce_thread
                 last_rotation = fc_time
