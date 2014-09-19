@@ -59,7 +59,7 @@ def get_exception():
     exc_type, exc_value, exc_traceback = sys.exc_info()
     str_exc = traceback.format_exc()
     str_tb = '\n'.join(traceback.format_tb(exc_traceback))
-    str_stack2 = '\n'.join(traceback.format_stack())
+    str_stack2 = '' #'\n'.join(traceback.format_stack())
     s = '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
     s = filter(lambda x: x != '\u0000', s)
     return s.decode('unicode_escape').encode('ascii','ignore')
@@ -132,13 +132,13 @@ def archive_hpss(config, fname, ftype, sources = None, doNothing=False):
             send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
 
-        prodfileRegex = re.compile('%s\.(\d+)\.h5')
+        prodfileRegex = re.compile('%s\.(\d+)\.h5' % config.h5_prefix)
         for a_fname in os.listdir("%s/%s/archiving" % (config.base_prefix, config.group)):
             match = prodfileRegex.match(a_fname)
             hpssPath = "%s/other" % config.h5_prefix
             if match is not None:
-                file_dt = datetime.strptime(match.group(0), "%Y%m%d%H%M%S")
-                hpssPath = "%s/%s/%s" % (config.h5_prefix, file_dt.year, file_dt.month)
+                file_dt = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+                hpssPath = "%s/%04d/%02d" % (config.h5_prefix, int(file_dt.year), int(file_dt.month))
             cmd=["hsi","put -P -d %s/%s/archiving/%s : %s/%s" % (config.base_prefix, config.group, a_fname, hpssPath, a_fname)]
             retval = subprocess.call(cmd)
             if retval == 0:
@@ -473,6 +473,9 @@ if __name__ == "__main__":
         import sdm_curl
         config.sdm      = sdm_curl.Curl(config.jamo_url, appToken=config.jamo_token)
         config.sdm_lock = threading.Lock()
+    if config.use_hpss:
+        config.hpss_lock = threading.Lock()
+
     logFacility = syslog.LOG_LOCAL4
     if config.logfacility is not None:
         logFacility = config.logfacility.strip()
