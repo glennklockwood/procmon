@@ -53,14 +53,16 @@ Subject: MESSAGE FROM PROCMON: %s
         smtp_message = smtplib.SMTP('localhost')
         smtp_message.sendmail(config.email_originator, config.email_list, message)
     except smtplib.SMTPException:
-        print "Error: failed to send email!"
+        syslog.syslog(LOG_ERR, "Error: failed to send email!")
 
 def get_exception():
     exc_type, exc_value, exc_traceback = sys.exc_info()
     str_exc = traceback.format_exc()
     str_tb = '\n'.join(traceback.format_tb(exc_traceback))
-    str_stack2 = '\n'.join(traceback.format_stack())
-    return '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
+    str_stack2 = '' #'\n'.join(traceback.format_stack())
+    s = '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
+    s = filter(lambda x: x != '\u0000', s)
+    return s.decode('unicode_escape').encode('ascii','ignore')
 
 def start_procMuxer(config, group=None, id=None, prefix=None, pidfile=None):
     args = [config.procMuxerPath, '-c', '60', '-d']
@@ -73,7 +75,7 @@ def start_procMuxer(config, group=None, id=None, prefix=None, pidfile=None):
     if pidfile is not None:
         args.extend(['-p',pidfile])
 
-    print "starting proxmuxer with args: ", args
+    syslog.syslog("starting proxmuxer with args: %s" % ' '.join(args))
     return subprocess.call(args, stdin=None, stdout=None, stderr=None)
 
 def get_muxer_pid(config, muxer_id):
@@ -117,7 +119,7 @@ def mkdir_p(path):
         if e.errno == errno.EEXIST and os.path.isdir(path): pass
         else: raise
 
-def archive_hpss(config, fname, ftype, sources = None, doNothing=false):
+def archive_hpss(config, fname, ftype, sources = None, doNothing=False):
     (somepath,core_fname) = os.path.split(fname)
     with config.hpss_lock:
         newpath = "%s/%s/archiving/%s" % (config.base_prefix, config.group, core_fname)
@@ -125,23 +127,24 @@ def archive_hpss(config, fname, ftype, sources = None, doNothing=false):
             shutil.copy2(fname, newpath);
             os.chmod(newpath, 0444)
         except:
-            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s", (fname, newpath, get_exception()))
-            send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
+            except_string = get_exception()
+            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s", (fname, newpath, except_string))
+            send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
 
-        prodfileRegex = re.compile('%s\.(\d+)\.h5')
-        for a_fname in os.listdir("%s/%s/archiving" % (config.base_prefix, config.group):
+        prodfileRegex = re.compile('%s\.(\d+)\.h5' % config.h5_prefix)
+        for a_fname in os.listdir("%s/%s/archiving" % (config.base_prefix, config.group)):
             match = prodfileRegex.match(a_fname)
             hpssPath = "%s/other" % config.h5_prefix
             if match is not None:
-                file_dt = datetime.strptime(match.group(0), "%Y%m%d%H%M%S")
-                hpssPath = "%s/%s/%s" % (config.h5_prefix, file_dt.year, file_dt.month)
+                file_dt = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+                hpssPath = "%s/%04d/%02d" % (config.h5_prefix, int(file_dt.year), int(file_dt.month))
             cmd=["hsi","put -P -d %s/%s/archiving/%s : %s/%s" % (config.base_prefix, config.group, a_fname, hpssPath, a_fname)]
             retval = subprocess.call(cmd)
             if retval == 0:
-                syslog.syslog(LOG_INFO, "successfully archived %s to %s/%s" % (a_fname, hpssPath, a_fname))
+                syslog.syslog(syslog.LOG_INFO, "successfully archived %s to %s/%s" % (a_fname, hpssPath, a_fname))
             else:
-                syslog.syslog(LOG_ERR, "failed to archive %s, %d" % (a_fname, retval))
+                syslog.syslog(syslog.LOG_ERR, "failed to archive %s, %d" % (a_fname, retval))
                 send_email(config, "failed to archive", "%s, %d" % (a_fname, retval))
 
 
@@ -191,7 +194,6 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
         sources = []
 
     if doNothing:
-        print md_final
         return None
     with config.sdm_lock:
         posted = config.sdm.post('api/metadata/file',
@@ -203,10 +205,17 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
                 metadata=md_final,
         )
     if posted is None or 'metadata_id' not in posted:
-        syslog.syslog(LOG_ERR, "failed to register with jamo: %s; %s" % (fname, ftype, ))
+        syslog.syslog(syslog.LOG_ERR, "failed to register with jamo: %s; %s" % (fname, ftype, ))
         send_email(config, "failed to register with jamo", "%s\n%s\n" % (fname, ftype, ))
     return posted
 
+def reduce_files_wrapper(config, timeobj, filenames):
+    try:
+        reduce_files(config, timeobj, filenames)
+    except:
+        except_string = get_exception()
+        syslog.syslog(syslog.LOG_ERR, "reducer thread failure: %s" % except_string)
+        send_email(config, "reducer thread failure: %s" % except_string)
 
 def reduce_files(config, timeobj, filenames):
     """Runs the reducer on the files.  Then moves files to final destination,
@@ -219,7 +228,7 @@ def reduce_files(config, timeobj, filenames):
         reducer_args.extend(['-i', f])
     retval = subprocess.call(reducer_args, stdin=None, stdout=None, stderr=None)
     if retval != 0:
-        syslog.syslog(LOG_ERR, "reducer failed! retcode: %d; cmd: %s" % (retval, " ".join(reducer_args)))
+        syslog.syslog(syslog.LOG_ERR, "reducer failed! retcode: %d; cmd: %s" % (retval, " ".join(reducer_args)))
         send_email(config, "reducer failed!", "retcode: %d\ncmd: %s" % (retval, " ".join(reducer_args)))
         return 1
     (currpath, product_fname) = os.path.split(product_output)
@@ -233,11 +242,14 @@ def reduce_files(config, timeobj, filenames):
         (somepath,fname) = os.path.split(f)
         newpath = "%s/%s" % (config.target_scratch, fname)
         try:
+            syslog.syslog(syslog.LOG_ERR, "about to move %s to %s " % (f, newpath))
             shutil.move(f, newpath);
+            syslog.syslog(syslog.LOG_ERR, "about to chmod %s " % (newpath))
             os.chmod(newpath, 0444)
         except:
-            syslog.syslog(LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
-            send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, get_exception()))
+            except_string = get_exception()
+            syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+            send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
         if config.use_jamo:
             response = register_jamo(config, newpath, "procmon_stripe_h5")
@@ -245,25 +257,27 @@ def reduce_files(config, timeobj, filenames):
                 sources.append(response['metadata_id'])
 
 
+    if config.use_hpss:
+        archive_hpss(config, product_output, "procmon_reduced_h5", sources)
     try:
         shutil.move(product_output, final_product)
         os.chmod(final_product, 0444)
     except:
-        syslog.syslog(LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
-        send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, get_exception()))
+        except_string = get_exception()
+        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+        send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, except_string))
         return 1
 
     if config.use_jamo:
         register_jamo(config, final_product, "procmon_reduced_h5", sources)
-    if config.use_hpss:
-        archive_hpss(config, final_product, "procmon_reduced_h5", sources)
 
     try:
         shutil.move(bad_output, final_badoutput)
         os.chmod(final_badoutput, 0444)
     except:
-        syslog.syslog(LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, get_exception()))
-        send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, get_exception()))
+        except_string = get_exception()
+        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+        send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, except_string))
         return 1
 
     if config.use_jamo:
@@ -272,7 +286,7 @@ def reduce_files(config, timeobj, filenames):
 
 def main_loop(config):
     # create pid directory
-    syslog.syslog(LOG_INFO, "procmonManager: attempting to create directory %s/%s" % (config.base_pid_path, config.group))
+    syslog.syslog(syslog.LOG_INFO, "procmonManager: attempting to create directory %s/%s" % (config.base_pid_path, config.group))
     mkdir_p("%s/%s" % (config.base_pid_path, config.group))
 
     # create working directory
@@ -356,7 +370,7 @@ def main_loop(config):
                     processing_files.append(new_filename)
 
                 ## create a thread to manage the reduction of the files
-                reduce_thread = threading.Thread(target=reduce_files, args=(config, fc_time, processing_files,))
+                reduce_thread = threading.Thread(target=reduce_files_wrapper, args=(config, fc_time, processing_files,))
                 reduce_thread.start()
 #reduce_threads[fc_time] = reduce_thread
                 last_rotation = fc_time
@@ -459,12 +473,15 @@ if __name__ == "__main__":
         import sdm_curl
         config.sdm      = sdm_curl.Curl(config.jamo_url, appToken=config.jamo_token)
         config.sdm_lock = threading.Lock()
+    if config.use_hpss:
+        config.hpss_lock = threading.Lock()
+
     logFacility = syslog.LOG_LOCAL4
     if config.logfacility is not None:
         logFacility = config.logfacility.strip()
         try: 
             logFacility = re.search('([\d\w]+)', logFacility).group(0)
-            logFacility = eval "syslog.LOG_%s" % logFacility
+            logFacility = eval("syslog.LOG_%s" % logFacility)
         except:
             logFacility = syslog.LOG_LOCAL4
             pass
@@ -479,7 +496,6 @@ if __name__ == "__main__":
         str_exc = traceback.format_exc()
         str_tb = '\n'.join(traceback.format_tb(exc_traceback))
         str_stack2 = '\n'.join(traceback.format_stack())
-        print '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2)
         send_email(config, 'PROCMON FAILURE', '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2))
         syslog.syslog(syslog.LOG_ERR, "PROCMONMANAGER FAILURE: stopped managing, %", str_exc)
     

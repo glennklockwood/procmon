@@ -48,18 +48,18 @@ IF ( USE_RABBITMQ_C )
     SET( RABBITMQ_C_LIB_DIR ${RABBITMQ_C_DIR}/lib )
     SET( RABBITMQ_C_LIBRARIES "${RABBITMQ_C_DIR}/lib/librabbitmq.fpic.a" )
 ENDIF ( USE_RABBITMQ_C )
-IF ( USE_ZEROMQ ) 
-    SET( ZEROMQ_DIR "${CMAKE_BINARY_DIR}/zeromq" )
-    INCLUDE( ExternalProject )
-    ExternalProject_Add(
-        zeromq-4.0.4
-        URL http://download.zeromq.org/zeromq-4.0.4.tar.gz
-        CONFIGURE_COMMAND ./configure --prefix=${ZEROMQ_DIR} --disable-dependency-tracking --enable-static --disable-shared --with-pic
-        PREFIX ${ZEROMQ_DIR}
-        BUILD_COMMAND make
-        BUILD_IN_SOURCE 1
-    )
-ENDIF ( USE_ZEROMQ )
+#IF ( USE_ZEROMQ ) 
+#    SET( ZEROMQ_DIR "${CMAKE_BINARY_DIR}/zeromq" )
+#    INCLUDE( ExternalProject )
+#    ExternalProject_Add(
+#        zeromq-4.0.4
+#        URL http://download.zeromq.org/zeromq-4.0.4.tar.gz
+#        CONFIGURE_COMMAND ./configure --prefix=${ZEROMQ_DIR} --disable-dependency-tracking --enable-static --disable-shared --with-pic
+#        PREFIX ${ZEROMQ_DIR}
+#        BUILD_COMMAND make
+#        BUILD_IN_SOURCE 1
+#    )
+#ENDIF ( USE_ZEROMQ )
 
 IF ( BUILD_PROCMON )
     ADD_SUBDIRECTORY( src )
