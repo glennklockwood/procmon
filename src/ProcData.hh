@@ -121,11 +121,15 @@ typedef struct _procobs {
     }
 } procobs;
 
-typedef struct _genericobs {
+class ProcmonDataset {
+    public:
+    virtual bool equivRecord(const ProcmonDataset &other) const = 0;
+    virtual bool cmpRecord(const ProcomnDataset &other) const = 0;
+
     char identifier[IDENTIFIER_SIZE];
     char subidentifier[IDENTIFIER_SIZE];
     unsigned long recTime;
     unsigned long recTimeUSec;
-} genericobs;
+};
 
 #endif
