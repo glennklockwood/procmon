@@ -11,7 +11,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <pthread.h>
+
+#include <tbb/tbb.h>
+#include <tbb/task.h>
+#include <tbb/task_scheduler_init.h>
+#include <tbb/spin_mutex.h>
 
 #include <boost/program_options.hpp>
 #define PROCMON_SUMMARIZE_VERSION 2.0
@@ -22,13 +26,15 @@ class AnalysisTask;
 
 struct H5FileControl {
     ProcHDF5IO *file;
-    pthread_mutex_t mutex;
+    tbb::spin_mutex mutex;
+
+    tbb::task *H5FileControl(ProcHDF5IO *_file):
+        file(_file)
+    {
+    }
 };
 
-
-
-
-struct HostCountData {
+ProcHDF5IO *HostCountData {
     char hostname[256];
     size_t n_procdata;
     size_t n_procstat;
@@ -87,20 +93,6 @@ struct ProcessData {
 };
 
 
-pthread_mutex_t workQueue_rw_mutex;
-deque<AnalysisTask *> workQueue;
-
-void *workerThread(void *args) {
-    while (!cleanUp) {
-        pthread_mutex_lock(&workQueue_rw_mutex);
-        AnalysisTask *task = *(workQueue.begin());
-        workQueue.pop_front();
-        pthread_mutex_unlock(&workQueue_rw_mutex);
-        task->runTask();
-        task->signal();
-    }
-}
-
 /* ProcReducer
     * Takes in procmon data from all sources and only writes the minimal record
     * Writes an HDF5 file for all procdata foreach day
@@ -111,79 +103,51 @@ void version() {
     exit(0);
 }
 
-class AnalysisTask {
+class ReadH5Metadata : public tbb::task {
     public:
-    AnalysisTask(pthread_cond_t *_cond) {
-        completed = false;
-        status = false;
-        cond = _cond;
-    }
-    virtual bool runTask() = 0;
-    virtual const bool isComplete() const {
-        return completed;
-    }
-    virtual const bool exitStatus() const {
-        return status;
-    }
-    void signal() {
-        if (cond != NULL) pthread_cond_signal(cond);
-    }
-
-    protected:
-    bool completed;
-    bool status;
-};
-
-class ReadH5Metadata : public AnalysisTask {
-    public:
-    ReadH5Metadata(pthread_cond_t *_cond, ProcHDF5IO *_inputFile, vector<HostCountData> **_hostCounts):
-            inputFile(_h5file),
-            hostCounts(_hostCounts),
-            AnalysisTask(_cond)
+    ReadH5Metadata(H5FileControl *_inputFile, vector<HostCountData> **_hostCounts):
+            input(_inputFile),
+            hostCounts(_hostCounts)
     {
     }
 
-    virtual bool runTask() {
-        if (completed) return status;
+    tbb::task *execute() {
+        input->mutex->lock();
         vector<string> hosts;
 
-        inputFile->get_hosts(hosts);
+        input->file->get_hosts(hosts);
         *hostCounts = new vector<HostCountData>(hosts.size());
         vector<HostCountData>& l_hostCounts = **hostCounts;
 
         int idx = 0;
         for (auto it: hosts) {
-            inputFile->set_context(it, "any", "any");
+            input->file->set_context(it, "", "");
 
             int len = it.length();
             l_hostCounts[idx].setHostname(it.c_str());
-            l_hostCounts[idx].n_procdata = inputFile->get_nprocdata();
-            l_hostCounts[idx].n_procstat = inputFile->get_nprocstat();
-            l_hostCounts[idx].n_procfd   = inputFile->get_nprocfd();
-            l_hostCounts[idx].n_procobs  = inputFile->get_nprocobs();
+            l_hostCounts[idx].n_procdata = input->file->get_nprocdata();
+            l_hostCounts[idx].n_procstat = input->file->get_nprocstat();
+            l_hostCounts[idx].n_procfd   = input->file->get_nprocfd();
+            l_hostCounts[idx].n_procobs  = input->file->get_nprocobs();
 
             idx++;
         }
-        sort(l_hostCounts.begin(), l_hostCounts.end());
-        status = true;
-        completed = true;
-        return status;
+        tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end());
+        input->mutex->unlock();
+        return NULL;
     }
 
     private:
-    ProcHDF5IO *inputFile;
+    H5ControlFile *input;
     vector<HostCountData> **hostCounts;
 };
 
-class ReadH5ProcessData : public AnalysisTask {
+class ReadH5ProcessData : public tbb::task {
     public:
-    ReadH5ProcessData(pthread_cond_t *_cond, ProcHDF5IO *_inputFile,
-            pthread_mutex_t *_h5mutex, const char *_hostname, HostCountData &cnt,
-            HostCountData &cumsum):
-        inputFile(_inputFile),
-        hostname(_hostname),
-        h5mutex(_h5mutex),
-        AnalysisTask(_cond)
+    ReadH5ProcessData(H5ControlFile *_input, const char *_hostname,
+            HostCountData &cnt, HostCountData &cumsum):
+        input(_input),
+        hostname(_hostname)
     {
         ps_read = pd_read = fd_read = obs_read = 0;
         ps_count = cnt.n_procstat;
@@ -196,34 +160,28 @@ class ReadH5ProcessData : public AnalysisTask {
         obs_offset = cumsum.n_procobs;
     }
 
-    bool runTask() {
-        if (completed) return status;
-
-        pthread_mutex_lock(h5mutex);
-        inputFile->set_context(hostname, "", "");
+    tbb::task *execute() {
+        input->mutex->lock();
+        input->file->set_context(hostname, "", "");
 
         procstat *ps_ptr = &(output->ps[ps_offset]);
-        ps_read = inputFile->read_procstat(ps_ptr, 0, ps_count);
+        ps_read = input->file->read_procstat(ps_ptr, 0, ps_count);
 
         procstat *pd_ptr = &(output->pd[pd_offset]);
-        pd_read = inputFile->read_procdata(pd_ptr, 0, pd_count);
+        pd_read = input->file->read_procdata(pd_ptr, 0, pd_count);
 
         procfd *fd_ptr = &(output->fd[fd_offset]);
-        fd_read = inputFile->read_procfd(fd_ptr, 0, fd_count);
+        fd_read = input->file->read_procfd(fd_ptr, 0, fd_count);
 
         procobs *obs_ptr = &(output->obs[obs_offset]);
-        obs_read = inputFile->read_procobs(obs_ptr, 0, obs_count);
+        obs_read = input->file->read_procobs(obs_ptr, 0, obs_count);
 
-        pthread_mutex_unlock(h5mutex);
-
-        status = true;
-        completed = true; 
-        return status;
+        input->mutex->unlock();
+        return NULL;
     }
 
     private:
-    ProcHDF5IO  *inputFile;
-    pthread_mutex_t *h5mutex;
+    H5ControlFile  *input;
     const char *hostname;
 
     ProcessData *output;
@@ -284,8 +242,6 @@ public:
     string input_filename;
 };
 
-
-
 vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
 {
     unordered_map<string, HostCountData *> mergeMap;
@@ -314,87 +270,22 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
 
 int main(int argc, char **argv) {
     ProcmonSummarizeConfig config(argc, argv);
-    pthread_mutex_t barlock;
-    pthread_cond_t  barsig;
 
-    pthread_mutex_init(&workQueue_rw_lock);
-    pthread_mutex_init(&barlock, NULL);
-    pthread_mutex_lock(&barlock);
-    pthread_mutex_lock(&workQueue_rw_lock);
-
-    /* start up worker threads */
-    pthread_t tid;
-    for (int i = 0; i < config.nThreads; ++i) {
-        int ret = pthread_create(&tid, NULL, worker_start, &config);
-        if (ret != 0) {
-            cerr << "Failed to create worker thread, exiting." << endl;
-            exit(1);
-        }
-    }
+    tbb::task_scheduler_init init(config.threads != 0 ? config.threads : tbb::task_scheduler_init::automatic);
 
     /* open input h5 files, walk the metadata */
     vector<ProcHDF5IO *> inputFiles;
     vector<vector<HostCountData>* > inputHostCounts;
-    vector<ReadH5Metadata*> readTasks;
+    tbb::task_list metadataTasks;
     for (auto it: config.getProcmonH5Inputs()) {
-        ProcHDF5IO *input = new ProcHDF5IO(it, FILE_MODE_READ);
+        H5FileControl *input = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
         vector<HostCountData> *data = NULL;
         inputHostCounts.push_back(data);
 
-        ReadH5Metadata *task = new ReadH5Metadata(&barlock, input, &data);
-        readTasks.push_back(task);
-        workQueue.push_back(task);
+        metdataTasks.push_back(*new(tbb::task::allocate_root()) ReadH5Metadata(input, &data));
     }
-    pthread_mutex_unlock(&workQueue_rw_lock);
-    bool done = false;
-    while (!done) {
-        done = true
-        pthread_cond_wait(&barsig); //prevent busy wait
-        for (auto task: readTasks) {
-            done &= task->isComplete(); //safe to look at isComplete because it 
-                                        //is changed well before barsig is tripped
-        }
-    }
+    tbb::task::spawn_root_and_wait(list);
     globalHostCounts = mergeHostCounts(inputHostCounts);
-
-
-
-
-
-
-
-    string hostname, identifier, subidentifier;
-
-    int saveCnt = 0;
-    int nRecords = 0;
-
-    char buffer[1024];
-    vector<string> hosts;
-    inputFile->get_hosts(hosts);
-    cout << "\"hosts\":{" << endl;
-    for (auto ptr = hosts.begin(), end = hosts.end(); ptr != end; ++ptr) {
-        hostname = *ptr;
-        identifier = "any";
-        subidentifier = "any";
-        inputFile->set_context(hostname, identifier, subidentifier);
-        int n_procdata = inputFile->get_nprocdata();
-        int n_procstat = inputFile->get_nprocstat();
-        int n_procfd = inputFile->get_nprocfd();
-        int n_procobs = inputFile->get_nprocobs();
-
-        cout << "\"" << hostname << "\": {" << endl;
-        cout << "  \"nprocdata\":" << n_procdata << "," << endl;
-        cout << "  \"nprocstat\":" << n_procstat << "," << endl;
-        cout << "  \"nprocfd\":" << n_procfd << "," << endl;
-        cout << "  \"nprocobs\":" << n_procobs << endl;
-        cout << "}";
-        if (ptr + 1 != hosts.end()) cout << ",";
-        cout << endl;
-    }
-    cout << "}" << endl;
-    cout << "}" << endl;
-
-    delete inputFile;
 
     return 0;
 }
