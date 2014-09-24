@@ -3,10 +3,12 @@
 #include "ProcIO.hh"
 #include "ProcReducerData.hh"
 
+#include <algorithm>
 #include <signal.h>
 #include <string.h>
 #include <iostream>
 #include <deque>
+#include <unordered_map>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -15,6 +17,7 @@
 #include <tbb/tbb.h>
 #include <tbb/task.h>
 #include <tbb/task_scheduler_init.h>
+#include <tbb/cache_aligned_allocator.h>
 #include <tbb/spin_mutex.h>
 
 #include <boost/program_options.hpp>
@@ -28,13 +31,13 @@ struct H5FileControl {
     ProcHDF5IO *file;
     tbb::spin_mutex mutex;
 
-    tbb::task *H5FileControl(ProcHDF5IO *_file):
+    H5FileControl(ProcHDF5IO *_file):
         file(_file)
     {
     }
 };
 
-ProcHDF5IO *HostCountData {
+struct HostCountData {
     char hostname[256];
     size_t n_procdata;
     size_t n_procstat;
@@ -46,7 +49,7 @@ ProcHDF5IO *HostCountData {
         n_procdata = 0;
         n_procstat = 0;
         n_procfd = 0;
-        n_probobs = 0;
+        n_procobs = 0;
     }
 
     void setHostname(const char *_hostname) {
@@ -79,16 +82,30 @@ ProcHDF5IO *HostCountData {
 };
 
 struct ProcessData {
-    vector<procstat> *ps;
-    vector<procdata> *pd;
-    vector<procfd>   *fd;
-    vector<procobs>  *obs;
+    procstat *ps;
+    procdata *pd;
+    procfd   *fd;
+    procobs  *obs;
 
-    ProcessData(HostCountData& cnt) {
-        ps = new vector<procstat>(cnt.n_procstat);
+    int n_ps;
+    int n_pd;
+    int n_fd;
+    int n_obs;
+
+    ProcessData(const HostCountData &cnt) {
+        ps = new procstat[cnt.n_procstat];
+        pd = new procdata[cnt.n_procdata];
+        fd = new procfd[cnt.n_procfd];
+        obs = new procobs[cnt.n_procobs];
+        n_ps = cnt.n_procstat;
+        n_pd = cnt.n_procdata;
+        n_fd = cnt.n_procfd;
+        n_obs = cnt.n_procobs;
+        /*
         pd = new vector<procdata>(cnt.n_procdata);
         fd = new vector<procfd>(cnt.n_procfd);
         obs = new vector<procobs>(cnt.n_procobs);
+        */
     }
 };
 
@@ -105,46 +122,47 @@ void version() {
 
 class ReadH5Metadata : public tbb::task {
     public:
-    ReadH5Metadata(H5FileControl *_inputFile, vector<HostCountData> **_hostCounts):
+    ReadH5Metadata(H5FileControl *_inputFile, vector<HostCountData*> **_hostCounts):
             input(_inputFile),
             hostCounts(_hostCounts)
     {
     }
 
     tbb::task *execute() {
-        input->mutex->lock();
+        input->mutex.lock();
         vector<string> hosts;
 
         input->file->get_hosts(hosts);
-        *hostCounts = new vector<HostCountData>(hosts.size());
-        vector<HostCountData>& l_hostCounts = **hostCounts;
+        *hostCounts = new vector<HostCountData*>(hosts.size());
+        vector<HostCountData*>& l_hostCounts = **hostCounts;
 
         int idx = 0;
         for (auto it: hosts) {
             input->file->set_context(it, "", "");
 
             int len = it.length();
-            l_hostCounts[idx].setHostname(it.c_str());
-            l_hostCounts[idx].n_procdata = input->file->get_nprocdata();
-            l_hostCounts[idx].n_procstat = input->file->get_nprocstat();
-            l_hostCounts[idx].n_procfd   = input->file->get_nprocfd();
-            l_hostCounts[idx].n_procobs  = input->file->get_nprocobs();
+            l_hostCounts[idx] = new HostCountData();
+            l_hostCounts[idx]->setHostname(it.c_str());
+            l_hostCounts[idx]->n_procdata = input->file->get_nprocdata();
+            l_hostCounts[idx]->n_procstat = input->file->get_nprocstat();
+            l_hostCounts[idx]->n_procfd   = input->file->get_nprocfd();
+            l_hostCounts[idx]->n_procobs  = input->file->get_nprocobs();
 
             idx++;
         }
         tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end());
-        input->mutex->unlock();
+        input->mutex.unlock();
         return NULL;
     }
 
     private:
-    H5ControlFile *input;
-    vector<HostCountData> **hostCounts;
+    H5FileControl *input;
+    vector<HostCountData*> **hostCounts;
 };
 
 class ReadH5ProcessData : public tbb::task {
     public:
-    ReadH5ProcessData(H5ControlFile *_input, const char *_hostname,
+    ReadH5ProcessData(H5FileControl *_input, const char *_hostname,
             HostCountData &cnt, HostCountData &cumsum):
         input(_input),
         hostname(_hostname)
@@ -161,13 +179,13 @@ class ReadH5ProcessData : public tbb::task {
     }
 
     tbb::task *execute() {
-        input->mutex->lock();
+        input->mutex.lock();
         input->file->set_context(hostname, "", "");
 
         procstat *ps_ptr = &(output->ps[ps_offset]);
         ps_read = input->file->read_procstat(ps_ptr, 0, ps_count);
 
-        procstat *pd_ptr = &(output->pd[pd_offset]);
+        procdata *pd_ptr = &(output->pd[pd_offset]);
         pd_read = input->file->read_procdata(pd_ptr, 0, pd_count);
 
         procfd *fd_ptr = &(output->fd[fd_offset]);
@@ -176,12 +194,12 @@ class ReadH5ProcessData : public tbb::task {
         procobs *obs_ptr = &(output->obs[obs_offset]);
         obs_read = input->file->read_procobs(obs_ptr, 0, obs_count);
 
-        input->mutex->unlock();
+        input->mutex.unlock();
         return NULL;
     }
 
     private:
-    H5ControlFile  *input;
+    H5FileControl  *input;
     const char *hostname;
 
     ProcessData *output;
@@ -234,8 +252,11 @@ public:
 
         if (nThreads < 1) {
             cerr << "Need at least one (1) worker thread!" << endl;
-            usage(options, 1);
+            //usage(options, 1);
         }
+    }
+    const vector<string> &getProcmonH5Inputs() {
+        return procmonh5_files;
     }
     bool debug;
 
@@ -246,8 +267,9 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
 {
     unordered_map<string, HostCountData *> mergeMap;
     vector<HostCountData> *ret = NULL;
-    for (auto it: counts) {
-        for (auto host: it) {
+    for (auto it = counts.begin(); it != counts.end(); ++it) {
+        vector<HostCountData> &count = **it;
+        for (auto host: count) {
             auto loc = mergeMap.find(host.hostname);
             HostCountData *tgt = NULL;
             if (loc == mergeMap.end()) {
@@ -262,30 +284,30 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
     ret = new vector<HostCountData>(mergeMap.size());
     size_t idx = 0;
     for (auto it: mergeMap) {
-        (*it)[idx++] = *(it.second);
+        (*ret)[idx++] = *(it.second);
     }
-    sort(ret->begin(), ret->end());
+    //sort(ret->begin(), ret->end());
     return ret;
 }
 
 int main(int argc, char **argv) {
     ProcmonSummarizeConfig config(argc, argv);
 
-    tbb::task_scheduler_init init(config.threads != 0 ? config.threads : tbb::task_scheduler_init::automatic);
+    tbb::task_scheduler_init init(config.nThreads != 0 ? config.nThreads : tbb::task_scheduler_init::automatic);
 
     /* open input h5 files, walk the metadata */
     vector<ProcHDF5IO *> inputFiles;
-    vector<vector<HostCountData>* > inputHostCounts;
+    vector<vector<HostCountData*>* > inputHostCounts;
     tbb::task_list metadataTasks;
     for (auto it: config.getProcmonH5Inputs()) {
         H5FileControl *input = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
-        vector<HostCountData> *data = NULL;
+        vector<HostCountData*> *data = NULL;
         inputHostCounts.push_back(data);
 
-        metdataTasks.push_back(*new(tbb::task::allocate_root()) ReadH5Metadata(input, &data));
+        metadataTasks.push_back(*new(tbb::task::allocate_root()) ReadH5Metadata(input, &data));
     }
-    tbb::task::spawn_root_and_wait(list);
-    globalHostCounts = mergeHostCounts(inputHostCounts);
+    tbb::task::spawn_root_and_wait(metadataTasks);
+    //vector<HostCountData> *globalHostCounts = mergeHostCounts(inputHostCounts);
 
     return 0;
 }

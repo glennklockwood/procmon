@@ -41,6 +41,8 @@ IF ( USE_HDF5 )
     FIND_PACKAGE( HDF5 )
 ENDIF ( USE_HDF5 )
 
+FIND_PACKAGE(TBB)
+
 CONFIGURE_FILE(
     "config.h.in"
     "config.h"
