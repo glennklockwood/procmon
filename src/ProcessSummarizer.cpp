@@ -38,39 +38,37 @@ struct H5FileControl {
 };
 
 struct HostCountData {
-    char hostname[256];
+    string hostname;
     size_t n_procdata;
     size_t n_procstat;
     size_t n_procfd;
     size_t n_procobs;
+    bool set;
 
     HostCountData() {
-        memset(hostname, 0, sizeof(char) * 256);
+        hostname = "";
         n_procdata = 0;
         n_procstat = 0;
         n_procfd = 0;
         n_procobs = 0;
+        set = false;
     }
 
     void setHostname(const char *_hostname) {
-        strncpy(hostname, _hostname, 256);
-        hostname[255] = 0;
+        hostname = _hostname;
+        set = true;
     }
 
     HostCountData(const HostCountData& other) {
-        setHostname(other.hostname);
+        setHostname(other.hostname.c_str());
         n_procdata = other.n_procdata;
         n_procstat = other.n_procstat;
         n_procfd   = other.n_procfd;
         n_procobs  = other.n_procobs;
     }
 
-    bool operator<(const HostCountData& other) {
-        if (strncmp(hostname, other.hostname, 256) < 0) return true;
-        if (n_procdata < other.n_procdata) return true;
-        if (n_procstat < other.n_procstat) return true;
-        if (n_procfd < other.n_procfd) return true;
-        if (n_procobs < other.n_procobs) return true;
+    const bool operator<(const HostCountData& other) const {
+        return hostname < other.hostname;
     }
 
     void operator+=(const HostCountData &other) {
@@ -80,6 +78,13 @@ struct HostCountData {
         n_procobs  += other.n_procobs;
     }
 };
+
+bool HostCountDataPtrCmp(const HostCountData *a, const HostCountData *b) {
+    printf("Compare: %lu, %lu\n", a, b);
+    if (a == NULL && b != NULL) { return true; }
+    if (b == NULL) return false;
+    return *a < *b;
+}
 
 struct ProcessData {
     procstat *ps;
@@ -122,7 +127,7 @@ void version() {
 
 class ReadH5Metadata : public tbb::task {
     public:
-    ReadH5Metadata(H5FileControl *_inputFile, vector<HostCountData*> **_hostCounts):
+    ReadH5Metadata(H5FileControl *_inputFile, vector<HostCountData> **_hostCounts):
             input(_inputFile),
             hostCounts(_hostCounts)
     {
@@ -133,31 +138,32 @@ class ReadH5Metadata : public tbb::task {
         vector<string> hosts;
 
         input->file->get_hosts(hosts);
-        *hostCounts = new vector<HostCountData*>(hosts.size());
-        vector<HostCountData*>& l_hostCounts = **hostCounts;
+        *hostCounts = new vector<HostCountData>(hosts.size());
+        vector<HostCountData>& l_hostCounts = **hostCounts;
 
         int idx = 0;
         for (auto it: hosts) {
             input->file->set_context(it, "", "");
 
             int len = it.length();
-            l_hostCounts[idx] = new HostCountData();
-            l_hostCounts[idx]->setHostname(it.c_str());
-            l_hostCounts[idx]->n_procdata = input->file->get_nprocdata();
-            l_hostCounts[idx]->n_procstat = input->file->get_nprocstat();
-            l_hostCounts[idx]->n_procfd   = input->file->get_nprocfd();
-            l_hostCounts[idx]->n_procobs  = input->file->get_nprocobs();
+//l_hostCounts[idx] = new HostCountData();
+            l_hostCounts[idx].setHostname(it.c_str());
+            l_hostCounts[idx].n_procdata = input->file->get_nprocdata();
+            l_hostCounts[idx].n_procstat = input->file->get_nprocstat();
+            l_hostCounts[idx].n_procfd   = input->file->get_nprocfd();
+            l_hostCounts[idx].n_procobs  = input->file->get_nprocobs();
 
             idx++;
         }
-        tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end());
+        sort(l_hostCounts.begin(), l_hostCounts.end());//, HostCountDataPtrCmp);
+        //tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end(), HostCountDataPtrCmp);
         input->mutex.unlock();
         return NULL;
     }
 
     private:
     H5FileControl *input;
-    vector<HostCountData*> **hostCounts;
+    vector<HostCountData> **hostCounts;
 };
 
 class ReadH5ProcessData : public tbb::task {
@@ -263,12 +269,17 @@ public:
     string input_filename;
 };
 
-vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
+vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> **>& counts)
 {
     unordered_map<string, HostCountData *> mergeMap;
     vector<HostCountData> *ret = NULL;
     for (auto it = counts.begin(); it != counts.end(); ++it) {
-        vector<HostCountData> &count = **it;
+        if (*it == NULL) {
+            /* something failed with the host count parsing */
+            cerr << "FAILURE: no data for host count" << endl;
+            exit(1);
+        }
+        vector<HostCountData> &count = ***it;
         for (auto host: count) {
             auto loc = mergeMap.find(host.hostname);
             HostCountData *tgt = NULL;
@@ -276,6 +287,7 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
                 tgt = new HostCountData(host);
                 mergeMap[host.hostname] = tgt;
             } else {
+                tgt = loc->second;
                 *tgt += host;
             }
         }
@@ -285,8 +297,10 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> *>& counts)
     size_t idx = 0;
     for (auto it: mergeMap) {
         (*ret)[idx++] = *(it.second);
+        delete it.second;
     }
-    //sort(ret->begin(), ret->end());
+    sort(ret->begin(), ret->end());//, HostCountDataPtrCmp);
+    //tbb::parallel_sort(ret->begin(), ret->end(), HostCountDataPtrCmp);
     return ret;
 }
 
@@ -297,17 +311,22 @@ int main(int argc, char **argv) {
 
     /* open input h5 files, walk the metadata */
     vector<ProcHDF5IO *> inputFiles;
-    vector<vector<HostCountData*>* > inputHostCounts;
+    vector<vector<HostCountData>** > inputHostCounts;
     tbb::task_list metadataTasks;
     for (auto it: config.getProcmonH5Inputs()) {
+        cout << "preparing " << it << endl;
         H5FileControl *input = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
-        vector<HostCountData*> *data = NULL;
-        inputHostCounts.push_back(data);
+        vector<HostCountData> *data = NULL;
+        inputHostCounts.push_back(&data);
 
         metadataTasks.push_back(*new(tbb::task::allocate_root()) ReadH5Metadata(input, &data));
     }
     tbb::task::spawn_root_and_wait(metadataTasks);
-    //vector<HostCountData> *globalHostCounts = mergeHostCounts(inputHostCounts);
+    vector<HostCountData> *globalHostCounts = mergeHostCounts(inputHostCounts);
+
+    for (auto it: *globalHostCounts) {
+        cout << it.hostname << "; " << it.n_procstat << endl;
+    }
 
     return 0;
 }
