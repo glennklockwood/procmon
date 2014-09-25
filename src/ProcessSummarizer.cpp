@@ -35,6 +35,11 @@ struct H5FileControl {
         file(_file)
     {
     }
+
+    ~H5FileControl() {
+        delete file;
+    }
+
 };
 
 struct HostCountData {
@@ -155,8 +160,8 @@ class ReadH5Metadata : public tbb::task {
 
             idx++;
         }
-        sort(l_hostCounts.begin(), l_hostCounts.end());//, HostCountDataPtrCmp);
-        //tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end(), HostCountDataPtrCmp);
+        //sort(l_hostCounts.begin(), l_hostCounts.end());//, HostCountDataPtrCmp);
+        tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end());//, HostCountDataPtrCmp);
         input->mutex.unlock();
         return NULL;
     }
@@ -299,8 +304,8 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> **>& counts)
         (*ret)[idx++] = *(it.second);
         delete it.second;
     }
-    sort(ret->begin(), ret->end());//, HostCountDataPtrCmp);
-    //tbb::parallel_sort(ret->begin(), ret->end(), HostCountDataPtrCmp);
+    //sort(ret->begin(), ret->end());//, HostCountDataPtrCmp);
+    tbb::parallel_sort(ret->begin(), ret->end());//, HostCountDataPtrCmp);
     return ret;
 }
 
@@ -310,23 +315,47 @@ int main(int argc, char **argv) {
     tbb::task_scheduler_init init(config.nThreads != 0 ? config.nThreads : tbb::task_scheduler_init::automatic);
 
     /* open input h5 files, walk the metadata */
-    vector<ProcHDF5IO *> inputFiles;
+    vector<H5FileControl *> inputFiles;
     vector<vector<HostCountData>** > inputHostCounts;
     tbb::task_list metadataTasks;
     for (auto it: config.getProcmonH5Inputs()) {
-        cout << "preparing " << it << endl;
         H5FileControl *input = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
         vector<HostCountData> *data = NULL;
         inputHostCounts.push_back(&data);
+        inputFiles.push_back(input);
 
-        metadataTasks.push_back(*new(tbb::task::allocate_root()) ReadH5Metadata(input, &data));
+        ReadH5Metadata task(input, &data);
+        task.execute();
     }
-    tbb::task::spawn_root_and_wait(metadataTasks);
     vector<HostCountData> *globalHostCounts = mergeHostCounts(inputHostCounts);
 
     for (auto it: *globalHostCounts) {
         cout << it.hostname << "; " << it.n_procstat << endl;
     }
+    vector<HostCountData> cumulativeSum(globalHostCounts->size());
+    vector<HostCountData*> hostCountPtrs(inputFiles.size());
+    for (size_t idx = 0; idx < hostCountPtrs.size(); ++idx) {
+        hostCountsPtrs[idx] = inputHostCounts[idx];
+    for (size_t idx = 0; idx < globalHostCounts->size(); ++idx) {
+        HostCountData *host = (*globalHostCounts)[idx];
+        ProcessData *processData = new ProcessData((*globalHostCounts)[idx]);
+
+        for (size_t fileIdx = 0; fileIdx < inputFiles.size(); ++fileIdx) {
+            HostCountData *ptr = hostCountsPtrs[fileIdx];
+            while (ptr != NULL && host != NULL && ptr->hostname != host->hostname) {
+                ptr++;
+            }
+            hostCountsPtrs[fileIdx] = ptr;
+            cumulativeSum[fileIdx] += *ptr;
+
+
+
+
+        }
+
+        delete processData;
+    }
+
 
     return 0;
 }
