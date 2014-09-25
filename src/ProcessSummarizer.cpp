@@ -117,6 +117,13 @@ struct ProcessData {
         obs = new vector<procobs>(cnt.n_procobs);
         */
     }
+
+    ~ProcessData() {
+        delete ps;
+        delete pd;
+        delete fd;
+        delete obs;
+    }
 };
 
 
@@ -335,17 +342,18 @@ int main(int argc, char **argv) {
     vector<HostCountData> cumulativeSum(globalHostCounts->size());
     vector<HostCountData*> hostCountPtrs(inputFiles.size());
     for (size_t idx = 0; idx < hostCountPtrs.size(); ++idx) {
-        hostCountsPtrs[idx] = inputHostCounts[idx];
+        hostCountPtrs[idx] = &((**(inputHostCounts[idx]))[0]);
+    }
     for (size_t idx = 0; idx < globalHostCounts->size(); ++idx) {
-        HostCountData *host = (*globalHostCounts)[idx];
+        HostCountData *host = &((*globalHostCounts)[idx]);
         ProcessData *processData = new ProcessData((*globalHostCounts)[idx]);
 
         for (size_t fileIdx = 0; fileIdx < inputFiles.size(); ++fileIdx) {
-            HostCountData *ptr = hostCountsPtrs[fileIdx];
+            HostCountData *ptr = hostCountPtrs[fileIdx];
             while (ptr != NULL && host != NULL && ptr->hostname != host->hostname) {
                 ptr++;
             }
-            hostCountsPtrs[fileIdx] = ptr;
+            hostCountPtrs[fileIdx] = ptr;
             cumulativeSum[fileIdx] += *ptr;
 
 
