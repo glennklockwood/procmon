@@ -8,6 +8,8 @@
 #include <cctype>
 #include <locale>
 #include <array>
+#include <ctype.h>
+#include <string.h>
 
 typedef boost::tokenizer<boost::char_separator<char> > tokenizer;
 
@@ -15,12 +17,6 @@ struct ProcessSummary: public procobs {
     public:
 
     ProcessSummary();
-    void update(const procstat *);
-    update(const procdata *);
-    update(const procfd *);
-    normalize(ProcessSummary *, time_t baseline);
-
-
 
     /* from procdata */
     char execName[EXEBUFFER_SIZE];
@@ -115,17 +111,10 @@ struct ProcessSummary: public procobs {
 };
 
 static inline std::string &trim(std::string &s) {
-    s.erase(s.begin(), find_if(s.begin(), s.end(), not1(isspace)));
-    s.erase(find_if(s.rbegin(), s.rend(), not1(isspace)).base(), s.end());
+    s.erase(s.begin(), find_if(s.begin(), s.end(), [](const char c){return isspace(c) == 0;}));
+    s.erase(find_if(s.rbegin(), s.rend(), [](const char c){return isspace(c) == 0;}).base(), s.end());
     return s;
 }
-
-class JavaScriptable;
-class PythonScriptable;
-class PerlScriptable;
-class RubyScriptable;
-class BashScriptable;
-class CshScriptable;
 
 class Scriptable {
     protected:
@@ -135,7 +124,8 @@ class Scriptable {
         boost::char_separator<char> sep("|");
         tokenizer tokens(_cmdArgs, sep);
         for (auto token: tokens) {
-            cmdArgs.insert(trim(token));
+            trim(token);
+            cmdArgs.push_back(token);
         }
     }
 
@@ -143,25 +133,8 @@ class Scriptable {
     vector<string> cmdArgs;
 
     public:
-    static Scriptable *getScriptable(const char *exePath, const char *cmdArgs) {
-        const char *execName = exePath;
-        const char *last_slash = strrchr(exePath, '/');
-        if (last_slash != NULL) execName = last_slash + 1;
-        if (strncmp(execName, "java") == 0) {
-            return new JavaScriptble(exePath, cmdArgs);
-        } else if (strncmp(execName, "python", 6) == 0) {
-            return new PythonScriptable(exePath, cmdArgs);
-        } else if (strncmp(execName, "perl", 4) == 0) {
-            return new PerlScriptable(exePath, cmdArgs);
-        } else if (strncmp(execName, "ruby", 4) == 0) {
-            return new RubyScriptable(exePath, cmdArgs);
-        } else if (strncmp(execName, "sh", 2) == 0 || strncmp(execName, "bash", 4) == 0) {
-            return new BashScriptable(exePath, cmdArgs);
-        } else if (strncmp(execName, "csh", 3) == 0 || strncmp(execName, "tcsh", 4) == 0) {
-            return new CshScriptable(exePath, cmdArgs);
-        }
-    }
-    virtual const string& operator()() = 0;
+    static Scriptable *getScriptable(const char *exePath, const char *cmdArgs);
+    virtual const string operator()() = 0;
 };
 
 class PerlScriptable : public Scriptable {
@@ -170,7 +143,7 @@ class PerlScriptable : public Scriptable {
         Scriptable(exePath, cmdArgs)
     {}
 
-    virtual const string& operator()() {
+    virtual const string operator()() {
         for (size_t idx = 1; idx < cmdArgs.size(); ++idx) {
             if (cmdArgs[idx][0] == '-' && (cmdArgs[idx].find("e") != string::npos || cmdArgs[idx].find("E") != string::npos)) {
                 return "COMMAND";
@@ -192,7 +165,7 @@ class JavaScriptable : public Scriptable {
         Scriptable(exePath, cmdArgs)
     {}
 
-    virtual const string& operator()() {
+    virtual const string operator()() {
         for (size_t idx = 1; idx < cmdArgs.size(); ++idx) {
             if (cmdArgs[idx] == "-cp" || cmdArgs[idx] == "-classpath") {
                 // skip next arg
@@ -219,7 +192,7 @@ class PythonScriptable : public Scriptable {
         Scriptable(exePath, cmdArgs)
     {}
 
-    virtual const string& operator()() {
+    virtual const string operator()() {
         array<string,3> skipArgs = {"-m", "-Q", "-W"};
 
         for (size_t idx = 1; idx < cmdArgs.size(); ++idx) {
@@ -246,7 +219,7 @@ class RubyScriptable : public Scriptable {
         Scriptable(exePath, cmdArgs)
     {}
 
-    virtual const string& operator()() {
+    virtual const string operator()() {
         array<string,5> skipArgs = {"-C","-F","-I","-K","-r"};
 
         for (size_t idx = 1; idx < cmdArgs.size(); ++idx) {
@@ -273,7 +246,7 @@ class BashScriptable : public Scriptable {
         Scriptable(exePath, cmdArgs)
     {}
 
-    virtual const string& operator()() {
+    virtual const string operator()() {
         array<string,4> skipArgs = {"--rcfile","--init-file", "-O", "+O"};
 
         for (size_t idx = 1; idx < cmdArgs.size(); ++idx) {
@@ -300,7 +273,7 @@ class CshScriptable : public Scriptable {
         Scriptable(exePath, cmdArgs)
     {}
 
-    virtual const string& operator()() {
+    virtual const string operator()() {
         for (size_t idx = 1; idx < cmdArgs.size(); ++idx) {
             if (cmdArgs[idx][0] == '-' && cmdArgs[idx].find("c") != string::npos) {
                 return "COMMAND";

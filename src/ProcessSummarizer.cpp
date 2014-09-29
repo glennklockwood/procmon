@@ -2,6 +2,7 @@
 #include "ProcData.hh"
 #include "ProcIO.hh"
 #include "ProcReducerData.hh"
+#include "ProcessSummary.hh"
 
 #include <algorithm>
 #include <signal.h>
@@ -92,8 +93,8 @@ bool HostCountDataPtrCmp(const HostCountData *a, const HostCountData *b) {
 }
 
 /* procmon data structure comparison routines for sort() */
-template <>
-bool less_byprocess<procstat>(const procstat& a, const procstat& b) {
+template <typename pmType>
+bool less_byprocess(const pmType& a, const pmType& b) {
     if (a.startTime < b.startTime) return true;
     if (a.startTime > b.startTime) return false;
 
@@ -103,18 +104,8 @@ bool less_byprocess<procstat>(const procstat& a, const procstat& b) {
     if (a.recTime < b.recTime) return true;
     return false;
 }
+
 template <>
-bool less_byprocess<procdata>(const procdata& a, const procdata& b) {
-    if (a.startTime < b.startTime) return true;
-    if (a.startTime > b.startTime) return false;
-
-    if (a.pid < b.pid) return true;
-    if (a.pid > b.pid) return false;
-
-    if (a.recTime < b.recTime) return true;
-    return false;
-}
-template<>
 bool less_byprocess<procfd>(const procfd& a, const procfd& b) {
     if (a.startTime < b.startTime) return true;
     if (a.startTime > b.startTime) return false;
@@ -129,34 +120,23 @@ bool less_byprocess<procfd>(const procfd& a, const procfd& b) {
     if (a.recTime < b.recTime) return true;
     return false;
 }
-template<>
-bool less_byprocess<procobs>(const procobs& a, const procobs& b) {
-    if (a.startTime < b.startTime) return true;
-    if (a.startTime > b.startTime) return false;
 
-    if (a.pid < b.pid) return true;
-    if (a.pid > b.pid) return false;
-
-    if (a.recTime < b.recTime) return true;
-    return false;
-}
-
-template<class _pm_data>
-inline bool equiv_byprocess<_pm_data>(const _pm_data& a, const _pm_data& b) {
+template<typename pmType>
+inline bool equiv_byprocess(const pmType& a, const pmType& b) {
     return a.startTime == b.startTime & a.pid == b.pid;
 }
 
-template<class _pm_data>
+template<typename pmType>
 class ProcessMasker {
     bool *mask;
-    _pm_data *start_ptr;
+    pmType *start_ptr;
     size_t nelem;
 
-    vector<pair<_pm_data*, _pm_data*> > processes;
+    vector<pair<pmType*, pmType*> > processes;
     bool setprocs;
 
     public:
-    ProcessMasker(_pm_data *_start_ptr, size_t _nelem):
+    ProcessMasker(pmType *_start_ptr, size_t _nelem):
         start_ptr(_start_ptr), nelem(_nelem)
     {
         mask = new bool[nelem];
@@ -166,21 +146,21 @@ class ProcessMasker {
     ~ProcessMasker() {
         delete mask;
     }
-    void operator()(const tbb::blocked_range<_pm_data> &r) {
-        for (_pm_data *ptr = r.begin(); ptr != r.end(); ++ptr) {
+    void operator()(const tbb::blocked_range<pmType> &r) {
+        for (pmType *ptr = r.begin(); ptr != r.end(); ++ptr) {
             size_t idx = ptr - start_ptr;
-            mask[idx] = (idx == 0) | equiv_byprocess<_pm_data>(*(ptr-1), *ptr);
+            mask[idx] = (idx == 0) | equiv_byprocess<pmType>(*(ptr-1), *ptr);
         }
     }
-    const vector<pair<_pm_data*,_pm_data*> >& getProcessBoundaries() {
+    const vector<pair<pmType*,pmType*> >& getProcessBoundaries() {
         if (setprocs) return processes;
-        _pm_data *start = NULL;
-        _pm_data *end = NULL;
+        pmType *start = NULL;
+        pmType *end = NULL;
         for (size_t idx = 0; idx < nelem; ++idx) {
             if (mask[idx]) {
                 if (idx > 0) {
                     end = &(start_ptr[idx]);
-                    processes.push_back(pair<_pm_data *, _pm_data *>(start, end));
+                    processes.push_back(pair<pmType *, pmType *>(start, end));
                 }
                 start = &(start_ptr[idx]);
             }
@@ -189,27 +169,27 @@ class ProcessMasker {
             start = start_ptr;
         }
         end = start_ptr[nelem];
-        processes.push_back(par<_pm_data *, _pm_data *>(start, end));
+        processes.push_back(pair<pmType *, pmType *>(start, end));
         return processes;
     }
 };
 
-template <class pm_data>
+template <class pmType>
 class ProcessReducer {
     public:
     ProcessReducer(tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *>& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries) {
         summaryIndex = &_index;
-        summaries    = &_summaires;
+        summaries    = &_summaries;
         maxSummaries = _maxSummaries;
     }
 
-    void operator()(const tbb::blocked_range<pair<pm_data*,pm_data*> > &r) {
+    void operator()(const tbb::blocked_range<pair<pmType*,pmType*> > &r) {
         for (auto it: r) {
             reduce(it.first, it.second);
         }
     }
     private:
-    void reduce(pm_data *, pm_data *);
+    void reduce(pmType *, pmType *);
 
     tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> *summaryIndex;
     tbb::concurrent_vector<ProcessSummary> *summaries;
