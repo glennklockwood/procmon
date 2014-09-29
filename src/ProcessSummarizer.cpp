@@ -91,18 +91,292 @@ bool HostCountDataPtrCmp(const HostCountData *a, const HostCountData *b) {
     return *a < *b;
 }
 
-struct ProcessData {
+/* procmon data structure comparison routines for sort() */
+template <>
+bool less_byprocess<procstat>(const procstat& a, const procstat& b) {
+    if (a.startTime < b.startTime) return true;
+    if (a.startTime > b.startTime) return false;
+
+    if (a.pid < b.pid) return true;
+    if (a.pid > b.pid) return false;
+
+    if (a.recTime < b.recTime) return true;
+    return false;
+}
+template <>
+bool less_byprocess<procdata>(const procdata& a, const procdata& b) {
+    if (a.startTime < b.startTime) return true;
+    if (a.startTime > b.startTime) return false;
+
+    if (a.pid < b.pid) return true;
+    if (a.pid > b.pid) return false;
+
+    if (a.recTime < b.recTime) return true;
+    return false;
+}
+template<>
+bool less_byprocess<procfd>(const procfd& a, const procfd& b) {
+    if (a.startTime < b.startTime) return true;
+    if (a.startTime > b.startTime) return false;
+
+    if (a.pid < b.pid) return true;
+    if (a.pid > b.pid) return false;
+
+    ssize_t pathVal = strncmp(a.path, b.path, BUFFER_SIZE);
+    if (pathVal < 0) return true;
+    if (pathVal > 0) return false;
+
+    if (a.recTime < b.recTime) return true;
+    return false;
+}
+template<>
+bool less_byprocess<procobs>(const procobs& a, const procobs& b) {
+    if (a.startTime < b.startTime) return true;
+    if (a.startTime > b.startTime) return false;
+
+    if (a.pid < b.pid) return true;
+    if (a.pid > b.pid) return false;
+
+    if (a.recTime < b.recTime) return true;
+    return false;
+}
+
+template<class _pm_data>
+inline bool equiv_byprocess<_pm_data>(const _pm_data& a, const _pm_data& b) {
+    return a.startTime == b.startTime & a.pid == b.pid;
+}
+
+template<class _pm_data>
+class ProcessMasker {
+    bool *mask;
+    _pm_data *start_ptr;
+    size_t nelem;
+
+    vector<pair<_pm_data*, _pm_data*> > processes;
+    bool setprocs;
+
+    public:
+    ProcessMasker(_pm_data *_start_ptr, size_t _nelem):
+        start_ptr(_start_ptr), nelem(_nelem)
+    {
+        mask = new bool[nelem];
+        memset(mask, 0, sizeof(mask));
+        setprocs = false;
+    }
+    ~ProcessMasker() {
+        delete mask;
+    }
+    void operator()(const tbb::blocked_range<_pm_data> &r) {
+        for (_pm_data *ptr = r.begin(); ptr != r.end(); ++ptr) {
+            size_t idx = ptr - start_ptr;
+            mask[idx] = (idx == 0) | equiv_byprocess<_pm_data>(*(ptr-1), *ptr);
+        }
+    }
+    const vector<pair<_pm_data*,_pm_data*> >& getProcessBoundaries() {
+        if (setprocs) return processes;
+        _pm_data *start = NULL;
+        _pm_data *end = NULL;
+        for (size_t idx = 0; idx < nelem; ++idx) {
+            if (mask[idx]) {
+                if (idx > 0) {
+                    end = &(start_ptr[idx]);
+                    processes.push_back(pair<_pm_data *, _pm_data *>(start, end));
+                }
+                start = &(start_ptr[idx]);
+            }
+        }
+        if (start == NULL) {
+            start = start_ptr;
+        }
+        end = start_ptr[nelem];
+        processes.push_back(par<_pm_data *, _pm_data *>(start, end));
+        return processes;
+    }
+};
+
+template <class pm_data>
+class ProcessReducer {
+    public:
+    ProcessReducer(tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *>& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries) {
+        summaryIndex = &_index;
+        summaries    = &_summaires;
+        maxSummaries = _maxSummaries;
+    }
+
+    void operator()(const tbb::blocked_range<pair<pm_data*,pm_data*> > &r) {
+        for (auto it: r) {
+            reduce(it.first, it.second);
+        }
+    }
+    private:
+    void reduce(pm_data *, pm_data *);
+
+    tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> *summaryIndex;
+    tbb::concurrent_vector<ProcessSummary> *summaries;
+    size_t maxSummaries;
+
+    ProcessSummary *findSummary(time_t start, int pid) {
+        ProcessSummary *ret = NULL;
+        pair<time_t, int> key(start, pid);
+        auto it = summaryIndex->find(key);
+        if (it == summaryIndex->end()) {
+            auto pos = summaries.emplace_back(hostname, identifier, subidentifier, pid, start);
+            ret = &pos;
+        } else {
+            ret = &(it.second);
+        }
+        return ret;
+    }
+};
+
+
+template <>
+void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
+
+    size_t nRecords = end-start;
+    if (nRecords == 0) {
+        /* XXX throw exception, cause problems, etc XXX */
+        return;
+    }
+    ProcessSummary *summary = getSummary(start->startTime, start->pid);
+    double recTime[nRecords];
+    double startTime[nRecords];
+    double duration[nRecords];
+    double cpu[nRecords];
+
+    /* find most recent, undamaged record */
+    procstat *record = end - 1;
+    for ( ; record > start; --record) {
+        if (record->utime >= (record-1)->utime) break;
+    }
+
+    summary->state = record->state;
+    summary->pgrp = record->pgrp;
+    summary->session = record->session;
+    summary->tty = record->tty;
+    summary->tpgid = record->tpgid;
+    summary->realUid = record->realUid;
+    summary->effUid = record->effUid;
+    summary->realGid = record->realGid;
+    summary->effGid = record->effGid;
+    summary->flags = record->flags;
+    summary->utime = record->utime;
+    summary->stime = record->stime;
+    summary->priority = record->priority;
+    summary->nice = record->nice;
+    summary->numThreads = record->numThreads;
+    summary->vsize = record->vsize;
+    summary->rss = record->rss;
+    summary->rsslim = record->rsslim;
+    summary->signal = record->signal;
+    summary->blocked = record->blocked;
+    summary->sigignore = record->sigignore;
+    summary->sigcatch = record->sigcatch;
+    summary->rtPriority = record->rtPriority;
+    summary->policy = record->policy;
+    summary->delayacctBlkIOTicks = record->delayacctBlkIOTicks;
+    summary->guestTime = record->guestTime;
+    summary->vmpeak = record->vmpeak;
+    summary->rsspeak = record->rsspeak;
+    summary->cpusAllowed = record->cpusAllowed;
+    summary->io_rchar = record->io_rchar;
+    summary->io_wchar = record->io_wchar;
+    summary->io_syscr = record->io_syscr;
+    summary->io_syscw = record->io_syscw;
+    summary->io_readBytes = record->io_readBytes;
+    summary->io_writeBytes = record->io_writeBytes;
+    summary->io_cancelledWriteBytes = record->io_cancelledWriteBytes;
+    summary->m_size = record->m_size;
+    summary->m_resident = record->m_resident;
+    summary->m_share = record->m_share;
+    summary->m_text = record->m_text;
+    summary->m_data = record->m_data;
+
+    for (procstat *ptr = start; ptr < end; ++ptr) {
+        size_t idx = ptr - start;
+        recTime[idx] = ptr->recTime + ptr->recTimeUSec * 1e-6;
+        startTime[idx] = ptr->startTime + ptr->recTimeUSec * 1e-6;
+        duration[idx] = recTime[idx] - startTime[idx];
+        cpu[idx] = (ptr->utime + ptr->stime) / 100.;
+    }
+
+    if (nRecords == 1) {
+        /* no deltas to compute */
+        return;
+    }
+    size_t nDeltas  = nRecords - 1;
+    double delta[nDeltas];
+    double cpuRate[nDeltas];
+    double iowRate[nDeltas];
+    double iorRate[nDeltas];
+    double msizeRate[nDeltas];
+    double mresidentRate[nDeltas];
+    /* calcuate deltas */
+    for (size_t idx = 0; idx < end-start-1; ++idx) {
+        delta[idx] = recTime[idx+1]-recTime[dx];
+        cpuRate[idx] = (cpu[idx+1] - cpu[idx]) / delta[idx];
+        iowRate[idx] = (start[idx+1].io_wchar - start[idx].io_wchar) / delta[idx];
+        iorRate[idx] = (start[idx+1].io_rchar - start[idx].io_rchar) / delta[idx];
+        msizeRate[idx] = (start[idx+1].m_size - start[idx].m_size) / delta[idx];
+        mresidentRate[idx] = (start[idx+1].m_resident - start[idx].m_resident) / delta[idx];
+    }
+    summary->cpuRateMax = *( max_element(begin(cpuRate), end(cpuRate)) );
+    summary->iowRateMax = *( max_element(begin(iowRate), end(iowRate)) );
+    summary->iorRateMax = *( max_element(begin(iorRate), end(iorRate)) );
+    summary->msizeRateMax = *( max_element(begin(msizeRate), end(msizeRate)) );
+    summary->mresidentRateMax = *( max_element(begin(mresidentRate), end(mresidentRate)) );
+    summary->duration = *( max_element(begin(duration), end(duration)) );
+    summary->cpuTime = *( max_element(begin(cpu), end(cpu)) );
+    summary->nRecords = nRecords;
+
+    /* calculate cross-correlation of the rates */
+}
+
+template <>
+void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
+
+    size_t nRecords = end-start;
+    if (nRecords == 0) {
+        /* XXX throw exception, cause problems, etc XXX */
+        return;
+    }
+    ProcessSummary *summary = getSummary(start->startTime, start->pid);
+
+    /* find most recent, undamaged record */
+    procdata *record = end - 1;
+    for ( ; record >= start; --record) {
+        if (strnstr(record->exePath, "Unknown", BUFFER_SIZE) == NULL) break;
+    }
+    if (record < start) {
+        /* bad process record, bail */
+        return;
+    }
+
+    strncpy(summary->execName, record->execName, EXEBUFFER_SIZE);
+    memcpy(summary->cmdArgs, record->cmdArgs, min({record->cmdArgBytes, BUFFER_SIZE}));
+    summary->cmdArgBytes = record->cmdArgBytes;
+    strncpy(summary->exePath, record->exePath, BUFFER_SIZE);
+    strncpy(summary->cwdPath, record->cwdPath, BUFFER_SIZE);
+    summary->ppid = record->ppid;
+
+
+
+}
+
+class ProcessData {
     procstat *ps;
     procdata *pd;
     procfd   *fd;
     procobs  *obs;
-
     int n_ps;
     int n_pd;
     int n_fd;
     int n_obs;
+    bool owndata;
 
+    public:
     ProcessData(const HostCountData &cnt) {
+        owndata = true;
         ps = new procstat[cnt.n_procstat];
         pd = new procdata[cnt.n_procdata];
         fd = new procfd[cnt.n_procfd];
@@ -111,18 +385,61 @@ struct ProcessData {
         n_pd = cnt.n_procdata;
         n_fd = cnt.n_procfd;
         n_obs = cnt.n_procobs;
-        /*
-        pd = new vector<procdata>(cnt.n_procdata);
-        fd = new vector<procfd>(cnt.n_procfd);
-        obs = new vector<procobs>(cnt.n_procobs);
-        */
+    }
+
+    void sort(bool parallel=true) {
+        sort_func = sort;
+        if (parallel) {
+            sort_func = tbb::parallel_sort;
+        }
+        sort_func(begin(ps), end(ps), less_byprocess);
+        sort_func(begin(pd), end(pd), less_byprocess);
+        sort_func(begin(fd), end(fd), less_byprocess);
+        sort_func(begin(obs), end(obs), less_byprocess);
+    }
+
+    void summarizeProcesses() {
+        ProcessMasker<procstat> ps_mask(ps, n_ps);
+        ProcessMasker<procdata> pd_mask(pd, n_pd);
+        ProcessMasker<procfd>   fd_mask(fd, n_fd);
+        ProcessMasker<procobs>  obs_mask(obs, n_obs);
+
+        tbb::parallel_reduce(tbb::blocked_range<procstat>(ps, ps + n_ps), ps_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procdata>(pd, pd + n_pd), pd_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procfd>(fd, fd + n_fd), fd_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procobs>(obs, obs + n_obs), obs_mask);
+
+        auto &ps_boundaries = ps_mask.getProcessBoundaries();
+        auto &pd_boundaries = pd_mask.getProcessBoundaries();
+        auto &fd_boundaries = fd_mask.getProcessBoundaries();
+        auto &obs_boundaries = obs_mask.getProcessBoundaries();
+        tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> summaryIndex;
+        size_t maxRecords = max({
+            ps_boundaries.size(), pd_boundaries.size(),
+            fd_boundaries.size(), obs_boundaries.size(),
+        });
+
+        tbb::concurrent_vector<ProcessSummary> summaries;
+        summaries.reserve(maxRecords);
+
+        ProcessReducer<procstat> ps_red(summaryIndex, summaries, maxRecords);
+        ProcessReducer<procdata> pd_red(summaryIndex, summaries, maxRecords);
+        ProcessReducer<procfd>   fd_red(summaryIndex, summaries, maxRecords);
+        ProcessReducer<procobs>  obs_red(summaryIndex, summaries, maxRecords);
+
+        tbb::parallel_reduce(tbb::blocked_range<procstat>(ps_boundaries.begin(), ps_boundaries.end()), ps_red);
+        tbb::parallel_reduce(tbb::blocked_range<procdata>(pd_boundaries.begin(), pd_boundaries.end()), pd_red);
+        tbb::parallel_reduce(tbb::blocked_range<procfd>(fd_boundaries.begin(), fd_boundaries.end()), fd_red);
+        tbb::parallel_reduce(tbb::blocked_range<procobs>(obs_boundaries.begin(), obs_boundaires.end()), obs_red);
     }
 
     ~ProcessData() {
-        delete ps;
-        delete pd;
-        delete fd;
-        delete obs;
+        if (owndata) {
+            delete ps;
+            delete pd;
+            delete fd;
+            delete obs;
+        }
     }
 };
 
@@ -158,7 +475,6 @@ class ReadH5Metadata : public tbb::task {
             input->file->set_context(it, "", "");
 
             int len = it.length();
-//l_hostCounts[idx] = new HostCountData();
             l_hostCounts[idx].setHostname(it.c_str());
             l_hostCounts[idx].n_procdata = input->file->get_nprocdata();
             l_hostCounts[idx].n_procstat = input->file->get_nprocstat();
@@ -167,8 +483,7 @@ class ReadH5Metadata : public tbb::task {
 
             idx++;
         }
-        //sort(l_hostCounts.begin(), l_hostCounts.end());//, HostCountDataPtrCmp);
-        tbb::parallel_sort(l_hostCounts.begin(), l_hostCounts.end());//, HostCountDataPtrCmp);
+        sort(l_hostCounts.begin(), l_hostCounts.end());
         input->mutex.unlock();
         return NULL;
     }
@@ -311,8 +626,8 @@ vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> **>& counts)
         (*ret)[idx++] = *(it.second);
         delete it.second;
     }
-    //sort(ret->begin(), ret->end());//, HostCountDataPtrCmp);
-    tbb::parallel_sort(ret->begin(), ret->end());//, HostCountDataPtrCmp);
+    sort(ret->begin(), ret->end());
+    tbb::parallel_sort(ret->begin(), ret->end());
     return ret;
 }
 
@@ -350,16 +665,24 @@ int main(int argc, char **argv) {
 
         for (size_t fileIdx = 0; fileIdx < inputFiles.size(); ++fileIdx) {
             HostCountData *ptr = hostCountPtrs[fileIdx];
-            while (ptr != NULL && host != NULL && ptr->hostname != host->hostname) {
+            while (ptr != NULL && host != NULL && ptr->hostname < host->hostname) {
                 ptr++;
+            }
+            if (ptr == NULL || ptr->hostname != host->hostname) {
+                continue; // skip this file, the host wasn't found
             }
             hostCountPtrs[fileIdx] = ptr;
             cumulativeSum[fileIdx] += *ptr;
 
-
-
-
+            tbb::task reader = ReadH5ProcessData(inputFiles[fileIdx], host->hostname.c_str(), *ptr, cumulativeSum[fileIdx]);
+            reader->execute();
         }
+
+        /* at this point all of the process data for the host should be in processData */
+        // first, sort the data in the most appropriate form for each dataset
+        processData->sort();
+        processData->summarizeProcesses();
+
 
         delete processData;
     }
