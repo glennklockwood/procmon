@@ -245,7 +245,7 @@ class ProcessReducer {
         pair<time_t, int> key(start, pid);
         auto it = summaryIndex->find(key);
         if (it == summaryIndex->end()) {
-            auto pos = summaries->emplace_back(hostname, identifier, subidentifier, pid, start);
+            auto pos = summaries->emplace_back(hostname, identifier, subidentifier, start, pid);
             ret = &*pos;
         } else {
             ret = it->second;

@@ -17,7 +17,13 @@ struct ProcessSummary: public procobs {
     public:
 
     ProcessSummary();
-    ProcessSummary(const string&, const string&, const string&, time_t, int);
+    ProcessSummary(const string& _hostname, const string& _identifier, const string& _subidentifier, time_t _startTime, int _pid) {
+        strncpy(host, _hostname.c_str(), IDENTIFIER_SIZE);
+        strncpy(identifier, _identifier.c_str(), IDENTIFIER_SIZE);
+        strncpy(subidentifier, _subidentifier.c_str(), IDENTIFIER_SIZE);
+        startTime = _startTime;
+        pid = _pid;
+    }
 
     /* from procdata */
     char execName[EXEBUFFER_SIZE];

@@ -60,7 +60,13 @@ ExternalProject_Add (
     INSTALL_COMMAND ""
 )
 ExternalProject_Get_Property(tbb-4.3 source_dir)
+FILE (GLOB ALL_TBB_LIBRARY_FILES "${source_dir}/build/*release/*.so*")
+INSTALL_FILES ( lib FILES ${ALL_TBB_LIBRARY_FILES} )
+
 SET (TBB_INCLUDE_DIRS ${source_dir}/include)
+FILE (GLOB TBB_LIBRARY_FILE "${source_dir}/build/*release/libtbb.so")
+SET (TBB_LIBRARY ${TBB_LIBRARY_FILE})
+
 
 #IF ( USE_ZEROMQ ) 
 #    SET( ZEROMQ_DIR "${CMAKE_BINARY_DIR}/zeromq" )
