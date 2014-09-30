@@ -17,6 +17,7 @@ struct ProcessSummary: public procobs {
     public:
 
     ProcessSummary();
+    ProcessSummary(const string&, const string&, const string&, time_t, int);
 
     /* from procdata */
     char execName[EXEBUFFER_SIZE];
@@ -86,6 +87,7 @@ struct ProcessSummary: public procobs {
     double baseline_startTime;
     double orig_startTime;
     unsigned int nObservations;
+    size_t nRecords;
     double volatilityScore;
     double cpuTime;
     double duration;
@@ -122,7 +124,7 @@ class Scriptable {
         exePath(_exePath)
     {
         boost::char_separator<char> sep("|");
-        tokenizer tokens(_cmdArgs, sep);
+        tokenizer tokens(string(_cmdArgs), sep);
         for (auto token: tokens) {
             trim(token);
             cmdArgs.push_back(token);

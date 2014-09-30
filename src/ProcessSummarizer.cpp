@@ -19,7 +19,10 @@
 #include <tbb/task.h>
 #include <tbb/task_scheduler_init.h>
 #include <tbb/cache_aligned_allocator.h>
+#include <tbb/blocked_range.h>
 #include <tbb/spin_mutex.h>
+#include <tbb/concurrent_vector.h>
+#include <tbb/concurrent_unordered_map.h>
 
 #include <boost/program_options.hpp>
 #define PROCMON_SUMMARIZE_VERSION 2.0
@@ -168,7 +171,7 @@ class ProcessMasker {
         if (start == NULL) {
             start = start_ptr;
         }
-        end = start_ptr[nelem];
+        end = &(start_ptr[nelem]);
         processes.push_back(pair<pmType *, pmType *>(start, end));
         return processes;
     }
@@ -177,7 +180,9 @@ class ProcessMasker {
 template <class pmType>
 class ProcessReducer {
     public:
-    ProcessReducer(tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *>& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries) {
+    ProcessReducer(tbb::concurrent_unordered_map<pair<time_t,int>, ProcessSummary *>& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname, const string& _identifier, const string& _subidentifier):
+        hostname(_hostname), identifier(_identifier), subidentifier(_subidentifier)
+    {
         summaryIndex = &_index;
         summaries    = &_summaries;
         maxSummaries = _maxSummaries;
@@ -191,19 +196,22 @@ class ProcessReducer {
     private:
     void reduce(pmType *, pmType *);
 
-    tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> *summaryIndex;
+    tbb::concurrent_unordered_map<pair<time_t,int>, ProcessSummary *> *summaryIndex;
     tbb::concurrent_vector<ProcessSummary> *summaries;
     size_t maxSummaries;
+    string hostname;
+    string identifier;
+    string subidentifier;
 
     ProcessSummary *findSummary(time_t start, int pid) {
         ProcessSummary *ret = NULL;
         pair<time_t, int> key(start, pid);
         auto it = summaryIndex->find(key);
         if (it == summaryIndex->end()) {
-            auto pos = summaries.emplace_back(hostname, identifier, subidentifier, pid, start);
-            ret = &pos;
+            auto pos = summaries->emplace_back(hostname, identifier, subidentifier, pid, start);
+            ret = &*pos;
         } else {
-            ret = &(it.second);
+            ret = it->second;
         }
         return ret;
     }
@@ -213,16 +221,16 @@ class ProcessReducer {
 template <>
 void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
 
-    size_t nRecords = end-start;
+    const size_t nRecords = end-start;
     if (nRecords == 0) {
         /* XXX throw exception, cause problems, etc XXX */
         return;
     }
-    ProcessSummary *summary = getSummary(start->startTime, start->pid);
-    double recTime[nRecords];
-    double startTime[nRecords];
-    double duration[nRecords];
-    double cpu[nRecords];
+    ProcessSummary *summary = findSummary(start->startTime, start->pid);
+    vector<double> recTime(nRecords);
+    vector<double> startTime(nRecords);
+    vector<double> duration(nRecords);
+    vector<double> cpu(nRecords);
 
     /* find most recent, undamaged record */
     procstat *record = end - 1;
@@ -284,29 +292,29 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
         /* no deltas to compute */
         return;
     }
-    size_t nDeltas  = nRecords - 1;
-    double delta[nDeltas];
-    double cpuRate[nDeltas];
-    double iowRate[nDeltas];
-    double iorRate[nDeltas];
-    double msizeRate[nDeltas];
-    double mresidentRate[nDeltas];
+    const size_t nDeltas  = nRecords - 1;
+    vector<double> delta(nDeltas);
+    vector<double> cpuRate(nDeltas);
+    vector<double> iowRate(nDeltas);
+    vector<double> iorRate(nDeltas);
+    vector<double> msizeRate(nDeltas);
+    vector<double> mresidentRate(nDeltas);
     /* calcuate deltas */
     for (size_t idx = 0; idx < end-start-1; ++idx) {
-        delta[idx] = recTime[idx+1]-recTime[dx];
+        delta[idx] = recTime[idx+1]-recTime[idx];
         cpuRate[idx] = (cpu[idx+1] - cpu[idx]) / delta[idx];
         iowRate[idx] = (start[idx+1].io_wchar - start[idx].io_wchar) / delta[idx];
         iorRate[idx] = (start[idx+1].io_rchar - start[idx].io_rchar) / delta[idx];
         msizeRate[idx] = (start[idx+1].m_size - start[idx].m_size) / delta[idx];
         mresidentRate[idx] = (start[idx+1].m_resident - start[idx].m_resident) / delta[idx];
     }
-    summary->cpuRateMax = *( max_element(begin(cpuRate), end(cpuRate)) );
-    summary->iowRateMax = *( max_element(begin(iowRate), end(iowRate)) );
-    summary->iorRateMax = *( max_element(begin(iorRate), end(iorRate)) );
-    summary->msizeRateMax = *( max_element(begin(msizeRate), end(msizeRate)) );
-    summary->mresidentRateMax = *( max_element(begin(mresidentRate), end(mresidentRate)) );
-    summary->duration = *( max_element(begin(duration), end(duration)) );
-    summary->cpuTime = *( max_element(begin(cpu), end(cpu)) );
+    summary->cpuRateMax = *( max_element(cpuRate.begin(), cpuRate.end()) );
+    summary->iowRateMax = *( max_element(iowRate.begin(), iowRate.end()) );
+    summary->iorRateMax = *( max_element(iorRate.begin(), iorRate.end()) );
+    summary->msizeRateMax = *( max_element(msizeRate.begin(), msizeRate.end()) );
+    summary->mresidentRateMax = *( max_element(mresidentRate.begin(), mresidentRate.end()) );
+    summary->duration = *( max_element(duration.begin(), duration.end()) );
+    summary->cpuTime = *( max_element(cpu.begin(), cpu.end()) );
     summary->nRecords = nRecords;
 
     /* calculate cross-correlation of the rates */
@@ -320,12 +328,12 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
         /* XXX throw exception, cause problems, etc XXX */
         return;
     }
-    ProcessSummary *summary = getSummary(start->startTime, start->pid);
+    ProcessSummary *summary = findSummary(start->startTime, start->pid);
 
     /* find most recent, undamaged record */
     procdata *record = end - 1;
     for ( ; record >= start; --record) {
-        if (strnstr(record->exePath, "Unknown", BUFFER_SIZE) == NULL) break;
+        if (strstr(record->exePath, "Unknown") == NULL) break;
     }
     if (record < start) {
         /* bad process record, bail */
@@ -333,7 +341,7 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
     }
 
     strncpy(summary->execName, record->execName, EXEBUFFER_SIZE);
-    memcpy(summary->cmdArgs, record->cmdArgs, min({record->cmdArgBytes, BUFFER_SIZE}));
+    memcpy(summary->cmdArgs, record->cmdArgs, record->cmdArgBytes < BUFFER_SIZE ? record->cmdArgBytes : BUFFER_SIZE);
     summary->cmdArgBytes = record->cmdArgBytes;
     strncpy(summary->exePath, record->exePath, BUFFER_SIZE);
     strncpy(summary->cwdPath, record->cwdPath, BUFFER_SIZE);
@@ -344,6 +352,7 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
 }
 
 class ProcessData {
+    public:
     procstat *ps;
     procdata *pd;
     procfd   *fd;
@@ -354,7 +363,6 @@ class ProcessData {
     int n_obs;
     bool owndata;
 
-    public:
     ProcessData(const HostCountData &cnt) {
         owndata = true;
         ps = new procstat[cnt.n_procstat];
@@ -367,33 +375,29 @@ class ProcessData {
         n_obs = cnt.n_procobs;
     }
 
-    void sort(bool parallel=true) {
-        sort_func = sort;
-        if (parallel) {
-            sort_func = tbb::parallel_sort;
-        }
-        sort_func(begin(ps), end(ps), less_byprocess);
-        sort_func(begin(pd), end(pd), less_byprocess);
-        sort_func(begin(fd), end(fd), less_byprocess);
-        sort_func(begin(obs), end(obs), less_byprocess);
+    void sort() {
+        tbb::parallel_sort(ps, ps+n_ps, less_byprocess<procstat>);
+        tbb::parallel_sort(pd, pd+n_pd, less_byprocess<procdata>);
+        tbb::parallel_sort(fd, fd+n_fd, less_byprocess<procfd>);
+        tbb::parallel_sort(obs, obs+n_obs, less_byprocess<procobs>);
     }
 
-    void summarizeProcesses() {
+    void summarizeProcesses(const string& hostname) {
         ProcessMasker<procstat> ps_mask(ps, n_ps);
         ProcessMasker<procdata> pd_mask(pd, n_pd);
         ProcessMasker<procfd>   fd_mask(fd, n_fd);
         ProcessMasker<procobs>  obs_mask(obs, n_obs);
 
-        tbb::parallel_reduce(tbb::blocked_range<procstat>(ps, ps + n_ps), ps_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procdata>(pd, pd + n_pd), pd_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procfd>(fd, fd + n_fd), fd_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procobs>(obs, obs + n_obs), obs_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procstat>(*ps, *(ps+n_ps), sizeof(procstat)), ps_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procdata>(*pd, *(pd+n_pd), sizeof(procdata)), pd_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procfd>(*fd, *(fd+n_fd), sizeof(procfd)), fd_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procobs>(*obs, *(obs+n_obs), sizeof(procobs)), obs_mask);
 
         auto &ps_boundaries = ps_mask.getProcessBoundaries();
         auto &pd_boundaries = pd_mask.getProcessBoundaries();
         auto &fd_boundaries = fd_mask.getProcessBoundaries();
         auto &obs_boundaries = obs_mask.getProcessBoundaries();
-        tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> summaryIndex;
+        tbb::concurrent_unordered_map<pair<time_t,int>, ProcessSummary *> summaryIndex;
         size_t maxRecords = max({
             ps_boundaries.size(), pd_boundaries.size(),
             fd_boundaries.size(), obs_boundaries.size(),
@@ -402,15 +406,17 @@ class ProcessData {
         tbb::concurrent_vector<ProcessSummary> summaries;
         summaries.reserve(maxRecords);
 
-        ProcessReducer<procstat> ps_red(summaryIndex, summaries, maxRecords);
-        ProcessReducer<procdata> pd_red(summaryIndex, summaries, maxRecords);
-        ProcessReducer<procfd>   fd_red(summaryIndex, summaries, maxRecords);
+        /* XXX HERE XXX
+        ProcessReducer<procstat> ps_red(summaryIndex, summaries, maxRecords, hostname);
+        ProcessReducer<procdata> pd_red(summaryIndex, summaries, maxRecords, hostname);
+        ProcessReducer<procfd>   fd_red(summaryIndex, summaries, maxRecords, hostname);
         ProcessReducer<procobs>  obs_red(summaryIndex, summaries, maxRecords);
 
         tbb::parallel_reduce(tbb::blocked_range<procstat>(ps_boundaries.begin(), ps_boundaries.end()), ps_red);
         tbb::parallel_reduce(tbb::blocked_range<procdata>(pd_boundaries.begin(), pd_boundaries.end()), pd_red);
         tbb::parallel_reduce(tbb::blocked_range<procfd>(fd_boundaries.begin(), fd_boundaries.end()), fd_red);
         tbb::parallel_reduce(tbb::blocked_range<procobs>(obs_boundaries.begin(), obs_boundaires.end()), obs_red);
+        */
     }
 
     ~ProcessData() {
@@ -654,14 +660,15 @@ int main(int argc, char **argv) {
             hostCountPtrs[fileIdx] = ptr;
             cumulativeSum[fileIdx] += *ptr;
 
-            tbb::task reader = ReadH5ProcessData(inputFiles[fileIdx], host->hostname.c_str(), *ptr, cumulativeSum[fileIdx]);
+            tbb::task *reader = new ReadH5ProcessData(inputFiles[fileIdx], host->hostname.c_str(), *ptr, cumulativeSum[fileIdx]);
             reader->execute();
+            delete reader;
         }
 
         /* at this point all of the process data for the host should be in processData */
         // first, sort the data in the most appropriate form for each dataset
         processData->sort();
-        processData->summarizeProcesses();
+        processData->summarizeProcesses(host->hostname);
 
 
         delete processData;
