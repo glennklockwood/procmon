@@ -98,6 +98,14 @@ bool HostCountDataPtrCmp(const HostCountData *a, const HostCountData *b) {
 /* procmon data structure comparison routines for sort() */
 template <typename pmType>
 bool less_byprocess(const pmType& a, const pmType& b) {
+    int cmp = strncmp(a.identifier, b.identifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+
+    cmp = strncmp(a.subidentifier, b.subidentifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+
     if (a.startTime < b.startTime) return true;
     if (a.startTime > b.startTime) return false;
 
@@ -110,6 +118,14 @@ bool less_byprocess(const pmType& a, const pmType& b) {
 
 template <>
 bool less_byprocess<procfd>(const procfd& a, const procfd& b) {
+    int cmp = strncmp(a.identifier, b.identifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+
+    cmp = strncmp(a.subidentifier, b.subidentifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+
     if (a.startTime < b.startTime) return true;
     if (a.startTime > b.startTime) return false;
 
@@ -137,6 +153,8 @@ class ProcessMasker {
 
     vector<pair<pmType*, pmType*> > processes;
     bool setprocs;
+    bool ownmask;
+    size_t count;
 
     public:
     ProcessMasker(pmType *_start_ptr, size_t _nelem):
@@ -145,16 +163,35 @@ class ProcessMasker {
         mask = new bool[nelem];
         memset(mask, 0, sizeof(mask));
         setprocs = false;
+        ownmask = true;
+        count = 0;
     }
+
+    ProcessMasker(ProcessMasker<pmType>& other, tbb::split) {
+        start_ptr = other.start_ptr;
+        nelem = other.nelem;
+        mask = other.mask;
+        ownmask = false;
+        count = other.count;
+    }
+
     ~ProcessMasker() {
-        delete mask;
+        if (ownmask) delete mask;
     }
-    void operator()(const tbb::blocked_range<pmType> &r) {
+
+    void join(ProcessMasker<pmType>& other) {
+        count += other.count;
+    }
+
+    void operator()(const tbb::blocked_range<pmType*> &r) {
+        count += r.end() - r.begin();
+
         for (pmType *ptr = r.begin(); ptr != r.end(); ++ptr) {
             size_t idx = ptr - start_ptr;
             mask[idx] = (idx == 0) | equiv_byprocess<pmType>(*(ptr-1), *ptr);
         }
     }
+
     const vector<pair<pmType*,pmType*> >& getProcessBoundaries() {
         if (setprocs) return processes;
         pmType *start = NULL;
@@ -375,23 +412,24 @@ class ProcessData {
         n_obs = cnt.n_procobs;
     }
 
-    void sort() {
+    void summarizeProcesses(const string& hostname) {
+        /* summarization algorithm:
+         *    sort process datastructures by identifier,subidentifier,starttime, pid, rectime
+         */
         tbb::parallel_sort(ps, ps+n_ps, less_byprocess<procstat>);
         tbb::parallel_sort(pd, pd+n_pd, less_byprocess<procdata>);
         tbb::parallel_sort(fd, fd+n_fd, less_byprocess<procfd>);
         tbb::parallel_sort(obs, obs+n_obs, less_byprocess<procobs>);
-    }
 
-    void summarizeProcesses(const string& hostname) {
         ProcessMasker<procstat> ps_mask(ps, n_ps);
         ProcessMasker<procdata> pd_mask(pd, n_pd);
         ProcessMasker<procfd>   fd_mask(fd, n_fd);
         ProcessMasker<procobs>  obs_mask(obs, n_obs);
 
-        tbb::parallel_reduce(tbb::blocked_range<procstat>(*ps, *(ps+n_ps), sizeof(procstat)), ps_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procdata>(*pd, *(pd+n_pd), sizeof(procdata)), pd_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procfd>(*fd, *(fd+n_fd), sizeof(procfd)), fd_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procobs>(*obs, *(obs+n_obs), sizeof(procobs)), obs_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procstat*>(ps, (ps+n_ps), sizeof(procstat)), ps_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procdata*>(pd, (pd+n_pd), sizeof(procdata)), pd_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procfd*>(fd, (fd+n_fd), sizeof(procfd)), fd_mask);
+        tbb::parallel_reduce(tbb::blocked_range<procobs*>(obs, (obs+n_obs), sizeof(procobs)), obs_mask);
 
         auto &ps_boundaries = ps_mask.getProcessBoundaries();
         auto &pd_boundaries = pd_mask.getProcessBoundaries();
@@ -667,7 +705,6 @@ int main(int argc, char **argv) {
 
         /* at this point all of the process data for the host should be in processData */
         // first, sort the data in the most appropriate form for each dataset
-        processData->sort();
         processData->summarizeProcesses(host->hostname);
 
 
