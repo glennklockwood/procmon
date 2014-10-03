@@ -8,9 +8,11 @@
 #include <cctype>
 #include <locale>
 #include <array>
+#include <string>
 #include <ctype.h>
 #include <string.h>
 
+using namespace std;
 typedef boost::tokenizer<boost::char_separator<char> > tokenizer;
 
 struct ProcessSummary: public procobs {
@@ -107,15 +109,16 @@ struct ProcessSummary: public procobs {
     double iowRateMax;
     double msizeRateMax;
     double mresidentRateMax;
-    double cor_cpuXiow;
-    double cor_cpuXior;
-    double cor_cpuXmresident;
-    double cor_iowXior;
-    double cor_iowXmsize;
-    double cor_iowXmresident;
-    double cor_iorXmsize;
-    double cor_iorXmresident;
-    double cor_msizeXmresident;
+    double cov_cpuXiow;
+    double cov_cpuXior;
+    double cov_cpuXmsize;
+    double cov_cpuXmresident;
+    double cov_iowXior;
+    double cov_iowXmsize;
+    double cov_iowXmresident;
+    double cov_iorXmsize;
+    double cov_iorXmresident;
+    double cov_msizeXmresident;
 };
 
 static inline std::string &trim(std::string &s) {
@@ -129,8 +132,9 @@ class Scriptable {
     Scriptable(const char *_exePath, const char *_cmdArgs):
         exePath(_exePath)
     {
+        string cmdArgsStr(_cmdArgs);
         boost::char_separator<char> sep("|");
-        tokenizer tokens(string(_cmdArgs), sep);
+        tokenizer tokens(cmdArgsStr, sep);
         for (auto token: tokens) {
             trim(token);
             cmdArgs.push_back(token);

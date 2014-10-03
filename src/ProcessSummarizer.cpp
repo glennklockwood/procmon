@@ -21,13 +21,16 @@
 #include <tbb/cache_aligned_allocator.h>
 #include <tbb/blocked_range.h>
 #include <tbb/spin_mutex.h>
+#include <tbb/concurrent_hash_map.h>
 #include <tbb/concurrent_vector.h>
-#include <tbb/concurrent_unordered_map.h>
 
 #include <boost/program_options.hpp>
 #define PROCMON_SUMMARIZE_VERSION 2.0
 namespace po = boost::program_options;
 using namespace std;
+
+class ProcessSummary;
+typedef tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> SummaryHashMap;
 
 class AnalysisTask;
 
@@ -142,7 +145,7 @@ bool less_byprocess<procfd>(const procfd& a, const procfd& b) {
 
 template<typename pmType>
 inline bool equiv_byprocess(const pmType& a, const pmType& b) {
-    return a.startTime == b.startTime & a.pid == b.pid;
+    return a.startTime == b.startTime && a.pid == b.pid;
 }
 
 template<typename pmType>
@@ -188,7 +191,7 @@ class ProcessMasker {
 
         for (pmType *ptr = r.begin(); ptr != r.end(); ++ptr) {
             size_t idx = ptr - start_ptr;
-            mask[idx] = (idx == 0) | equiv_byprocess<pmType>(*(ptr-1), *ptr);
+            mask[idx] = (idx == 0) || !equiv_byprocess<pmType>(*(ptr-1), *ptr);
         }
     }
 
@@ -217,43 +220,72 @@ class ProcessMasker {
 template <class pmType>
 class ProcessReducer {
     public:
-    ProcessReducer(tbb::concurrent_unordered_map<pair<time_t,int>, ProcessSummary *>& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname, const string& _identifier, const string& _subidentifier):
-        hostname(_hostname), identifier(_identifier), subidentifier(_subidentifier)
+    ProcessReducer(SummaryHashMap& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname):
+        hostname(_hostname)
     {
-        summaryIndex = &_index;
         summaries    = &_summaries;
         maxSummaries = _maxSummaries;
+        summaryIndex = &_index;
+    }
+    ProcessReducer(ProcessReducer<pmType>& other, tbb::split) {
+        summaries = other.summaries;
+        maxSummaries = other.maxSummaries;
+        summaryIndex = other.summaryIndex;
+    }
+    void join(ProcessReducer<pmType>& other) {
     }
 
-    void operator()(const tbb::blocked_range<pair<pmType*,pmType*> > &r) {
+    void operator()(const tbb::blocked_range<const pair<pmType*,pmType*>* > &r) {
         for (auto it: r) {
             reduce(it.first, it.second);
         }
     }
+
     private:
     void reduce(pmType *, pmType *);
 
-    tbb::concurrent_unordered_map<pair<time_t,int>, ProcessSummary *> *summaryIndex;
+    SummaryHashMap *summaryIndex;
     tbb::concurrent_vector<ProcessSummary> *summaries;
     size_t maxSummaries;
     string hostname;
-    string identifier;
-    string subidentifier;
 
-    ProcessSummary *findSummary(time_t start, int pid) {
+    ProcessSummary *findSummary(const string& identifier, const string& subidentifier, time_t start, int pid) {
         ProcessSummary *ret = NULL;
-        pair<time_t, int> key(start, pid);
-        auto it = summaryIndex->find(key);
-        if (it == summaryIndex->end()) {
+        SummaryHashMap::accessor a;
+        pair<time_t,int> key(start, pid);
+        if (!summaryIndex->find(a, key)) {
             auto pos = summaries->emplace_back(hostname, identifier, subidentifier, start, pid);
             ret = &*pos;
+            summaryIndex->insert(a, key);
+            a->second = ret;
         } else {
-            ret = it->second;
+            ret = a->second;
         }
         return ret;
     }
 };
 
+void calculateVariance(const vector<double>& vec, vector<double>& var) {
+    double mean = 0;
+    for (size_t idx = 0; idx < vec.size(); ++idx) {
+        mean += vec[idx];
+    }
+    for (size_t idx = 0; idx < vec.size(); ++idx) {
+        var[idx] = vec[idx] - mean;
+    }
+}
+
+double calculateCovariance(const vector<double>& var1, const vector<double>& var2) {
+    double num = 0;
+    double denom1 = 0;
+    double denom2 = 0;
+    for (size_t idx = 0; idx < var1.size(); ++idx) {
+        num += var1[idx] * var2[idx];
+        denom1 += var1[idx] * var1[idx];
+        denom2 += var2[idx] * var2[idx];
+    }
+    return num / ( sqrt(denom1) * sqrt(denom2) );
+}
 
 template <>
 void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
@@ -263,7 +295,7 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
         /* XXX throw exception, cause problems, etc XXX */
         return;
     }
-    ProcessSummary *summary = findSummary(start->startTime, start->pid);
+    ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
     vector<double> recTime(nRecords);
     vector<double> startTime(nRecords);
     vector<double> duration(nRecords);
@@ -354,7 +386,29 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
     summary->cpuTime = *( max_element(cpu.begin(), cpu.end()) );
     summary->nRecords = nRecords;
 
-    /* calculate cross-correlation of the rates */
+    /* calculate covariance coefficients of the rates */
+    vector<double> cpuRateVar(nDeltas);
+    vector<double> iowRateVar(nDeltas);
+    vector<double> iorRateVar(nDeltas);
+    vector<double> msizeRateVar(nDeltas);
+    vector<double> mresidentRateVar(nDeltas);
+
+    calculateVariance(cpuRate, cpuRateVar);
+    calculateVariance(iowRate, iowRateVar);
+    calculateVariance(iorRate, iorRateVar);
+    calculateVariance(msizeRate, msizeRateVar);
+    calculateVariance(mresidentRate, mresidentRateVar);
+
+    summary->cov_cpuXiow = calculateCovariance(cpuRateVar, iowRateVar);
+    summary->cov_cpuXior = calculateCovariance(cpuRateVar, iorRateVar);
+    summary->cov_cpuXmsize = calculateCovariance(cpuRateVar, msizeRateVar);
+    summary->cov_cpuXmresident = calculateCovariance(cpuRateVar, mresidentRateVar);
+    summary->cov_iowXior = calculateCovariance(iowRateVar, iorRateVar);
+    summary->cov_iowXmsize = calculateCovariance(iowRateVar, msizeRateVar);
+    summary->cov_iowXmresident = calculateCovariance(iowRateVar, mresidentRateVar);
+    summary->cov_iorXmsize = calculateCovariance(iorRateVar, msizeRateVar);
+    summary->cov_iorXmresident = calculateCovariance(iorRateVar, mresidentRateVar);
+    summary->cov_msizeXmresident = calculateCovariance(msizeRateVar, mresidentRateVar);
 }
 
 template <>
@@ -365,7 +419,7 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
         /* XXX throw exception, cause problems, etc XXX */
         return;
     }
-    ProcessSummary *summary = findSummary(start->startTime, start->pid);
+    ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
 
     /* find most recent, undamaged record */
     procdata *record = end - 1;
@@ -384,8 +438,45 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
     strncpy(summary->cwdPath, record->cwdPath, BUFFER_SIZE);
     summary->ppid = record->ppid;
 
+    Scriptable *scriptObj = Scriptable::getScriptable(record->exePath, record->cmdArgs);
+    if (scriptObj != NULL) {
+        string script = (*scriptObj)();
+        strncpy(summary->script, script.c_str(), BUFFER_SIZE);
+        delete scriptObj;
+    } else {
+        summary->script[0] = 0;
+    }
 
+    char *slashPtr = strrchr(record->exePath, '/');
+    if (slashPtr != NULL) {
+        slashPtr += 1;
+    } else {
+        slashPtr = record->exePath;
+    }
+    strncpy(summary->execCommand, slashPtr, BUFFER_SIZE);
 
+    slashPtr = strrchr(summary->script, '/');
+    if (slashPtr != NULL) {
+        slashPtr += 1;
+    } else {
+        slashPtr = summary->script;
+    }
+    if (strcmp(slashPtr, "COMMAND") == 0 || *slashPtr == 0) {
+        strncpy(summary->command, summary->execCommand, BUFFER_SIZE);
+    } else {
+        strncpy(summary->command, slashPtr, BUFFER_SIZE);
+    }
+}
+
+template <>
+void ProcessReducer<procobs>::reduce(procobs *start, procobs *end) {
+    size_t nObs = end-start;
+    if (nObs == 0) {
+        /* XXX throw exception, cause problems, etc XXX */
+        return;
+    }
+    ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
+    summary->nObservations = nObs;
 }
 
 class ProcessData {
@@ -400,16 +491,65 @@ class ProcessData {
     int n_obs;
     bool owndata;
 
-    ProcessData(const HostCountData &cnt) {
+    ProcessData() {
         owndata = true;
-        ps = new procstat[cnt.n_procstat];
-        pd = new procdata[cnt.n_procdata];
-        fd = new procfd[cnt.n_procfd];
-        obs = new procobs[cnt.n_procobs];
-        n_ps = cnt.n_procstat;
-        n_pd = cnt.n_procdata;
-        n_fd = cnt.n_procfd;
-        n_obs = cnt.n_procobs;
+        ps = NULL;
+        pd = NULL;
+        fd = NULL;
+        obs = NULL;
+        n_ps = 0;
+        n_pd = 0;
+        n_fd = 0;
+        n_obs = 0;
+    }
+
+    void readData(const string& hostname, H5FileControl *input) {
+        input->file->set_context(hostname, "", "");
+
+        size_t ln_pd = input->file->get_nprocdata();
+        size_t ln_ps = input->file->get_nprocstat();
+        size_t ln_fd = input->file->get_nprocfd();
+        size_t ln_obs = input->file->get_nprocobs();
+
+        procstat *newps = new procstat[n_ps + ln_ps];
+        procstat *ps_ptr = &(newps[n_ps]);
+        size_t ps_read = input->file->read_procstat(ps_ptr, 0, ln_ps);
+        if (ps != NULL) {
+            memcpy(newps, ps, sizeof(procstat) * n_ps);
+            delete[] ps;
+        }
+        ps = newps;
+        n_ps = n_ps + ln_ps;
+
+        procdata *newpd = new procdata[n_pd + ln_pd];
+        procdata *pd_ptr = &(newpd[n_pd]);
+        size_t pd_read = input->file->read_procdata(pd_ptr, 0, ln_pd);
+        if (pd != NULL) {
+            memcpy(newpd, pd, sizeof(procdata) * n_pd);
+            delete[] pd;
+        }
+        pd = newpd;
+        n_pd = n_pd + ln_pd;
+
+        procfd *newfd = new procfd[n_fd + ln_fd];
+        procfd *fd_ptr = &(newfd[n_fd]);
+        size_t fd_read = input->file->read_procfd(fd_ptr, 0, ln_fd);
+        if (fd != NULL) {
+            memcpy(newfd, fd, sizeof(procfd) * n_fd);
+            delete[] fd;
+        }
+        fd = newfd;
+        n_fd = n_fd + ln_fd;
+
+        procobs *newobs = new procobs[n_obs + ln_obs];
+        procobs *obs_ptr = &(newobs[n_obs]);
+        size_t obs_read = input->file->read_procobs(obs_ptr, 0, ln_obs);
+        if (obs != NULL) {
+            memcpy(newobs, obs, sizeof(procobs) * n_obs);
+            delete[] obs;
+        }
+        obs = newobs;
+        n_obs = n_obs + ln_obs;
     }
 
     void summarizeProcesses(const string& hostname) {
@@ -435,23 +575,47 @@ class ProcessData {
         auto &pd_boundaries = pd_mask.getProcessBoundaries();
         auto &fd_boundaries = fd_mask.getProcessBoundaries();
         auto &obs_boundaries = obs_mask.getProcessBoundaries();
-        tbb::concurrent_unordered_map<pair<time_t,int>, ProcessSummary *> summaryIndex;
+        SummaryHashMap summaryIndex;
         size_t maxRecords = max({
             ps_boundaries.size(), pd_boundaries.size(),
             fd_boundaries.size(), obs_boundaries.size(),
         });
 
+        cout << hostname << ": ps " << ps_boundaries.size() << "; pd " << pd_boundaries.size() << "; fd " << fd_boundaries.size() << "; obs " << obs_boundaries.size() << endl;
+
         tbb::concurrent_vector<ProcessSummary> summaries;
         summaries.reserve(maxRecords);
 
-        /* XXX HERE XXX
         ProcessReducer<procstat> ps_red(summaryIndex, summaries, maxRecords, hostname);
         ProcessReducer<procdata> pd_red(summaryIndex, summaries, maxRecords, hostname);
         ProcessReducer<procfd>   fd_red(summaryIndex, summaries, maxRecords, hostname);
-        ProcessReducer<procobs>  obs_red(summaryIndex, summaries, maxRecords);
+        ProcessReducer<procobs>  obs_red(summaryIndex, summaries, maxRecords, hostname);
 
-        tbb::parallel_reduce(tbb::blocked_range<procstat>(ps_boundaries.begin(), ps_boundaries.end()), ps_red);
-        tbb::parallel_reduce(tbb::blocked_range<procdata>(pd_boundaries.begin(), pd_boundaries.end()), pd_red);
+        tbb::parallel_reduce(
+                tbb::blocked_range<const pair<procstat*,procstat*>* >(
+                    &*ps_boundaries.begin(),
+                    &*ps_boundaries.end(),
+                    sizeof(pair<procstat*,procstat*>)
+                ),
+                ps_red
+        );
+        tbb::parallel_reduce(
+                tbb::blocked_range<const pair<procdata*,procdata*>* >(
+                    &*pd_boundaries.begin(),
+                    &*pd_boundaries.end(),
+                    sizeof(pair<procdata*,procdata*>)
+                ),
+                pd_red
+        );
+        tbb::parallel_reduce(
+                tbb::blocked_range<const pair<procobs*,procobs*>* >(
+                    &*obs_boundaries.begin(),
+                    &*obs_boundaries.end(),
+                    sizeof(pair<procobs*,procobs*>)
+                ),
+                obs_red
+        );
+        /* XXX HERE XXX
         tbb::parallel_reduce(tbb::blocked_range<procfd>(fd_boundaries.begin(), fd_boundaries.end()), fd_red);
         tbb::parallel_reduce(tbb::blocked_range<procobs>(obs_boundaries.begin(), obs_boundaires.end()), obs_red);
         */
@@ -459,10 +623,11 @@ class ProcessData {
 
     ~ProcessData() {
         if (owndata) {
-            delete ps;
-            delete pd;
-            delete fd;
-            delete obs;
+            cout << "deleting data" << endl;
+            delete[] ps;
+            delete[] pd;
+            delete[] fd;
+            delete[] obs;
         }
     }
 };
@@ -478,96 +643,10 @@ void version() {
     exit(0);
 }
 
-class ReadH5Metadata : public tbb::task {
-    public:
-    ReadH5Metadata(H5FileControl *_inputFile, vector<HostCountData> **_hostCounts):
-            input(_inputFile),
-            hostCounts(_hostCounts)
-    {
-    }
-
-    tbb::task *execute() {
-        input->mutex.lock();
-        vector<string> hosts;
-
-        input->file->get_hosts(hosts);
-        *hostCounts = new vector<HostCountData>(hosts.size());
-        vector<HostCountData>& l_hostCounts = **hostCounts;
-
-        int idx = 0;
-        for (auto it: hosts) {
-            input->file->set_context(it, "", "");
-
-            int len = it.length();
-            l_hostCounts[idx].setHostname(it.c_str());
-            l_hostCounts[idx].n_procdata = input->file->get_nprocdata();
-            l_hostCounts[idx].n_procstat = input->file->get_nprocstat();
-            l_hostCounts[idx].n_procfd   = input->file->get_nprocfd();
-            l_hostCounts[idx].n_procobs  = input->file->get_nprocobs();
-
-            idx++;
-        }
-        sort(l_hostCounts.begin(), l_hostCounts.end());
-        input->mutex.unlock();
-        return NULL;
-    }
-
-    private:
-    H5FileControl *input;
-    vector<HostCountData> **hostCounts;
-};
-
-class ReadH5ProcessData : public tbb::task {
-    public:
-    ReadH5ProcessData(H5FileControl *_input, const char *_hostname,
-            HostCountData &cnt, HostCountData &cumsum):
-        input(_input),
-        hostname(_hostname)
-    {
-        ps_read = pd_read = fd_read = obs_read = 0;
-        ps_count = cnt.n_procstat;
-        pd_count = cnt.n_procdata;
-        fd_count = cnt.n_procfd;
-        obs_count = cnt.n_procobs;
-        ps_offset = cumsum.n_procstat;
-        pd_offset = cumsum.n_procdata;
-        fd_offset = cumsum.n_procfd;
-        obs_offset = cumsum.n_procobs;
-    }
-
-    tbb::task *execute() {
-        input->mutex.lock();
-        input->file->set_context(hostname, "", "");
-
-        procstat *ps_ptr = &(output->ps[ps_offset]);
-        ps_read = input->file->read_procstat(ps_ptr, 0, ps_count);
-
-        procdata *pd_ptr = &(output->pd[pd_offset]);
-        pd_read = input->file->read_procdata(pd_ptr, 0, pd_count);
-
-        procfd *fd_ptr = &(output->fd[fd_offset]);
-        fd_read = input->file->read_procfd(fd_ptr, 0, fd_count);
-
-        procobs *obs_ptr = &(output->obs[obs_offset]);
-        obs_read = input->file->read_procobs(obs_ptr, 0, obs_count);
-
-        input->mutex.unlock();
-        return NULL;
-    }
-
-    private:
-    H5FileControl  *input;
-    const char *hostname;
-
-    ProcessData *output;
-    size_t ps_read, pd_read, fd_read, obs_read;
-    size_t ps_count, pd_count, fd_count, obs_count;
-    size_t ps_offset, pd_offset, fd_offset, obs_offset;
-};
-
 class ProcmonSummarizeConfig {
 public:
     vector<string> procmonh5_files;
+    string baseline_file;
     unsigned int nThreads;
 
     ProcmonSummarizeConfig(int argc, char **argv) {
@@ -581,6 +660,7 @@ public:
         po::options_description config("Configuration Options");
         config.add_options()
             ("input,i",po::value<vector<string> >(&procmonh5_files)->composing(), "input filename(s) (required)")
+            ("baseline,b",po::value<string>(&baseline_file), "baseline file for process normalization")
             ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
         ;
 
@@ -620,97 +700,66 @@ public:
     string input_filename;
 };
 
-vector<HostCountData> *mergeHostCounts(vector<vector<HostCountData> **>& counts)
-{
-    unordered_map<string, HostCountData *> mergeMap;
-    vector<HostCountData> *ret = NULL;
-    for (auto it = counts.begin(); it != counts.end(); ++it) {
-        if (*it == NULL) {
-            /* something failed with the host count parsing */
-            cerr << "FAILURE: no data for host count" << endl;
-            exit(1);
-        }
-        vector<HostCountData> &count = ***it;
-        for (auto host: count) {
-            auto loc = mergeMap.find(host.hostname);
-            HostCountData *tgt = NULL;
-            if (loc == mergeMap.end()) {
-                tgt = new HostCountData(host);
-                mergeMap[host.hostname] = tgt;
-            } else {
-                tgt = loc->second;
-                *tgt += host;
-            }
-        }
-    }
-    if (mergeMap.size() == 0) return NULL;
-    ret = new vector<HostCountData>(mergeMap.size());
-    size_t idx = 0;
-    for (auto it: mergeMap) {
-        (*ret)[idx++] = *(it.second);
-        delete it.second;
-    }
-    sort(ret->begin(), ret->end());
-    tbb::parallel_sort(ret->begin(), ret->end());
-    return ret;
-}
-
 int main(int argc, char **argv) {
     ProcmonSummarizeConfig config(argc, argv);
 
     tbb::task_scheduler_init init(config.nThreads != 0 ? config.nThreads : tbb::task_scheduler_init::automatic);
 
     /* open input h5 files, walk the metadata */
+    H5FileControl *baselineInput = NULL;
     vector<H5FileControl *> inputFiles;
-    vector<vector<HostCountData>** > inputHostCounts;
-    tbb::task_list metadataTasks;
+    vector<vector<string> > inputHosts;
+    vector<string> allHosts;
+    vector<string> baselineHosts;
+    if (config.baseline_file != "") {
+        baselineInput = new H5FileControl(new ProcHDF5IO(config.baseline_file, FILE_MODE_READ));
+        baselineInput->file->get_hosts(baselineHosts);
+    }
     for (auto it: config.getProcmonH5Inputs()) {
         H5FileControl *input = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
-        vector<HostCountData> *data = NULL;
-        inputHostCounts.push_back(&data);
         inputFiles.push_back(input);
 
-        ReadH5Metadata task(input, &data);
-        task.execute();
+        vector<string> l_hosts;
+        input->file->get_hosts(l_hosts);
+        sort(l_hosts.begin(), l_hosts.end());
+        inputHosts.push_back(l_hosts);
+        allHosts.insert(allHosts.end(), l_hosts.begin(), l_hosts.end());
     }
-    vector<HostCountData> *globalHostCounts = mergeHostCounts(inputHostCounts);
+    sort(allHosts.begin(), allHosts.end());
+    string lastHost = "";
+    size_t count = 0;
+    for (string host: allHosts) {
+        if (host == lastHost) continue;
+        lastHost = host;
 
-    for (auto it: *globalHostCounts) {
-        cout << it.hostname << "; " << it.n_procstat << endl;
-    }
-    vector<HostCountData> cumulativeSum(globalHostCounts->size());
-    vector<HostCountData*> hostCountPtrs(inputFiles.size());
-    for (size_t idx = 0; idx < hostCountPtrs.size(); ++idx) {
-        hostCountPtrs[idx] = &((**(inputHostCounts[idx]))[0]);
-    }
-    for (size_t idx = 0; idx < globalHostCounts->size(); ++idx) {
-        HostCountData *host = &((*globalHostCounts)[idx]);
-        ProcessData *processData = new ProcessData((*globalHostCounts)[idx]);
-
-        for (size_t fileIdx = 0; fileIdx < inputFiles.size(); ++fileIdx) {
-            HostCountData *ptr = hostCountPtrs[fileIdx];
-            while (ptr != NULL && host != NULL && ptr->hostname < host->hostname) {
-                ptr++;
-            }
-            if (ptr == NULL || ptr->hostname != host->hostname) {
-                continue; // skip this file, the host wasn't found
-            }
-            hostCountPtrs[fileIdx] = ptr;
-            cumulativeSum[fileIdx] += *ptr;
-
-            tbb::task *reader = new ReadH5ProcessData(inputFiles[fileIdx], host->hostname.c_str(), *ptr, cumulativeSum[fileIdx]);
-            reader->execute();
-            delete reader;
+        ProcessData *processData = new ProcessData();
+        ProcessData *baselineData = NULL;
+        if (find(baselineHosts.begin(), baselineHosts.end(), host) != baselineHosts.end()) {
+            baselineData = new ProcessData();
+            baselineData->readData(host, baselineInput);
+            baselineData->summarizeProcesses(host);
         }
 
-        /* at this point all of the process data for the host should be in processData */
-        // first, sort the data in the most appropriate form for each dataset
-        processData->summarizeProcesses(host->hostname);
+        for (size_t idx = 0; idx < inputFiles.size(); ++idx) {
+            if (find(inputHosts[idx].begin(), inputHosts[idx].end(), host) == inputHosts[idx].end()) {
+                continue;
+            }
+            processData->readData(host, inputFiles[idx]);
+        }
+        processData->summarizeProcesses(host);
 
+        if (baselineData != NULL) {
+            delete baselineData;
+        }
 
         delete processData;
+        count++;
     }
 
+    for (auto file: inputFiles) delete file;
+    if (baselineInput != NULL) {
+        delete baselineInput;
+    }
 
     return 0;
 }

@@ -3,6 +3,7 @@ cmake_minimum_required (VERSION 2.8)
 PROJECT( procmon )
 SET( PROCMON_VERSION 2.5 )
 
+
 OPTION ( USE_RABBITMQ_C "Use rabbitmq-c" ON )
 OPTION ( USE_ZEROMQ "Use zeromq" ON )
 OPTION ( USE_HDF5 "Use HDF5 Libraries" ON )
@@ -11,10 +12,10 @@ OPTION ( BUILD_PROCMON "Build procmon" ON )
 OPTION ( BUILD_AMQPLOGGER "Build the amqpLogger" ON )
 OPTION ( BUILD_EXTRA "Build the extra components" ON )
 
-SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -ggdb" )
+SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -ggdb" )
 SET( CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -ggdb" )
 SET( CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g -ggdb" )
-SET( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -g -ggdb" )
+SET( CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O3 -ggdb" )
 SET( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -ggdb" )
 SET( CMAKE_CXX_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -g -ggdb" )
 
@@ -66,6 +67,8 @@ INSTALL_FILES ( lib FILES ${ALL_TBB_LIBRARY_FILES} )
 SET (TBB_INCLUDE_DIRS ${source_dir}/include)
 FILE (GLOB TBB_LIBRARY_FILE "${source_dir}/build/*release/libtbb.so")
 SET (TBB_LIBRARY ${TBB_LIBRARY_FILE})
+
+MESSAGE( "TBB_LIBRARY: ${TBB_LIBRARY}" )
 
 
 #IF ( USE_ZEROMQ ) 

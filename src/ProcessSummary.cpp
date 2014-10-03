@@ -4,15 +4,6 @@ ProcessSummary::ProcessSummary() {
     memset(this, 0, sizeof(ProcessSummary));
 }
 
-void ProcessSummary::update(const procdata *pd) {
-}
-
-void ProcessSummary::update(const procstat *ps) {
-}
-
-void ProcessSummary::update(const procfd *fd) {
-}
-
 Scriptable *Scriptable::getScriptable(const char *exePath, const char *cmdArgs) {
     const char *execName = exePath;
     const char *last_slash = strrchr(exePath, '/');
@@ -30,4 +21,5 @@ Scriptable *Scriptable::getScriptable(const char *exePath, const char *cmdArgs) 
     } else if (strncmp(execName, "csh", 3) == 0 || strncmp(execName, "tcsh", 4) == 0) {
         return new CshScriptable(exePath, cmdArgs);
     }
+    return NULL;
 }
