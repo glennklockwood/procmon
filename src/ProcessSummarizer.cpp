@@ -10,6 +10,7 @@
 #include <iostream>
 #include <deque>
 #include <unordered_map>
+#include <regex>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -480,6 +481,10 @@ void ProcessReducer<procobs>::reduce(procobs *start, procobs *end) {
 }
 
 class ProcessData {
+    private:
+    SummaryHashMap summaryIndex;
+    tbb::concurrent_vector<ProcessSummary> summaries;
+
     public:
     procstat *ps;
     procdata *pd;
@@ -552,7 +557,7 @@ class ProcessData {
         n_obs = n_obs + ln_obs;
     }
 
-    void summarizeProcesses(const string& hostname) {
+    void summarizeProcesses(const string& hostname, ProcessData *baseline, time_t baselineTime) {
         /* summarization algorithm:
          *    sort process datastructures by identifier,subidentifier,starttime, pid, rectime
          */
@@ -575,7 +580,6 @@ class ProcessData {
         auto &pd_boundaries = pd_mask.getProcessBoundaries();
         auto &fd_boundaries = fd_mask.getProcessBoundaries();
         auto &obs_boundaries = obs_mask.getProcessBoundaries();
-        SummaryHashMap summaryIndex;
         size_t maxRecords = max({
             ps_boundaries.size(), pd_boundaries.size(),
             fd_boundaries.size(), obs_boundaries.size(),
@@ -583,7 +587,6 @@ class ProcessData {
 
         cout << hostname << ": ps " << ps_boundaries.size() << "; pd " << pd_boundaries.size() << "; fd " << fd_boundaries.size() << "; obs " << obs_boundaries.size() << endl;
 
-        tbb::concurrent_vector<ProcessSummary> summaries;
         summaries.reserve(maxRecords);
 
         ProcessReducer<procstat> ps_red(summaryIndex, summaries, maxRecords, hostname);
@@ -615,6 +618,7 @@ class ProcessData {
                 ),
                 obs_red
         );
+
         /* XXX HERE XXX
         tbb::parallel_reduce(tbb::blocked_range<procfd>(fd_boundaries.begin(), fd_boundaries.end()), fd_red);
         tbb::parallel_reduce(tbb::blocked_range<procobs>(obs_boundaries.begin(), obs_boundaires.end()), obs_red);
@@ -630,6 +634,15 @@ class ProcessData {
             delete[] obs;
         }
     }
+
+    ProcessSummary *findSummary(time_t start, int pid) {
+        pair<time_t,int> key(start,pid);
+        SummaryHashMap::accessor a;
+        if (summaryIndex.find(a, key)) {
+            return a->second;
+        }
+        return NULL;
+    }
 };
 
 
@@ -644,12 +657,18 @@ void version() {
 }
 
 class ProcmonSummarizeConfig {
-public:
+    private:
+    vector<pair<string,regex*> > fs_monitor_regex;
     vector<string> procmonh5_files;
-    string baseline_file;
     unsigned int nThreads;
+    string baseline_file;
+    bool debug;
+
+    public:
 
     ProcmonSummarizeConfig(int argc, char **argv) {
+        vector<string> fs_monitor;
+
         /* Parse command line arguments */
         po::options_description basic("Basic Options");
         basic.add_options()
@@ -662,6 +681,7 @@ public:
             ("input,i",po::value<vector<string> >(&procmonh5_files)->composing(), "input filename(s) (required)")
             ("baseline,b",po::value<string>(&baseline_file), "baseline file for process normalization")
             ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
+            ("fsMonitor", po::value<vector<string> >(&fs_monitor)->composing(), "regexes matching filesystems to monitor")
         ;
 
         po::options_description options;
@@ -691,19 +711,43 @@ public:
             cerr << "Need at least one (1) worker thread!" << endl;
             //usage(options, 1);
         }
+        for (string& it: fs_monitor) {
+            size_t pos = it.find('=');
+            if (pos == string::npos) continue;
+            string key = it.substr(0, pos);
+            string value = it.substr(pos+1);
+            fs_monitor_regex.emplace_back(pair<string,regex*>(key,new regex(value)));
+        }
     }
-    const vector<string> &getProcmonH5Inputs() {
+
+    ~ProcmonSummarizeConfig() {
+        for (pair<string,regex*>& item: fs_monitor_regex) {
+            delete item.second;
+        }
+    }
+
+    inline const vector<string> &getProcmonH5Inputs() const {
         return procmonh5_files;
     }
-    bool debug;
+    inline const int getNThreads() const {
+        return nThreads;
+    }
 
-    string input_filename;
+    inline const bool isDebug() const {
+        return debug;
+    }
+    inline const string& getBaselinePath() const {
+        return baseline_file;
+    }
+    inline const vector<pair<string,regex *> >& getFilesystemMonitorRegexes() const {
+        return fs_monitor_regex;
+    }
 };
 
 int main(int argc, char **argv) {
     ProcmonSummarizeConfig config(argc, argv);
 
-    tbb::task_scheduler_init init(config.nThreads != 0 ? config.nThreads : tbb::task_scheduler_init::automatic);
+    tbb::task_scheduler_init init(config.getNThreads() != 0 ? config.getNThreads() : tbb::task_scheduler_init::automatic);
 
     /* open input h5 files, walk the metadata */
     H5FileControl *baselineInput = NULL;
@@ -711,8 +755,8 @@ int main(int argc, char **argv) {
     vector<vector<string> > inputHosts;
     vector<string> allHosts;
     vector<string> baselineHosts;
-    if (config.baseline_file != "") {
-        baselineInput = new H5FileControl(new ProcHDF5IO(config.baseline_file, FILE_MODE_READ));
+    if (config.getBaselinePath() != "") {
+        baselineInput = new H5FileControl(new ProcHDF5IO(config.getBaselinePath(), FILE_MODE_READ));
         baselineInput->file->get_hosts(baselineHosts);
     }
     for (auto it: config.getProcmonH5Inputs()) {
@@ -737,7 +781,7 @@ int main(int argc, char **argv) {
         if (find(baselineHosts.begin(), baselineHosts.end(), host) != baselineHosts.end()) {
             baselineData = new ProcessData();
             baselineData->readData(host, baselineInput);
-            baselineData->summarizeProcesses(host);
+            baselineData->summarizeProcesses(host, NULL, 0);
         }
 
         for (size_t idx = 0; idx < inputFiles.size(); ++idx) {
@@ -746,7 +790,7 @@ int main(int argc, char **argv) {
             }
             processData->readData(host, inputFiles[idx]);
         }
-        processData->summarizeProcesses(host);
+        processData->summarizeProcesses(host, baselineData, 0);
 
         if (baselineData != NULL) {
             delete baselineData;
