@@ -121,16 +121,16 @@ sub findProcMuxerProcesses {
                     my $group = undef;
                     my $id = undef;
                     for (my $idx = 0; $idx <= $#args; $idx++) {
-                        if ($args[$idx] == "-g" && $idx < $#args) {
+                        if ($args[$idx] eq "-g" && $idx < $#args) {
                             $idx++;
                             $group = $args[$idx];
                         }
-                        if ($args[$idx] == "-i" && $idx < $#args) {
+                        if ($args[$idx] eq "-i" && $idx < $#args) {
                             $idx++;
                             $id = $args[$idx];
                         }
                     }
-                    if (defined($id) && defined($group) && $group == $options->{group}) {
+                    if (defined($id) && defined($group) && $group eq $options->{group}) {
                         push(@found, $id);
                         push(@found_pids,  $pid);
                     }
@@ -138,6 +138,7 @@ sub findProcMuxerProcesses {
             }
         }
     }
+    return (\@found, \@found_pids);
 }
 
 
@@ -159,8 +160,61 @@ if (!defined($pid) || $pid <= 0) {
     push(@nagiosMessages, "procmonManager.py process not running!");
 }
 
-findProcMuxerProcesses($options);
+my @found = findProcMuxerProcesses($options);
+my @found_ids = @{$found[0]};
+my @found_pids = @{$found[1]};
 
+if ($#found_ids != $#found_pids) {
+    $nagiosStatus = UNKNOWN;
+    push(@nagiosMessages, "Found inconsistent ProcMuxer processes, check manually!");
+    goto TheEnd; ## can't proceed, so just cleanup and die
+}
+if ($#found_ids+1 != $options->{num_procmuxers}) {
+    $nagiosStatus = WARNING;
+    push(@nagiosMessages, "Incorrect number of ProcMuxers running in the group");
+}
+if ($#found_ids < 0) {
+    $nagiosStatus = CRITICAL;
+    push(@nagiosMessages, "No ProcMuxers running in the $options->{group} group");
+}
+
+my $localPath = "$options->{base_prefix}/$options->{group}";
+my $archivingPath = "$localPath/archiving";
+if ($options->{use_hpss} eq "True") {
+    if (! -e $archivingPath) {
+        $nagiosStatus = CRITICAL;
+        push(@nagiosMessages, "Archiving enabled, but no archiving path; something is wrong!");
+    } else {
+        opendir(my $dh, $archivingPath);
+        my @h5 = grep { /h5$/ && -f $archivingPath/$_ } readdir($dh);
+        closedir($dh);
+        if ($#h5 > 2) {
+            my $nfiles = $#h5 + 1;
+            push(@nagiosMessages, "Archiving queue building: $nfiles files waiting");
+            if ($#h5 > 5) {
+                $nagiosStatus = CRITICAL;
+            } else {
+                $nagiosStatus = WARNING;
+            }
+        }
+    }
+}
+my $processingPath = "$localPath/processing";
+if (! -e $processingPath) {
+    $nagiosStatus = CRITICAL;
+    push(@nagiosMessages, "No processing path exists; something is wrong!");
+} else {
+    opendir(my $dh, $processingPath);
+    my $prefix = $options->{h5_prefix};
+    my @files = readdir($dh);
+    my @h5 = grep (/^$prefix/, @files);
+    closedir($dh);
+    if ($#h5 > 0) {
+        my $nfiles = $#h5 + 1;
+        push(@nagiosMessages, "Processing directory is filling up: $nfiles untransferred h5 files exist.");
+        $nagiosStatus = CRITICAL;
+    }
+}
 
 
 TheEnd:
@@ -170,7 +224,7 @@ if (time() - $startTime > $options->{timeout}) {
 }
 my $messages = join('|', @nagiosMessages);
 if (length($messages) == 0) {
-    $messages = "No queue problems detected";
+    $messages = "No procmon data aggregation problems detected";
 }
 print "$0 $statusMessages[$nagiosStatus]: $messages\n";
 exit($nagiosStatus);
@@ -178,39 +232,27 @@ __END__
 
 =head1 NAME
 
-check_jenkins_queue.pl - Examine jenkins build queue and set off alarms
+check_procmon_aggregation.pl - Examine procmon aggregation (procmonManager) state via NRPE and set off alarms
 
 =head1 SYNOPSIS
 
-check_jenkins_queue.pl [options]
+check_procmon_aggregation.pl [options]
 
  Options:
-   -h|--host <hostname>            hostname of jenkins master webservice
-   -r|--root <path/to/jenkins>     path on URL string to jenkins root
-   -u|--user <username>            user account, should have limited access
-   -t|--token <apiToken>           jenkins API token for <username>
-   -w|--warning <integer>          max # of buildable queued items for warning
-   -c|--critical <integer>         max # of buildable queued items for critical
-   -W|--waitwarn <seconds>         max # of seconds for a buildable queued job
-   -C|--waitcrit <seconds>         max # of seconds for a buildable queued job
+   -h|--procmonDir <path>          path to procmon installation
+   -u|--user <username>            user account running aggregation framework
    -v|--verbose                    flag for verbose output
-   -x|--xml <xmlfile>              parse xml file instead of downloading
-   -T|--timeout <seconds>          max time for completion before critical alert
    -h|-?|--help                    display this help
 
 =head1 DESCRIPTION
 
-check_jenkins_queue.pl attempts to connect to the configured jenkins master
-server and count the number of jobs builable jobs queued to be run.  If the
-webserver does not return HTTP code 200, or if the counted number of queued,
-buildable items exceeds the critical or warning limits, then the appropriate
-alert is issued.  In addition, if any jobs are marked as "stuck" or have been
-waiting to build for configurable, alarmable timeouts, then the appropriate
-alert is issued.
+check_procmon_aggregation.pl runs via NRPE on a data collection node, checks
+on the state of the procMuxer processes, procmonManager.py process, and the
+state of the local directories to determine if data are stacking up.
 
 =head1 AUTHOR
 
 Douglas Jacobsen <dmj@nersc.gov>
-September 11, 2014
+October 2, 2014
 
 =cut
