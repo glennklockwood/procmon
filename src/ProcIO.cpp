@@ -795,10 +795,10 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
 	if (mode == FILE_MODE_WRITE) {
     	file = H5Fopen(filename.c_str(), H5F_ACC_CREAT | H5F_ACC_RDWR, H5P_DEFAULT);
 	} else if (mode == FILE_MODE_READ) {
-        /* open read-only using the STDIO driver */
+        /* open read-only using the STDIO driver 
         hid_t faplist_id = H5Pcreate (H5P_FILE_ACCESS);
-        H5Pset_fapl_stdio(faplist_id);
-    	file = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, faplist_id);
+        H5Pset_fapl_stdio(faplist_id);*/
+    	file = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
 	}
 	if (file < 0) {
 		throw ProcIOException("Failed to open HDF5 file: " + filename);
