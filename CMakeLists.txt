@@ -51,24 +51,24 @@ IF ( USE_RABBITMQ_C )
     SET( RABBITMQ_C_LIB_DIR ${RABBITMQ_C_DIR}/lib )
     SET( RABBITMQ_C_LIBRARIES "${RABBITMQ_C_DIR}/lib/librabbitmq.fpic.a" )
 ENDIF ( USE_RABBITMQ_C )
-SET (TBB_DIR "${CMAKE_BINARY_DIR}/tbb" )
-ExternalProject_Add (
-    tbb-4.3
-    URL https://www.threadingbuildingblocks.org/sites/default/files/software_releases/source/tbb43_20140724oss_src.tgz
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND make
-    BUILD_IN_SOURCE 1
-    INSTALL_COMMAND ""
-)
-ExternalProject_Get_Property(tbb-4.3 source_dir)
-FILE (GLOB ALL_TBB_LIBRARY_FILES "${source_dir}/build/*release/*.so*")
-INSTALL_FILES ( lib FILES ${ALL_TBB_LIBRARY_FILES} )
+#SET (TBB_DIR "${CMAKE_BINARY_DIR}/tbb" )
+#ExternalProject_Add (
+#    tbb-4.3
+#    URL https://www.threadingbuildingblocks.org/sites/default/files/software_releases/source/tbb43_20140724oss_src.tgz
+#    CONFIGURE_COMMAND ""
+#    BUILD_COMMAND make
+#    BUILD_IN_SOURCE 1
+#    INSTALL_COMMAND ""
+#)
+#ExternalProject_Get_Property(tbb-4.3 source_dir)
+#FILE (GLOB ALL_TBB_LIBRARY_FILES "${source_dir}/build/*release/*.so*")
+#INSTALL_FILES ( lib FILES ${ALL_TBB_LIBRARY_FILES} )
+#
+#SET (TBB_INCLUDE_DIRS ${source_dir}/include)
+#FILE (GLOB TBB_LIBRARY_FILE "${source_dir}/build/*release/libtbb.so")
+#SET (TBB_LIBRARY ${TBB_LIBRARY_FILE})
 
-SET (TBB_INCLUDE_DIRS ${source_dir}/include)
-FILE (GLOB TBB_LIBRARY_FILE "${source_dir}/build/*release/libtbb.so")
-SET (TBB_LIBRARY ${TBB_LIBRARY_FILE})
-
-MESSAGE( "TBB_LIBRARY: ${TBB_LIBRARY}" )
+#MESSAGE( "TBB_LIBRARY: ${TBB_LIBRARY}" )
 
 
 #IF ( USE_ZEROMQ ) 
