@@ -58,13 +58,19 @@ public:
     }
     size_t resize(size_t new_capacity) {
         size_t talloc = new_capacity > 511 ? new_capacity * 2 : 512;
-        data = (T*) realloc(data, sizeof(T) * talloc);
-        if (data == NULL) {
+        T *newdata = new T[talloc];
+        if (newdata == NULL) {
             fprintf(stderr, "FAILED to allocate memory for %d items (%lu bytes)\n", talloc, sizeof(T) * talloc);
             capacity = 0;
             count = 0;
             return 0;
         }
+        if (data != NULL) {
+            memcpy(newdata, data, sizeof(T) * capacity);
+            delete[] data;
+        }
+        data = newdata;
+
         memset(&(data[capacity]), 0, sizeof(T)*(talloc-capacity));
         capacity = talloc;
         return capacity;
