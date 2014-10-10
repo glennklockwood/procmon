@@ -25,6 +25,8 @@
 #include <iostream>
 #include <string>
 #include <map>
+#include <vector>
+#include <algorithm>
 
 #ifdef SECURED
 #include <pthread.h>
@@ -101,13 +103,13 @@ inline void fatal_error(const char *error, int err) {
 /* global variables - these are global for signal handling, and inter-thread communication */
 int cleanUpFlag = 0;
 int search_procfs_count = 0;
-mempool<int> pids;
-mempool<int> keepflag;
-mempool<procstat> tmp_procStat;
-mempool<procdata> tmp_procData;
-mempool<procstat> global_procStat;
-mempool<procdata> global_procData;
-mempool<procfd>   global_procFD;
+vector<int> pids;
+vector<int> keepflag;
+vector<procstat> tmp_procStat;
+vector<procdata> tmp_procData;
+vector<procstat> global_procStat;
+vector<procdata> global_procData;
+vector<procfd>   global_procFD;
 
 void sig_handler(int signum) {
 	/* if we receive any trapped signal, just set the cleanUpFlag
@@ -117,43 +119,37 @@ void sig_handler(int signum) {
 	cleanUpFlag = 1;
 }
 
-static int cmp_procstat_ident(const void *p1, const void *p2) {
-    procstat *a = (procstat *) p1;
-    procstat *b = (procstat *) p2;
+static bool cmp_procstat_ident(const procstat &a, const procstat &b) {
     int cmp = 0;
-    if ((cmp = strncmp(a->identifier, b->identifier, IDENTIFIER_SIZE)) != 0) {
-        return cmp;
-    }
-    if ((cmp = strncmp(a->subidentifier, b->subidentifier, IDENTIFIER_SIZE)) != 0) {
-        return cmp;
-    }
-    return a->pid - b->pid;
+    cmp = strncmp(a.identifier, b.identifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+    cmp = strncmp(a.subidentifier, b.subidentifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+    return a.pid < b.pid;
 }
 
-static int cmp_procdata_ident(const void *p1, const void *p2) {
-    procdata *a = (procdata *) p1;
-    procdata *b = (procdata *) p2;
+static bool cmp_procdata_ident(const procdata &a, const procdata &b) {
     int cmp = 0;
-    if ((cmp = strncmp(a->identifier, b->identifier, IDENTIFIER_SIZE)) != 0) {
-        return cmp;
-    }
-    if ((cmp = strncmp(a->subidentifier, b->subidentifier, IDENTIFIER_SIZE)) != 0) {
-        return cmp;
-    }
-    return a->pid - b->pid;
+    cmp = strncmp(a.identifier, b.identifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+    cmp = strncmp(a.subidentifier, b.subidentifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+    return a.pid < b.pid;
 }
 
-static int cmp_procfd_ident(const void *p1, const void *p2) {
-    procfd *a = (procfd *) p1;
-    procfd *b = (procfd *) p2;
+static bool cmp_procfd_ident(const procfd &a, const procfd &b) {
     int cmp = 0;
-    if ((cmp = strncmp(a->identifier, b->identifier, IDENTIFIER_SIZE)) != 0) {
-        return cmp;
-    }
-    if ((cmp = strncmp(a->subidentifier, b->subidentifier, IDENTIFIER_SIZE)) != 0) {
-        return cmp;
-    }
-    return a->pid - b->pid;
+    cmp = strncmp(a.identifier, b.identifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+    cmp = strncmp(a.subidentifier, b.subidentifier, IDENTIFIER_SIZE);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+    return a.pid < b.pid;
 }
 
 int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
@@ -444,7 +440,7 @@ int parseProcEnvironment(int pid, std::map<std::string, std::string>& env) {
 	return 0;
 }
 
-int parse_fds(int pid, int maxfd, procfd *all_procfd, int *p_idx, procstat *statData) {
+int parse_fds(int pid, size_t maxfd, vector<procfd> &all_procfd, size_t *p_idx, procstat *statData) {
     char buffer[BUFFER_SIZE];
     struct stat link;
     int start_idx = *p_idx;
@@ -622,39 +618,32 @@ int searchProcFs(ProcmonConfig *config) {
 		if (tgt_pid <= 0) {
 			continue;
 		}
-        if (pids.check_capacity(npids) == 0) {
-            return -1;
+        while (pids.size() < npids) {
+            pids.push_back(0);
         }
-		pids.data[npids++] = tgt_pid;
+		pids[npids++] = tgt_pid;
 	}
 	closedir(procDir);
 
-    if (keepflag.check_capacity(npids) == 0) {
-        return -1;
-    }  
-    if (tmp_procStat.check_capacity(npids) == 0) {
-        return -1;
-    }
+    keepflag.clear();
+    tmp_procStat.clear();
+    tmp_procData.clear();
+    keepflag.resize(npids, 0);
+    tmp_procStat.resize(npids);
+
     if (readStatFirst) {
-        if (tmp_procData.check_capacity(npids) == 0) {
-            return -1;
-        }
-        tmp_procData.zero();
+        tmp_procData.resize(npids);
     }
-    procstat *procStats = tmp_procStat.data;
-    procdata  *procDatas = tmp_procData.data;
-    keepflag.zero();
-    tmp_procStat.zero();
 
     if (readStatFirst) {
         for (idx = 0; idx < npids; idx++) {
-            tgt_pid = pids.data[idx];	
-		    parseProcStat(tgt_pid, &(procStats[idx]), &(procDatas[idx]), config->boottime, config->clockTicksPerSec);
+            tgt_pid = pids[idx];	
+		    parseProcStat(tgt_pid, &(tmp_procStat[idx]), &(tmp_procData[idx]), config->boottime, config->clockTicksPerSec);
         }
     } else {
         for (idx = 0; idx < npids; idx++) {
-            tgt_pid = pids.data[idx];	
-            keepflag.data[idx] = parseProcStatus(tgt_pid, config->tgtGid, &(procStats[idx]));
+            tgt_pid = pids[idx];	
+            keepflag[idx] = parseProcStatus(tgt_pid, config->tgtGid, &(tmp_procStat[idx]));
         }
     }
 
@@ -664,20 +653,20 @@ int searchProcFs(ProcmonConfig *config) {
 	 * store interesting pids in the pids array, and their procstat indices in the
 	 * indices array */
 	int indices[npids];
-	pids.data[0] = config->targetPPid;
+	pids[0] = config->targetPPid;
 	foundParent = 0;
     ntargets = 0;
 	for (idx = 0; idx < npids; idx++) {
-		if (procStats[idx].pid == config->targetPPid ||
-            keepflag.data[idx] > 0 ||
-            (config->tgtSid > 0 && procStats[idx].session == config->tgtSid) ||
-            (config->tgtPgid > 0 && procStats[idx].pgrp == config->tgtPgid)
+		if (tmp_procStat[idx].pid == config->targetPPid ||
+            keepflag[idx] > 0 ||
+            (config->tgtSid > 0 && tmp_procStat[idx].session == config->tgtSid) ||
+            (config->tgtPgid > 0 && tmp_procStat[idx].pgrp == config->tgtPgid)
         ) {
-			keepflag.data[idx] = 1;
-			pids.data[ntargets] = procStats[idx].pid;
+			keepflag[idx] = 1;
+			pids[ntargets] = tmp_procStat[idx].pid;
 			indices[ntargets++] = idx;
 		}
-		if (procStats[idx].pid == config->targetPPid) {
+		if (tmp_procStat[idx].pid == config->targetPPid) {
 			foundParent = 1;
 		}
 	}
@@ -696,9 +685,9 @@ int searchProcFs(ProcmonConfig *config) {
 		nNewTargets = ntargets;
 		for (idx = 0; idx < npids; idx++) {
 			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
-				if (procStats[idx].ppid == pids.data[innerIdx] && keepflag.data[idx] == 0) {
-					pids.data[nNewTargets] = procStats[idx].pid;
-					keepflag.data[idx] = 1;
+				if (tmp_procStat[idx].ppid == pids[innerIdx] && keepflag[idx] == 0) {
+					pids[nNewTargets] = tmp_procStat[idx].pid;
+					keepflag[idx] = 1;
 					indices[nNewTargets] = idx;
 					nNewTargets++;
 					nchange++;
@@ -710,35 +699,26 @@ int searchProcFs(ProcmonConfig *config) {
 	} while (nchange > 0);
 
     if (ntargets > 0) {
-        if (global_procStat.check_capacity(ntargets) == 0) {
-            fprintf(stderr, "Failed to allocate memory; exiting...\n");
-            exit(1);
-        }
-            
-        if (global_procData.check_capacity(ntargets) == 0) {
-            fprintf(stderr, "Failed to allocate memory; exiting...\n");
-            exit(1);
-        }
-        if (config->maxfd > 0) {
-            if (global_procFD.check_capacity(ntargets * config->maxfd) == 0) {
-                fprintf(stderr, "Failed to allocate memory; exiting...\n");
-                exit(1);
-            }
-            global_procFD.zero();
-        }
-        global_procStat.zero();
-        global_procData.zero();
-    }
-    int fdidx = 0;
+        global_procStat.clear();
+        global_procData.clear();
+        global_procFD.clear();
 
-    /* copy data from procStats to global_procStat, but in order by idx */
-    for (idx = 0; idx < ntargets; idx++) {
-        memcpy(&(global_procStat.data[idx]), &(procStats[indices[idx]]), sizeof(procstat));
+        global_procStat.resize(ntargets);
+        global_procData.resize(ntargets);
+        if (config->maxfd > 0) {
+            global_procFD.resize(ntargets*config->maxfd);
+        }
     }
-    /* if using session id matching, copy procDatas as well */
+    size_t fdidx = 0;
+
+    /* copy data from tmp_procStat to global_procStat, but in order by idx */
+    for (idx = 0; idx < ntargets; idx++) {
+        memcpy(&(global_procStat[idx]), &(tmp_procStat[indices[idx]]), sizeof(procstat));
+    }
+    /* if using session id matching, copy tmp_procData as well */
     if (readStatFirst) {
         for (idx = 0; idx < ntargets; idx++) {
-            memcpy(&(global_procData.data[idx]), &(procDatas[indices[idx]]), sizeof(procdata));
+            memcpy(&(global_procData[idx]), &(tmp_procData[indices[idx]]), sizeof(procdata));
         }
     }
 
@@ -747,9 +727,9 @@ int searchProcFs(ProcmonConfig *config) {
 	 */
 	for (idx = 0; idx < ntargets; idx++) {
 		ssize_t rbytes = 0;
-        tgt_pid = pids.data[idx];
-		procstat* statData = &(global_procStat.data[idx]);
-        procdata* temp_procData = &(global_procData.data[idx]); 
+        tgt_pid = pids[idx];
+		procstat* statData = &(global_procStat[idx]);
+        procdata* temp_procData = &(global_procData[idx]); 
 
         if (readStatFirst) { 
             /* read status */
@@ -821,14 +801,14 @@ int searchProcFs(ProcmonConfig *config) {
         /* if fd tracking is enabled and there is enough room to store any more
            fd information, then parse it!
         */
-        int start_fdidx = fdidx;
-        int n_fd = global_procFD.capacity - fdidx;
+        size_t start_fdidx = fdidx;
+        size_t n_fd = global_procFD.size() - fdidx;
         if (config->maxfd < n_fd) {
             n_fd = config->maxfd;
         }
 
         if (n_fd > 0) {
-            parse_fds(tgt_pid, n_fd, global_procFD.data, &fdidx, statData);
+            parse_fds(tgt_pid, n_fd, global_procFD, &fdidx, statData);
         }
         std::map<std::string, std::string> env;
         std::map<std::string, std::string>::iterator it;
@@ -858,22 +838,18 @@ int searchProcFs(ProcmonConfig *config) {
         snprintf(statData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         snprintf(temp_procData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
         snprintf(temp_procData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
-        for (int l_fdidx = start_fdidx; l_fdidx < fdidx; l_fdidx++) {
-            snprintf(global_procFD.data[l_fdidx].identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
-            snprintf(global_procFD.data[l_fdidx].subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
+        for (size_t l_fdidx = start_fdidx; l_fdidx < fdidx; l_fdidx++) {
+            snprintf(global_procFD[l_fdidx].identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
+            snprintf(global_procFD[l_fdidx].subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         }
 	}
-
-    /* save data in global space */
-    global_procStat.count = ntargets;
-    global_procData.count = ntargets;
-    global_procFD.count = fdidx;
+    global_procFD.resize(fdidx);
     search_procfs_count = ntargets;
 
     /* sort by identifier/subidentifier/pid */
-    qsort(global_procStat.data, global_procStat.count, sizeof(procstat), cmp_procstat_ident);
-    qsort(global_procData.data, global_procData.count, sizeof(procdata), cmp_procdata_ident);
-    qsort(global_procFD.data, global_procFD.count, sizeof(procfd), cmp_procfd_ident);
+    sort(global_procStat.begin(), global_procStat.end(), cmp_procstat_ident);
+    sort(global_procData.begin(), global_procData.end(), cmp_procdata_ident);
+    sort(global_procFD.begin(), global_procFD.end(), cmp_procfd_ident);
 
 	return ntargets;
 }
@@ -1105,12 +1081,12 @@ bool set_context(ProcIO *output, const std::string& host, const std::string& ide
 }
 
 template<typename T>
-void writeOutput(ProcmonConfig *config, ProcIO *output, T *data, int count, unsigned int (*write_data)(ProcIO *, T*, int))  {
+void writeOutput(ProcmonConfig *config, ProcIO *output, vector<T>& data, unsigned int (*write_data)(ProcIO *, T*, int))  {
     const char *last_ident = NULL;
     const char *last_subident = NULL;
+    size_t i = 0;
     int sidx = 0;
-    int i = 0;
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < data.size(); i++) {
         T *datum = &(data[i]);
         if (last_ident == NULL || last_subident == NULL
             || strncmp(datum->identifier, last_ident, IDENTIFIER_SIZE) != 0
@@ -1291,9 +1267,9 @@ int main(int argc, char** argv) {
                     (*iter)->write_procfd(global_procFD.data, global_procFD.count);
                 }
                 */
-                writeOutput(config, *iter, global_procStat.data, global_procStat.count, write_procstat);
-                writeOutput(config, *iter, global_procData.data, global_procData.count, write_procdata);
-                writeOutput(config, *iter, global_procFD.data, global_procFD.count, write_procfd);
+                writeOutput(config, *iter, global_procStat, write_procstat);
+                writeOutput(config, *iter, global_procData, write_procdata);
+                writeOutput(config, *iter, global_procFD, write_procfd);
             }
         }
 
