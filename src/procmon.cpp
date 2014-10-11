@@ -39,62 +39,6 @@
 #include "ProcIO.hh"
 #include "procmon.hh"
 
-template <class T>
-class mempool {
-public:
-    mempool(size_t init_capacity = 128) {
-        data = NULL;
-        count = 0;
-        capacity = 0;
-        if (resize(init_capacity) != 0) {
-            zero();
-        }
-    }
-    ~mempool() {
-        if (data != NULL) {
-            free(data);
-        }
-        count = 0;
-        capacity = 0;
-        data = NULL;
-    }
-    size_t resize(size_t new_capacity) {
-        size_t talloc = new_capacity > 511 ? new_capacity * 2 : 512;
-        T *newdata = new T[talloc];
-        if (newdata == NULL) {
-            fprintf(stderr, "FAILED to allocate memory for %d items (%lu bytes)\n", talloc, sizeof(T) * talloc);
-            capacity = 0;
-            count = 0;
-            return 0;
-        }
-        if (data != NULL) {
-            memcpy(newdata, data, sizeof(T) * capacity);
-            delete[] data;
-        }
-        data = newdata;
-
-        memset(&(data[capacity]), 0, sizeof(T)*(talloc-capacity));
-        capacity = talloc;
-        return capacity;
-    }
-
-    inline size_t check_capacity(size_t t_capacity) {
-        if (data == NULL || t_capacity > capacity) {
-            resize(t_capacity);
-        }
-        return capacity;
-    }
-
-    void zero() {
-        bzero(data, sizeof(T) * capacity);
-        count = 0;
-    }
-
-    T *data;
-    size_t count;
-    size_t capacity;
-};
-
 inline void fatal_error(const char *error, int err) {
     fprintf(stderr, "Failed: %s; %d; bailing out.\n", error, err);
     exit(1);
@@ -613,17 +557,20 @@ int searchProcFs(ProcmonConfig *config) {
 		return -3;
 	}
 
+    pids.resize(512);
+
 	while( (dptr = readdir(procDir)) != NULL) {
 		tgt_pid = atoi(dptr->d_name);
 		if (tgt_pid <= 0) {
 			continue;
 		}
-        while (pids.size() < npids) {
-            pids.push_back(0);
+        if (pids.size() < npids) {
+            pids.resize(npids*2,0);
         }
 		pids[npids++] = tgt_pid;
 	}
 	closedir(procDir);
+    pids.resize(npids);
 
     keepflag.clear();
     tmp_procStat.clear();
