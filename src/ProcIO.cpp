@@ -36,6 +36,11 @@ unsigned int ProcIO::write_procfd(procfd* start_ptr, int count) {
 	return 0;
 }
 
+unsigned int ProcIO::write_netstat(netstat* start_ptr, int count) {
+    cout << "write_netstat: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << endl;
+    return 0;
+}
+
 #ifdef USE_AMQP
 ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, 
 	const string& _username, const string& _password, const string& _exchangeName, 
@@ -239,6 +244,9 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
 				} else if (frameMessageType == "procfd") {
                     required_size = sizeof(procfd) * nRecords;
                     recType = TYPE_PROCFD;
+                } else if (frameMessageType == "netstat") {
+                    required_size = sizeof(netstat) * nRecords;
+                    recType = TYPE_NETSTAT;
                 }
                 size_t alloc_size = (size_t) (required_size * 1.2);
                 if (*data == NULL || *pool_size < required_size) {
@@ -260,6 +268,8 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
 				} else if (recType == TYPE_PROCFD) {
                     _read_procfd((procfd*) *data, nRecords, sPtr, body_received - (sPtr - message_buffer));
                     *nRec = nRecords;
+                } else if (recType == TYPE_NETSTAT) {
+                    _read_netstat((netstat*) *data, nRecords, sPtr, body_received - (sPtr - message_buffer));
                 }
 			}
         }
@@ -455,6 +465,55 @@ bool ProcAMQPIO::_read_procfd(procfd *startPtr, int nRecords, char* buffer, int 
     return idx != nRecords;
 }
 
+bool ProcAMQPIO::_read_netstat(netstat *startPtr, int nRecords, char* buffer, int nBytes) {
+	char* ptr = buffer;
+	char* ePtr = buffer + nBytes;
+	char* sPtr = ptr;
+
+    int pos = 0;
+	int idx = 0;
+	int readBytes = -1;
+	bool done = false;
+	netstat* net = startPtr;
+    while (idx < nRecords && ptr < ePtr) {
+        if ((*ptr == ',' || *ptr == '\n') && (readBytes < 0 || readBytes == (ptr-sPtr))) {
+			if (done) {
+				net = &(startPtr[++idx]);
+				pos = 0;
+				readBytes = -1;
+				done = false;
+			}
+            if (*ptr == '\n') {
+				done = true;
+			}
+            *ptr = 0;
+            switch (pos) {
+                case 0: net->recTime = strtoul(sPtr, &ptr, 10); break;
+                case 1: net->recTimeUSec = strtoul(sPtr, &ptr, 10); break;
+                case 2: net->local_address = strtoul(sPtr, &ptr, 10); break;
+                case 3: net->local_port = strtoul(sPtr, &ptr, 10); break;
+                case 4: net->remote_address = strtoul(sPtr, &ptr, 10); break;
+                case 5: net->remote_port = strtoul(sPtr, &ptr, 10); break;
+                case 6: net->state = strtoul(sPtr, &ptr, 10); break;
+                case 7: net->tx_queue = strtoul(sPtr, &ptr, 10); break;
+                case 8: net->rx_queue = strtoul(sPtr, &ptr, 10); break;
+                case 9: net->tr = strtoul(sPtr, &ptr, 10); break;
+                case 10: net->ticks_expire = strtoul(sPtr, &ptr, 10); break;
+                case 11: net->retransmit = strtoul(sPtr, &ptr, 10); break;
+                case 12: net->uid = strtoul(sPtr, &ptr, 10); break;
+                case 13: net->timeout = strtoul(sPtr, &ptr, 10); break;
+                case 14: net->inode = strtoul(sPtr, &ptr, 10); break;
+                case 15: net->refCount = strtoul(sPtr, &ptr, 10); break;
+                case 16: net->type = strtoul(sPtr, &ptr, 10); break;
+            }
+            pos++;
+            sPtr = ptr + 1;
+        }
+        ptr++;
+    }
+    return idx != nRecords;
+}
+
 unsigned int ProcAMQPIO::write_procdata(procdata* start_ptr, int count) {
     unsigned int nBytes = 0;
     char* ptr = buffer;
@@ -560,6 +619,33 @@ unsigned int ProcAMQPIO::write_procfd(procfd* start_ptr, int count) {
 	message.bytes = buffer;
 	message.len = nBytes;
     return _send_message("procfd", message) ? nBytes : 0;
+}
+
+unsigned int ProcAMQPIO::write_netstat(netstat* start_ptr, int count) {
+    unsigned int nBytes = 0;
+    char* ptr = buffer;
+    ptr += snprintf(ptr, AMQP_BUFFER_SIZE, "nRecords=%d\n", count);
+    for (int i = 0; i < count; i++) {
+        netstat* net = &(start_ptr[i]);
+        ptr += snprintf(ptr, AMQP_BUFFER_SIZE - (ptr - buffer),
+            "%lu,%lu,%lu,%u,%lu,%u,%u,%lu,%lu,%u,%lu,%lu,%lu,%lu,%lu,%u,%d\n",
+            net->recTime, net->recTimeUSec, net->local_address,
+            net->local_port, net->remote_address, net->remote_port,
+            net->state, net->tx_queue, net->rx_queue, net->tr,
+            net->ticks_expire, net->retransmit, net->uid,
+            net->timeout, net->inode, net->refCount, net->type
+        );
+    }
+	*ptr = 0;
+    nBytes = ptr - buffer;
+    if (nBytes == AMQP_BUFFER_SIZE) {
+        fprintf(stderr, "WARNING: sending full buffer -- data will be truncated\n");
+    }
+
+	amqp_bytes_t message;
+	message.bytes = buffer;
+	message.len = nBytes;
+    return _send_message("netstat", message) ? nBytes : 0;
 }
 
 bool ProcAMQPIO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
@@ -668,20 +754,23 @@ bool ProcAMQPIO::_amqp_bind_context() {
 #endif
 
 #ifdef USE_HDF5
-hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obsBlockSize) {
+hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, hid_t type_netstat, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obsBlockSize, unsigned int netBlockSize) {
 	group = -1;
 	procstatDS = -1;
 	procdataDS = -1;
     procfdDS = -1;
     procobsDS = -1;
+    netstatDS = -1;
 	procstatSizeID = -1;
 	procdataSizeID = -1;
     procfdSizeID = -1;
     procobsSizeID = -1;
+    netstatSizeID = -1;
 	procstatSize = 0;
 	procdataSize = 0;
     procfdSize = 0;
     procobsSize = 0;
+    netstatSize = 0;
 
     if (H5Lexists(file, hostname.c_str(), H5P_DEFAULT) == 1) {
         group = H5Gopen2(file, hostname.c_str(), H5P_DEFAULT);
@@ -702,7 +791,10 @@ hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t typ
         procfdSize = open_dataset("procfd", type_procfd, fdBlockSize, &procfdDS, &procfdSizeID, 9);
     }
     if (H5Lexists(group, "procobs", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
-        procobsSize = open_dataset("procobs", type_procobs, fdBlockSize, &procobsDS, &procobsSizeID, 9);
+        procobsSize = open_dataset("procobs", type_procobs, obsBlockSize, &procobsDS, &procobsSizeID, 9);
+    }
+    if (H5Lexists(group, "netstat", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
+        netstatSize = open_dataset("netstat", type_netstat, netBlockSize, &netstatDS, &netstatSizeID, 9);
     }
 }
 
@@ -757,6 +849,9 @@ hdf5Ref::~hdf5Ref() {
     if (procobsSizeID >= 0) {
         H5Aclose(procobsSizeID);
     }
+    if (netstatSizeID >= 0) {
+        H5Aclose(netstatSizeID);
+    }
 	if (procstatDS >= 0) {
 		H5Dclose(procstatDS);
 	}
@@ -769,6 +864,9 @@ hdf5Ref::~hdf5Ref() {
     if (procobsDS >= 0) {
         H5Dclose(procobsDS);
     }
+    if (netstatDS >= 0) {
+        H5Dclose(netstatDS);
+    }
 	if (group >= 0) {
 		H5Gclose(group);
 	}
@@ -776,10 +874,12 @@ hdf5Ref::~hdf5Ref() {
 
 ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode, 
 	unsigned int _statBlockSize, unsigned int _dataBlockSize,
-    unsigned int _fdBlockSize, unsigned int _obsBlockSize): 
+    unsigned int _fdBlockSize, unsigned int _obsBlockSize,
+    unsigned int _netBlockSize): 
 	
 	filename(_filename),mode(_mode),statBlockSize(_statBlockSize),
-	dataBlockSize(_dataBlockSize),fdBlockSize(_fdBlockSize),obsBlockSize(_obsBlockSize)
+	dataBlockSize(_dataBlockSize),fdBlockSize(_fdBlockSize),
+    obsBlockSize(_obsBlockSize),netBlockSize(_netBlockSize)
 {
 	file = -1;
 	strType_exeBuffer = -1;
@@ -790,6 +890,7 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
 	type_procstat = -1;
     type_procfd = -1;
     type_procobs = -1;
+    type_netstat = -1;
     override_context = false;
 
 	if (mode == FILE_MODE_WRITE) {
@@ -817,6 +918,7 @@ ProcHDF5IO::~ProcHDF5IO() {
     if (type_procstat > 0) status = H5Tclose(type_procstat);
     if (type_procfd > 0) status = H5Tclose(type_procfd);
     if (type_procobs > 0) status = H5Tclose(type_procobs);
+    if (type_netstat > 0) status = H5Tclose(type_netstat);
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
     if (strType_variable > 0) status = H5Tclose(strType_variable);
@@ -845,6 +947,10 @@ unsigned int ProcHDF5IO::read_procobs(procobs* procObs, unsigned int id) {
     return read_procobs(procObs, id, 1);
 }
 
+unsigned int ProcHDF5IO::read_netstat(netstat* netData, unsigned int id) {
+    return read_netstat(netData, id, 1);
+}
+
 bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
 	size_t endPos = _hostname.find('.');
 	endPos = endPos == string::npos ? _hostname.size() : endPos;
@@ -863,7 +969,7 @@ bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier,
 	auto refIter = openRefs.find(key);
 	if (refIter == openRefs.end()) {
 		/* need to create new hdf5Ref */
-		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, type_procfd, type_procobs, t_hostname, mode, statBlockSize, dataBlockSize, fdBlockSize, obsBlockSize);
+		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, type_procfd, type_procobs, type_netstat, t_hostname, mode, statBlockSize, dataBlockSize, fdBlockSize, obsBlockSize, netBlockSize);
 		auto added = openRefs.insert({key,ref});
 		if (added.second) refIter = added.first;
 	}
@@ -999,6 +1105,28 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_procobs, "recTimeUSec", HOFFSET(procobs, recTimeUSec), H5T_NATIVE_ULONG);
     H5Tinsert(type_procobs, "startTime", HOFFSET(procobs, startTime), H5T_NATIVE_ULONG);
     H5Tinsert(type_procobs, "startTimeUSec", HOFFSET(procobs, startTimeUSec), H5T_NATIVE_ULONG);
+
+    type_netstat = H5Tcreate(H5T_COMPOUND, sizeof(netstat));
+    if (type_netstat < 0) throw ProcIOException("Failed to create type_netstat");
+	H5Tinsert(type_netstat, "identifier", HOFFSET(netstat, identifier), strType_idBuffer);
+	H5Tinsert(type_netstat, "subidentifier", HOFFSET(netstat, subidentifier), strType_idBuffer);
+    H5Tinsert(type_netstat, "recTime", HOFFSET(netstat, recTime), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "recTimeUSec", HOFFSET(netstat, recTimeUSec), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "local_address", HOFFSET(netstat, local_address), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "local_port", HOFFSET(netstat, local_port), H5T_NATIVE_UINT);
+    H5Tinsert(type_netstat, "remote_address", HOFFSET(netstat, remote_address), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "remote_port", HOFFSET(netstat, remote_port), H5T_NATIVE_UINT);
+    H5Tinsert(type_netstat, "state", HOFFSET(netstat, state), H5T_NATIVE_USHORT);
+    H5Tinsert(type_netstat, "tx_queue", HOFFSET(netstat, tx_queue), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "rx_queue", HOFFSET(netstat, rx_queue), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "tr", HOFFSET(netstat, tr), H5T_NATIVE_USHORT);
+    H5Tinsert(type_netstat, "ticks_expire", HOFFSET(netstat, ticks_expire), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "retransmit", HOFFSET(netstat, retransmit), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "uid", HOFFSET(netstat, uid), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "timeout", HOFFSET(netstat, timeout), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "inode", HOFFSET(netstat, inode), H5T_NATIVE_ULONG);
+    H5Tinsert(type_netstat, "refCount", HOFFSET(netstat, refCount), H5T_NATIVE_UINT);
+    H5Tinsert(type_netstat, "type", HOFFSET(netstat, type), H5T_NATIVE_INT);
 }
 
 unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int start_id, int count) {
@@ -1041,6 +1169,16 @@ unsigned int ProcHDF5IO::write_procobs(procobs* start_pointer, unsigned int star
     return write_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count, obsBlockSize);
 }
 
+unsigned int ProcHDF5IO::write_netstat(netstat* start_pointer, unsigned int start_id, int count) {
+    if (!override_context) {
+	    for (int i = 0; i < count; i++) {
+		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
+		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
+	    }
+    }
+    return write_dataset(TYPE_NETSTAT, type_netstat, (void*) start_pointer, start_id, count, netBlockSize);
+}
+
 unsigned int ProcHDF5IO::read_procstat(procstat* start_pointer, unsigned int start_id, unsigned int count) {
     return read_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count);
 }
@@ -1057,6 +1195,10 @@ unsigned int ProcHDF5IO::read_procobs(procobs* start_pointer, unsigned int start
     return read_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count);
 }
 
+unsigned int ProcHDF5IO::read_netstat(netstat* start_pointer, unsigned int start_id, unsigned int count) {
+    return read_dataset(TYPE_NETSTAT, type_netstat, (void*) start_pointer, start_id, count);
+}
+
 unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count) {
     if (hdf5Segment == nullptr) {
         return 0;
@@ -1071,13 +1213,15 @@ unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, voi
 
 	hid_t ds = -1;
     if (recordType == TYPE_PROCSTAT) {
-       ds = hdf5Segment->procstatDS;
+        ds = hdf5Segment->procstatDS;
     } else if (recordType == TYPE_PROCDATA) {
-       ds = hdf5Segment->procdataDS;
+        ds = hdf5Segment->procdataDS;
     } else if (recordType == TYPE_PROCFD) {
-       ds = hdf5Segment->procfdDS;
+        ds = hdf5Segment->procfdDS;
     } else if (recordType == TYPE_PROCOBS) {
-       ds = hdf5Segment->procobsDS;
+        ds = hdf5Segment->procobsDS;
+    } else if (recordType == TYPE_NETSTAT) {
+        ds = hdf5Segment->netstatDS;
     }
     hid_t dataspace = H5Dget_space(ds);
     hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
@@ -1129,6 +1273,10 @@ unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, vo
        ds = hdf5Segment->procobsDS;
        size_attribute = hdf5Segment->procobsSizeID;
        nRecords = &(hdf5Segment->procobsSize);
+    } else if (recordType == TYPE_NETSTAT) {
+        ds = hdf5Segment->netstatDS;
+        size_attribute = hdf5Segment->netstatSizeID;
+        nRecords = &(hdf5Segment->netstatSize);
     }
     hid_t filespace;
     herr_t status;
@@ -1203,6 +1351,11 @@ unsigned int ProcHDF5IO::get_nprocfd() {
 unsigned int ProcHDF5IO::get_nprocobs() {
 	if (hdf5Segment == nullptr) return 0;
 	return hdf5Segment->procobsSize;
+}
+
+unsigned int ProcHDF5IO::get_nnetstat() {
+	if (hdf5Segment == nullptr) return 0;
+	return hdf5Segment->netstatSize;
 }
 
 herr_t op_func(hid_t loc_id, const char *name, const H5L_info_t *info, void *op_data) {
@@ -1306,7 +1459,7 @@ int ProcTextIO::fill_buffer() {
 }
 
 
-ProcRecordType ProcTextIO::read_stream_record(procdata* procData, procstat* procStat, procfd* procFD) {
+ProcRecordType ProcTextIO::read_stream_record(procdata* procData, procstat* procStat, procfd* procFD, netstat* net) {
     while (true) {
         if (sPtr == NULL || ptr == ePtr) {
             int bytes = fill_buffer();
@@ -1323,6 +1476,9 @@ ProcRecordType ProcTextIO::read_stream_record(procdata* procData, procstat* proc
             } else if (strcmp(sPtr, "procfd") == 0) {
                 sPtr = ptr + 1;
                 return read_procfd(procFD) ? TYPE_PROCFD : TYPE_INVALID;
+            } else if (strcmp(sPtr, "netstat") == 0) {
+                sPtr = ptr + 1;
+                return read_netstat(net) ? TYPE_NETSTAT : TYPE_INVALID;
             }
         }
         ptr++;
@@ -1472,6 +1628,46 @@ bool ProcTextIO::read_procfd(procfd* procFD) {
     return procFD->pid != 0;
 }
 
+bool ProcTextIO::read_netstat(netstat* net) {
+    int pos = 0;
+    int readBytes = -1;
+    bool done = false;
+    net->inode = 0;
+    while (!done) {
+        if (sPtr == NULL || ptr == ePtr) {
+            int bytes = fill_buffer();
+            if (bytes == 0) break;
+        }
+        if ((*ptr == ',' || *ptr == '\n') && (readBytes < 0 || readBytes == (ptr-sPtr))) {
+            if (*ptr == '\n') done = true;
+            *ptr = 0;
+            switch (pos) {
+                case 0: net->recTime = strtoul(sPtr, &ptr, 10); break;
+                case 1: net->recTimeUSec = strtoul(sPtr, &ptr, 10); break;
+                case 2: net->local_address = strtoul(sPtr, &ptr, 10); break;
+                case 3: net->local_port = strtoul(sPtr, &ptr, 10); break;
+                case 4: net->remote_address = strtoul(sPtr, &ptr, 10); break;
+                case 5: net->remote_port = strtoul(sPtr, &ptr, 10); break;
+                case 6: net->state = strtoul(sPtr, &ptr, 10); break;
+                case 7: net->tx_queue = strtoul(sPtr, &ptr, 10); break;
+                case 8: net->rx_queue = strtoul(sPtr, &ptr, 10); break;
+                case 9: net->tr = strtoul(sPtr, &ptr, 10); break;
+                case 10: net->ticks_expire = strtoul(sPtr, &ptr, 10); break;
+                case 11: net->retransmit = strtoul(sPtr, &ptr, 10); break;
+                case 12: net->uid = strtoul(sPtr, &ptr, 10); break;
+                case 13: net->timeout = strtoul(sPtr, &ptr, 10); break;
+                case 14: net->inode = strtoul(sPtr, &ptr, 10); break;
+                case 15: net->refCount = strtoul(sPtr, &ptr, 10); break;
+                case 16: net->type = strtoul(sPtr, &ptr, 10); break;
+            }
+            pos++;
+            sPtr = ptr + 1;
+        }
+        ptr++;
+    }
+    return net->inode != 0;
+}
+
 unsigned int ProcTextIO::write_procdata(procdata* start_ptr, int cnt) {
     unsigned int nBytes = 0;
     for (int i = 0; i < cnt; i++) {
@@ -1513,6 +1709,22 @@ unsigned int ProcTextIO::write_procfd(procfd* start_ptr, int cnt) {
         nBytes += fprintf(filePtr, ",%d,%d,%lu,%lu,%lu,%lu",procFD->pid,procFD->ppid,procFD->recTime,procFD->recTimeUSec,procFD->startTime,procFD->startTimeUSec);
         nBytes += fprintf(filePtr, ",%lu,%s", strlen(procFD->path), procFD->path);
         nBytes += fprintf(filePtr, ",%d,%u\n", procFD->fd, procFD->mode);
+    }
+    return nBytes;
+}
+
+unsigned int ProcTextIO::write_netstat(netstat* start_ptr, int cnt) {
+    unsigned int nBytes = 0;
+    for (int i = 0; i < cnt; i++) {
+        netstat* net = &(start_ptr[i]);
+        ptr += fprintf(filePtr,
+            "%lu,%lu,%lu,%u,%lu,%u,%u,%lu,%lu,%u,%lu,%lu,%lu,%lu,%lu,%u,%d\n",
+            net->recTime, net->recTimeUSec, net->local_address,
+            net->local_port, net->remote_address, net->remote_port,
+            net->state, net->tx_queue, net->rx_queue, net->tr,
+            net->ticks_expire, net->retransmit, net->uid,
+            net->timeout, net->inode, net->refCount, net->type
+        );
     }
     return nBytes;
 }

@@ -54,7 +54,8 @@ typedef enum _ProcRecordType {
     TYPE_PROCSTAT = 1,
     TYPE_PROCFD = 2,
     TYPE_PROCOBS = 3,
-    TYPE_INVALID = 4,
+    TYPE_NETSTAT = 4,
+    TYPE_INVALID = 5,
 } ProcRecordType;
 
 using namespace std;
@@ -67,6 +68,7 @@ public:
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, int count);
+    virtual unsigned int write_netstat(netstat* start_ptr, int count);
 protected:
 	bool contextSet;
     string identifier;
@@ -82,12 +84,14 @@ public:
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, int count);
-    ProcRecordType read_stream_record(procdata* procData, procstat* procStat, procfd* procFD);
+    virtual unsigned int write_netstat(netstat* start_ptr, int count);
+    ProcRecordType read_stream_record(procdata* procData, procstat* procStat, procfd* procFD,netstat*);
 private:
 	int fill_buffer();
 	bool read_procstat(procstat*);
 	bool read_procdata(procdata*);
     bool read_procfd(procfd*);
+    bool read_netstat(netstat*);
 
     string filename;
     ProcIOFileMode mode;
@@ -101,7 +105,7 @@ class hdf5Ref {
 	friend class ProcHDF5IO;
 
 public:
-	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obBlockSize);
+	hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, hid_t type_netstat, const std::string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obBlockSize, unsigned int netBlockSize);
 	~hdf5Ref();
 
 private:
@@ -111,38 +115,45 @@ private:
 	hid_t procdataDS;
     hid_t procfdDS;
     hid_t procobsDS;
+    hid_t netstatDS;
 	hid_t procstatSizeID;
 	hid_t procdataSizeID;
     hid_t procfdSizeID;
     hid_t procobsSizeID;
+    hid_t netstatSizeID;
 	unsigned int procstatSize;
 	unsigned int procdataSize;
     unsigned int procfdSize;
     unsigned int procobsSize;
+    unsigned int netstatSize;
 	time_t lastUpdate;
 };
 
 class ProcHDF5IO : public ProcIO {
 public:
-    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE, unsigned int fdBlockSize=DEFAULT_FD_BLOCK_SIZE, unsigned int obsBlockSize=DEFAULT_OBS_BLOCK_SIZE);
+    ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE, unsigned int fdBlockSize=DEFAULT_FD_BLOCK_SIZE, unsigned int obsBlockSize=DEFAULT_OBS_BLOCK_SIZE, unsigned int netBlockSize=10);
     ~ProcHDF5IO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procobs(procobs* start_ptr, unsigned int start_id, int count);
+    virtual unsigned int write_netstat(netstat* start_ptr, unsigned int start_id, int count);
     unsigned int read_procdata(procdata* procData, unsigned int id);
     unsigned int read_procstat(procstat* procStat, unsigned int id);
     unsigned int read_procfd(procfd* procFD, unsigned int id);
     unsigned int read_procobs(procobs* procObs, unsigned int id);
+    unsigned int read_netstat(netstat* netData, unsigned int id);
     unsigned int read_procdata(procdata* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procstat(procstat* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procfd(procfd* start_ptr, unsigned int start_id, unsigned int count);
     unsigned int read_procobs(procobs* start_ptr, unsigned int start_id, unsigned int count);
+    unsigned int read_netstat(netstat* netData, unsigned int start_id, unsigned int count);
 	unsigned int get_nprocdata();
 	unsigned int get_nprocstat();
 	unsigned int get_nprocfd();
 	unsigned int get_nprocobs();
+    unsigned int get_nnetstat();
 
     bool metadata_set_string(const char*, const char*);
     bool metadata_set_uint(const char*, unsigned long);
@@ -176,11 +187,13 @@ private:
     hid_t type_procstat;
     hid_t type_procfd;
     hid_t type_procobs;
+    hid_t type_netstat;
 
 	unsigned int dataBlockSize;
 	unsigned int statBlockSize;
 	unsigned int fdBlockSize;
 	unsigned int obsBlockSize;
+    unsigned int netBlockSize;
     bool override_context;
 };
 #endif
@@ -194,6 +207,7 @@ public:
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, int count);
+    virtual unsigned int write_netstat(netstat* start_ptr, int count);
     bool set_queue_name(const string& queue_name);
     ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec);
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
@@ -206,11 +220,13 @@ private:
 	bool _read_procstat(procstat *startPtr, int nRecords, const char* buffer, int nBytes);
 	bool _read_procdata(procdata *startPtr, int nRecords, const char* buffer, int nBytes);
 	bool _read_procfd(procfd *startPtr, int nRecords, const char* buffer, int nBytes);
+    bool _read_netstat(netstat *startPtr, int nRecords, const char* buffer, int nBytes);
 	bool _set_frame_context(const string& routingKey);
 
 	bool _read_procstat(procstat*, int, char*, int);
 	bool _read_procdata(procdata*, int, char*, int);
 	bool _read_procfd(procfd*, int, char*, int);
+    bool _read_netstat(netstat*, int, char*, int);
 
     bool _send_message(const char *tag, amqp_bytes_t& message);
 

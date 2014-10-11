@@ -54,6 +54,7 @@ vector<procdata> tmp_procData;
 vector<procstat> global_procStat;
 vector<procdata> global_procData;
 vector<procfd>   global_procFD;
+vector<netstat>  global_netstat;
 
 void sig_handler(int signum) {
     /* if we receive any trapped signal, just set the cleanUpFlag
@@ -244,6 +245,131 @@ int parseProcIO(int pid, procdata* procData, procstat* statData) {
         }
         ptr++;
     }
+    fclose(fp);
+    return 0;
+}
+
+int parseNetstat(const char *protocol, vector<netstat>& data) {
+    char *ptr = NULL;
+    char *sptr = NULL;
+    char *eptr = NULL;
+    int rbytes = 0;
+    int stage = 0;  /* 0 = parsing header; 1 = parsing data */
+    char filename[BUFFER_SIZE];
+    char lbuffer[LBUFFER_SIZE] = "";
+    FILE* fp = NULL;
+    netstat *dataPtr = NULL;
+    size_t dataCount = 0;
+    int netType = -1;
+    snprintf(filename, BUFFER_SIZE, "/proc/net/%s", protocol);
+    if (strcmp(protocol, "tcp") == 0) {
+        netType = 0;
+    } else if (strcmp(protocol, "udp") == 0) {
+        netType = 1;
+    } else {
+        return -1;
+    }
+
+    fp = fopen(filename, "r");
+    if (fp == NULL) return -1;
+
+    /* read and skip the header line */
+    while (true) {
+        if (sptr == NULL || ptr == eptr) {
+            rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+            if (rbytes == 0) break;
+        }
+        for ( ; ptr < eptr && *ptr != '\n'; ++ptr) {
+            // the logic is the loop
+        }
+        if (*ptr++ == '\n') {
+            break;
+        }
+    }
+    /* parse the body */
+    bool lastInvalid = true;
+    int fieldCount = 0;
+    while (true) {
+        if (sptr == NULL || ptr == eptr) {
+            rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
+            if (rbytes == 0) break;
+        }
+        for ( ; ptr < eptr; ++ptr) {
+            bool newline = *ptr == '\n';
+            bool currInvalid = isspace(*ptr) || *ptr == ':' || *ptr == 0;
+            if (lastInvalid && currInvalid) {
+                // still between tokens
+                continue;
+            }
+            if (currInvalid) {
+                // end of token
+                *ptr = 0;
+                if (dataPtr == NULL) {
+                    if (data.size() == dataCount) {
+                        data.resize(dataCount + 10);
+                        dataPtr = &(data[dataCount++]);
+                        dataPtr->type = netType;
+                    }
+                }
+                switch (fieldCount) {
+                    case 0: break;
+                    case 1:
+                        dataPtr->local_address = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 2:
+                        dataPtr->local_port = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 3:
+                        dataPtr->remote_address = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 4:
+                        dataPtr->remote_port = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 5:
+                        dataPtr->state = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 6:
+                        dataPtr->tx_queue = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 7:
+                        dataPtr->rx_queue = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 8:
+                        dataPtr->tr = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 9:
+                        dataPtr->ticks_expire = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 10:
+                        dataPtr->retransmit = strtoul(sptr, &ptr, 16);
+                        break;
+                    case 11:
+                        dataPtr->uid = strtoul(sptr, &ptr, 10);
+                        break;
+                    case 12:
+                        dataPtr->timeout = strtoul(sptr, &ptr, 10);
+                        break;
+                    case 13:
+                        dataPtr->inode = strtoul(sptr, &ptr, 10);
+                        break;
+                    case 14:
+                        dataPtr->refCount = strtoul(sptr, &ptr, 10);
+                        break;
+                }
+                if (newline) {
+                    fieldCount = 0;
+                    dataPtr = NULL;
+                } else {
+                    fieldCount++;
+                }
+            } else if (lastInvalid) {
+                // beginning of token
+                sptr = ptr;
+            }
+            lastInvalid = currInvalid;
+        }
+    }
+    data.resize(dataCount);
     fclose(fp);
     return 0;
 }
@@ -798,6 +924,17 @@ int searchProcFs(ProcmonConfig *config) {
     sort(global_procData.begin(), global_procData.end(), cmp_procdata_ident);
     sort(global_procFD.begin(), global_procFD.end(), cmp_procfd_ident);
 
+    // get machine-level stats
+    global_netstat.clear();
+    parseNetstat("tcp", global_netstat);
+    parseNetstat("udp", global_netstat);
+    for (auto net: global_netstat) {
+        snprintf(net.identifier, IDENTIFIER_SIZE, config->identifier.c_str());
+        snprintf(net.subidentifier, IDENTIFIER_SIZE, config->subidentifier.c_str());
+        net.recTime = before.tv_sec;
+        net.recTimeUSec = before.tv_usec;
+    }
+
     return ntargets;
 }
 
@@ -1023,6 +1160,9 @@ unsigned int write_procdata(ProcIO *output, procdata *data, int count) {
 unsigned int write_procfd(ProcIO *output, procfd *data, int count) {
     return output->write_procfd(data, count);
 }
+unsigned int write_netstat(ProcIO *output, netstat *data, int count) {
+    return output->write_netstat(data, count);
+}
 bool set_context(ProcIO *output, const std::string& host, const std::string& identifier, const std::string &subidentifier) {
     return output->set_context(host, identifier, subidentifier);
 }
@@ -1217,6 +1357,7 @@ int main(int argc, char** argv) {
                 writeOutput(config, *iter, global_procStat, write_procstat);
                 writeOutput(config, *iter, global_procData, write_procdata);
                 writeOutput(config, *iter, global_procFD, write_procfd);
+                writeOutput(config, *iter, global_netstat, write_netstat);
             }
         }
 
