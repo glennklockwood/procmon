@@ -56,11 +56,11 @@ vector<procdata> global_procData;
 vector<procfd>   global_procFD;
 
 void sig_handler(int signum) {
-	/* if we receive any trapped signal, just set the cleanUpFlag
-	 * this will break the infinite loop and cause the message
-	 * buffer to get written out
-	 */
-	cleanUpFlag = 1;
+    /* if we receive any trapped signal, just set the cleanUpFlag
+     * this will break the infinite loop and cause the message
+     * buffer to get written out
+     */
+    cleanUpFlag = 1;
 }
 
 static bool cmp_procstat_ident(const procstat &a, const procstat &b) {
@@ -97,11 +97,11 @@ static bool cmp_procfd_ident(const procfd &a, const procfd &b) {
 }
 
 int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
-	char *ptr = NULL;
+    char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	int idx = 0;
-	int rbytes;
+    int idx = 0;
+    int rbytes;
     unsigned long long starttime;
     double temp_time;
     char filename[BUFFER_SIZE];
@@ -117,80 +117,80 @@ int parseProcStat(int pid, procstat* statData, procdata* procData, time_t bootti
             rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
             if (rbytes == 0) break;
         }
-		if (*ptr == ' ' || *ptr == 0) {
-			*ptr = 0;
-			switch (idx) {
-				case 0:		statData->pid = atoi(sptr);  break;
-				case 1:		{
+        if (*ptr == ' ' || *ptr == 0) {
+            *ptr = 0;
+            switch (idx) {
+                case 0:        statData->pid = atoi(sptr);  break;
+                case 1:        {
                     int n = ((ptr - 1) - (sptr+1));
                     n = n > EXEBUFFER_SIZE ? EXEBUFFER_SIZE : n;
                     memcpy(procData->execName, sptr+1, n);
                     procData->execName[n] = 0;
                 }
-				case 2:		statData->state = *sptr; break;
-				case 3:		statData->ppid = atoi(sptr); break;
-				case 4:		statData->pgrp = atoi(sptr); break;
-				case 5:		statData->session = atoi(sptr); break;
-				case 6:		statData->tty = atoi(sptr); break;
-				case 7:		statData->tpgid = atoi(sptr); break;
-				case 8:		statData->flags = atoi(sptr); break;
-				//case 9:	statData->minorFaults = strtoul(sptr, &ptr, 10); break;
-				//case 10:	statData->cminorFaults = strtoul(sptr, &ptr, 10); break;
-				//case 11:	statData->majorFaults = strtoul(sptr, &ptr, 10); break;
-				//case 12:	statData->cmajorFaults = strtoul(sptr, &ptr, 10); break;
-				case 13:	statData->utime = strtoul(sptr, &ptr, 10); break;
-				case 14:	statData->stime = strtoul(sptr, &ptr, 10); break;
-				//case 15:	statData->cutime = atol(sptr); break;
-				//case 16:	statData->cstime = atol(sptr); break;
-				case 17:	statData->priority = atol(sptr); break;
-				case 18:	statData->nice = atol(sptr); break;
-				case 19:	statData->numThreads = atol(sptr); break;
-				//case 20:	statData->itrealvalue = atol(sptr); break;
-				case 21:
+                case 2:        statData->state = *sptr; break;
+                case 3:        statData->ppid = atoi(sptr); break;
+                case 4:        statData->pgrp = atoi(sptr); break;
+                case 5:        statData->session = atoi(sptr); break;
+                case 6:        statData->tty = atoi(sptr); break;
+                case 7:        statData->tpgid = atoi(sptr); break;
+                case 8:        statData->flags = atoi(sptr); break;
+                //case 9:    statData->minorFaults = strtoul(sptr, &ptr, 10); break;
+                //case 10:    statData->cminorFaults = strtoul(sptr, &ptr, 10); break;
+                //case 11:    statData->majorFaults = strtoul(sptr, &ptr, 10); break;
+                //case 12:    statData->cmajorFaults = strtoul(sptr, &ptr, 10); break;
+                case 13:    statData->utime = strtoul(sptr, &ptr, 10); break;
+                case 14:    statData->stime = strtoul(sptr, &ptr, 10); break;
+                //case 15:    statData->cutime = atol(sptr); break;
+                //case 16:    statData->cstime = atol(sptr); break;
+                case 17:    statData->priority = atol(sptr); break;
+                case 18:    statData->nice = atol(sptr); break;
+                case 19:    statData->numThreads = atol(sptr); break;
+                //case 20:    statData->itrealvalue = atol(sptr); break;
+                case 21:
                     starttime = strtoull(sptr, &ptr, 10);
                     temp_time = boottime + starttime / (double)clockTicksPerSec;
                     statData->startTime = (time_t) floor(temp_time);
                     statData->startTimeUSec = (time_t) floor( (temp_time - statData->startTime) * 1e6);
                     break;
-				case 22:	statData->vsize = strtoul(sptr, &ptr, 10); break;
-				case 23:	statData->rss = strtoul(sptr, &ptr, 10); break;
-				case 24:	statData->rsslim = strtoul(sptr, &ptr, 10); break;
-				//case 25:	statData->startcode = strtoul(sptr, &ptr, 10); break;
-				//case 26:	statData->endcode = strtoul(sptr, &ptr, 10); break;
-				//case 27:	statData->startstack = strtoul(sptr, &ptr, 10); break;
-				//case 28:	statData->kstkesp = strtoul(sptr, &ptr, 10); break;
-				//case 29:	statData->kstkeip = strtoul(sptr, &ptr, 10); break;
-				case 30:	statData->signal = strtoul(sptr, &ptr, 10); break;
-				case 31:	statData->blocked = strtoul(sptr, &ptr, 10); break;
-				case 32:	statData->sigignore = strtoul(sptr, &ptr, 10); break;
-				case 33:	statData->sigcatch = strtoul(sptr, &ptr, 10); break;
-				//case 34:	statData->wchan = strtoul(sptr, &ptr, 10); break;
-				//case 35:	statData->nswap = strtoul(sptr, &ptr, 10); break;
-				//case 36:	statData->cnswap = strtoul(sptr, &ptr, 10); break;
-				//case 37:	statData->exitSignal = atoi(sptr); break;
-				//case 38:	statData->processor = atoi(sptr); break;
-				case 39:	statData->rtPriority = atoi(sptr); break;
-				case 40:	statData->policy = atoi(sptr); break;
-				case 41:	statData->delayacctBlkIOTicks = strtoull(sptr, &ptr, 10); break;
-				case 42:	statData->guestTime = strtoul(sptr, &ptr, 10); break;
-				//case 43:	statData->cguestTime = strtoul(sptr, &ptr, 10); break;
-			}
-			idx++;
-			sptr = ptr+1;
-		}
+                case 22:    statData->vsize = strtoul(sptr, &ptr, 10); break;
+                case 23:    statData->rss = strtoul(sptr, &ptr, 10); break;
+                case 24:    statData->rsslim = strtoul(sptr, &ptr, 10); break;
+                //case 25:    statData->startcode = strtoul(sptr, &ptr, 10); break;
+                //case 26:    statData->endcode = strtoul(sptr, &ptr, 10); break;
+                //case 27:    statData->startstack = strtoul(sptr, &ptr, 10); break;
+                //case 28:    statData->kstkesp = strtoul(sptr, &ptr, 10); break;
+                //case 29:    statData->kstkeip = strtoul(sptr, &ptr, 10); break;
+                case 30:    statData->signal = strtoul(sptr, &ptr, 10); break;
+                case 31:    statData->blocked = strtoul(sptr, &ptr, 10); break;
+                case 32:    statData->sigignore = strtoul(sptr, &ptr, 10); break;
+                case 33:    statData->sigcatch = strtoul(sptr, &ptr, 10); break;
+                //case 34:    statData->wchan = strtoul(sptr, &ptr, 10); break;
+                //case 35:    statData->nswap = strtoul(sptr, &ptr, 10); break;
+                //case 36:    statData->cnswap = strtoul(sptr, &ptr, 10); break;
+                //case 37:    statData->exitSignal = atoi(sptr); break;
+                //case 38:    statData->processor = atoi(sptr); break;
+                case 39:    statData->rtPriority = atoi(sptr); break;
+                case 40:    statData->policy = atoi(sptr); break;
+                case 41:    statData->delayacctBlkIOTicks = strtoull(sptr, &ptr, 10); break;
+                case 42:    statData->guestTime = strtoul(sptr, &ptr, 10); break;
+                //case 43:    statData->cguestTime = strtoul(sptr, &ptr, 10); break;
+            }
+            idx++;
+            sptr = ptr+1;
+        }
         ptr++;
-	}
+    }
     fclose(fp);
-	return 0;
+    return 0;
 }
 
 int parseProcIO(int pid, procdata* procData, procstat* statData) {
-	char *ptr = NULL;
+    char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	char* label = NULL;
-	int rbytes = 0;
-	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
+    char* label = NULL;
+    int rbytes = 0;
+    int stage = 0;  /* 0 = parsing Label; >1 parsing values */
     char filename[BUFFER_SIZE] = "";
     char lbuffer[LBUFFER_SIZE] = "";
     FILE* fp = NULL;
@@ -204,117 +204,117 @@ int parseProcIO(int pid, procdata* procData, procstat* statData) {
             rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
             if (rbytes == 0) break;
         }
-		if (stage <= 0) {
-			if (*ptr == ':') {
-				*ptr = 0;
-				label = sptr;
-				sptr = ptr + 1;
-				stage = 1;
+        if (stage <= 0) {
+            if (*ptr == ':') {
+                *ptr = 0;
+                label = sptr;
+                sptr = ptr + 1;
+                stage = 1;
                 ptr++;
                 continue;
-			}
-		}
-		if (stage > 0) {
-			if (*ptr == ' ' || *ptr == '\n' || *ptr == 0) {
-				if (*ptr == '\n' || *ptr == 0) {
-					stage = -1;
-				}
-				*ptr = 0;
-				if (ptr != sptr) {
-					/* got a real value here */
-					if (strcmp(label, "rchar") == 0) {
-						statData->io_rchar = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "wchar") == 0) {
-						statData->io_wchar = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "syscr") == 0) {
-						statData->io_syscr = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "syscw") == 0) {
-						statData->io_syscw = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "read_bytes") == 0) {
-						statData->io_readBytes = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "write_bytes") == 0) {
-						statData->io_writeBytes = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "cancelled_write_bytes") == 0) {
-						statData->io_cancelledWriteBytes = strtoull(sptr, &ptr, 10);
-					}
-					stage++;
-				}
-				sptr = ptr + 1;
-			}
-		}
+            }
+        }
+        if (stage > 0) {
+            if (*ptr == ' ' || *ptr == '\n' || *ptr == 0) {
+                if (*ptr == '\n' || *ptr == 0) {
+                    stage = -1;
+                }
+                *ptr = 0;
+                if (ptr != sptr) {
+                    /* got a real value here */
+                    if (strcmp(label, "rchar") == 0) {
+                        statData->io_rchar = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "wchar") == 0) {
+                        statData->io_wchar = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "syscr") == 0) {
+                        statData->io_syscr = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "syscw") == 0) {
+                        statData->io_syscw = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "read_bytes") == 0) {
+                        statData->io_readBytes = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "write_bytes") == 0) {
+                        statData->io_writeBytes = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "cancelled_write_bytes") == 0) {
+                        statData->io_cancelledWriteBytes = strtoull(sptr, &ptr, 10);
+                    }
+                    stage++;
+                }
+                sptr = ptr + 1;
+            }
+        }
         ptr++;
-	}
+    }
     fclose(fp);
-	return 0;
+    return 0;
 }
 
 time_t getBootTime() {
-	char *ptr = NULL;
+    char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	char* label = NULL;
-	char lbuffer[LBUFFER_SIZE];
-	time_t timestamp;
-	int stage = 0;
-	FILE* fp = fopen("/proc/stat", "r");
-	if (fp == NULL) {
-		return 0;
-	}
+    char* label = NULL;
+    char lbuffer[LBUFFER_SIZE];
+    time_t timestamp;
+    int stage = 0;
+    FILE* fp = fopen("/proc/stat", "r");
+    if (fp == NULL) {
+        return 0;
+    }
 
-	for ( ; ; ptr++) {
-		if (sptr == NULL || ptr == eptr) {
-			/* populate the buffer, if the last line was larger than LBUFFER_SIZE,
-			 * then it can't be parsed by this scheme, and will be abandoned
-			 * thus, the buffer is reset (sptr == ptr == lbuffer)
-			 */
+    for ( ; ; ptr++) {
+        if (sptr == NULL || ptr == eptr) {
+            /* populate the buffer, if the last line was larger than LBUFFER_SIZE,
+             * then it can't be parsed by this scheme, and will be abandoned
+             * thus, the buffer is reset (sptr == ptr == lbuffer)
+             */
             int bytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
-			if (bytes == 0) {
-				break;
-			}
-		}
+            if (bytes == 0) {
+                break;
+            }
+        }
 
-		if (stage <= 0) {
-			if (*ptr == ' ' || *ptr == '\t') {
-				*ptr = 0;
-				label = sptr;
-				sptr = ptr + 1;
-				stage = 1;
-				continue;
-			}
-			if (*ptr == '\n') {
-				sptr = ptr + 1;
-				stage = -1;
-				continue;
-			}
-		}
-		if (stage > 0) {
-			if (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == 0) {
-				if (*ptr == '\n' || *ptr == 0) {
-					stage = -1;
-				}
-				*ptr = 0;
-				if (ptr != sptr) {
-					/* got a real value here */
-					if (strcmp(label, "btime") == 0) {
-						timestamp = (time_t) strtoul(sptr, &ptr, 10);
-					}
-					stage++;
-				}
-				sptr = ptr + 1;
-				continue;
-			}
-		}
-	}
-	fclose(fp);
-	return timestamp;
+        if (stage <= 0) {
+            if (*ptr == ' ' || *ptr == '\t') {
+                *ptr = 0;
+                label = sptr;
+                sptr = ptr + 1;
+                stage = 1;
+                continue;
+            }
+            if (*ptr == '\n') {
+                sptr = ptr + 1;
+                stage = -1;
+                continue;
+            }
+        }
+        if (stage > 0) {
+            if (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == 0) {
+                if (*ptr == '\n' || *ptr == 0) {
+                    stage = -1;
+                }
+                *ptr = 0;
+                if (ptr != sptr) {
+                    /* got a real value here */
+                    if (strcmp(label, "btime") == 0) {
+                        timestamp = (time_t) strtoul(sptr, &ptr, 10);
+                    }
+                    stage++;
+                }
+                sptr = ptr + 1;
+                continue;
+            }
+        }
+    }
+    fclose(fp);
+    return timestamp;
 }
 
 int parseProcStatM(int pid, procdata* procData, procstat* statData) {
-	char *ptr = NULL;
+    char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
-	int idx = 0;
-	int rbytes = 0;
+    int idx = 0;
+    int rbytes = 0;
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE];
     FILE* fp = NULL;
@@ -328,33 +328,33 @@ int parseProcStatM(int pid, procdata* procData, procstat* statData) {
             rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
             if (rbytes == 0) break;
         }
-		if (*ptr == ' ' || *ptr == '\n' || *ptr == 0) {
-			*ptr = 0;
-			switch (idx) {
-				case 0: statData->m_size = strtoul(sptr, &ptr, 10); break;
-				case 1: statData->m_resident = strtoul(sptr, &ptr, 10); break;
-				case 2: statData->m_share = strtoul(sptr, &ptr, 10); break;
-				case 3: statData->m_text = strtoul(sptr, &ptr, 10); break;
-				case 4: break;
-				case 5: statData->m_data = strtoul(sptr, &ptr, 10); break;
-				case 6: break;
-			}
-			idx++;
-			sptr = ptr + 1;
-		}
+        if (*ptr == ' ' || *ptr == '\n' || *ptr == 0) {
+            *ptr = 0;
+            switch (idx) {
+                case 0: statData->m_size = strtoul(sptr, &ptr, 10); break;
+                case 1: statData->m_resident = strtoul(sptr, &ptr, 10); break;
+                case 2: statData->m_share = strtoul(sptr, &ptr, 10); break;
+                case 3: statData->m_text = strtoul(sptr, &ptr, 10); break;
+                case 4: break;
+                case 5: statData->m_data = strtoul(sptr, &ptr, 10); break;
+                case 6: break;
+            }
+            idx++;
+            sptr = ptr + 1;
+        }
         ptr++;
-	}
+    }
     fclose(fp);
-	return 0;
+    return 0;
 }
 
 int parseProcEnvironment(int pid, std::map<std::string, std::string>& env) {
-	char *ptr = NULL;
+    char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
     char *keptr = NULL;
     char *vsptr = NULL;
-	int rbytes = 0;
+    int rbytes = 0;
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE];
     FILE* fp = NULL;
@@ -368,20 +368,20 @@ int parseProcEnvironment(int pid, std::map<std::string, std::string>& env) {
             rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
             if (rbytes == 0) break;
         }
-		if (*ptr == 0) {
-			*ptr = 0;
+        if (*ptr == 0) {
+            *ptr = 0;
             keptr = strchr(sptr, '=');
             if (keptr != NULL) {
                 *keptr = 0;
                 vsptr = keptr + 1;
                 env[std::string(sptr)] = std::string(vsptr);
             }
-			sptr = ptr + 1;
-		}
+            sptr = ptr + 1;
+        }
         ptr++;
-	}
+    }
     fclose(fp);
-	return 0;
+    return 0;
 }
 
 int parse_fds(int pid, size_t maxfd, vector<procfd> &all_procfd, size_t *p_idx, procstat *statData) {
@@ -390,7 +390,7 @@ int parse_fds(int pid, size_t maxfd, vector<procfd> &all_procfd, size_t *p_idx, 
     int start_idx = *p_idx;
     int rbytes = 0;
     for (int fd = 3; fd < maxfd+3; fd++) {
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/fd/%d", pid, fd);
+        snprintf(buffer, BUFFER_SIZE, "/proc/%d/fd/%d", pid, fd);
         if (lstat(buffer, &link) != 0) {
             break;
         }
@@ -403,11 +403,11 @@ int parse_fds(int pid, size_t maxfd, vector<procfd> &all_procfd, size_t *p_idx, 
         all_procfd[idx].startTimeUSec = statData->startTimeUSec;
         all_procfd[idx].fd = fd;
         all_procfd[idx].mode = link.st_mode;
-		if ((rbytes = readlink(buffer, all_procfd[idx].path, BUFFER_SIZE)) <= 0) {
-			snprintf(all_procfd[idx].path, BUFFER_SIZE, "Unknown");
-		} else {
-			all_procfd[idx].path[rbytes] = 0;
-		}
+        if ((rbytes = readlink(buffer, all_procfd[idx].path, BUFFER_SIZE)) <= 0) {
+            snprintf(all_procfd[idx].path, BUFFER_SIZE, "Unknown");
+        } else {
+            all_procfd[idx].path[rbytes] = 0;
+        }
     }
     return *p_idx - start_idx;
 }
@@ -445,16 +445,16 @@ tgtGid < 0); -1 for file error error
 
 */
 int parseProcStatus(int pid, int tgtGid, procstat* statData) {
-	char *ptr = NULL;
+    char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE];
-	char* label;
-	int stage = 0;  /* 0 = parsing Label; >1 parsing values */
-	int nextStage = 0;
+    char* label;
+    int stage = 0;  /* 0 = parsing Label; >1 parsing values */
+    int nextStage = 0;
     int retVal = 0;
-	FILE* fp = NULL;
+    FILE* fp = NULL;
     int rbytes = 0;
     snprintf(filename, BUFFER_SIZE, "/proc/%d/status", pid);
     fp = fopen(filename, "r");
@@ -465,61 +465,61 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData) {
             rbytes = fileFillBuffer(fp, lbuffer, LBUFFER_SIZE, &sptr, &ptr, &eptr);
             if (rbytes == 0) break;
         }
-		if (stage <= 0) {
-			if (*ptr == ':') {
-				*ptr = 0;
-				label = sptr;
-				sptr = ptr + 1;
-				stage = 1;
-				continue;
-			}
-		}
-		if (stage > 0) {
-			if (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == 0) {
-				if (*ptr == '\n' || *ptr == 0) {
-					nextStage = -1;
-				} else {
-					nextStage = stage;
-				}
-				*ptr = 0;
-				if (ptr != sptr) {
-					/* got a real value here */
+        if (stage <= 0) {
+            if (*ptr == ':') {
+                *ptr = 0;
+                label = sptr;
+                sptr = ptr + 1;
+                stage = 1;
+                continue;
+            }
+        }
+        if (stage > 0) {
+            if (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == 0) {
+                if (*ptr == '\n' || *ptr == 0) {
+                    nextStage = -1;
+                } else {
+                    nextStage = stage;
+                }
+                *ptr = 0;
+                if (ptr != sptr) {
+                    /* got a real value here */
                     /*if (stage == 1 && strcmp(label, "Name") == 0) {
                         snprintf(procData->execName, EXEBUFFER_SIZE, "%s", sptr);
                     } else */
                     if (stage == 1 && strcmp(label, "Pid") == 0) {
-						statData->pid = (unsigned int) strtoul(sptr, &ptr, 10);
+                        statData->pid = (unsigned int) strtoul(sptr, &ptr, 10);
                     } else if (stage == 1 && strcmp(label, "PPid") == 0) {
-						statData->ppid = (unsigned int) strtoul(sptr, &ptr, 10);
+                        statData->ppid = (unsigned int) strtoul(sptr, &ptr, 10);
                     } else if (stage == 1 && strcmp(label, "Uid") == 0) {
-						statData->realUid = strtoul(sptr, &ptr, 10);
-					} else if (stage == 2 && strcmp(label, "Uid") == 0) {
-						statData->effUid = strtoul(sptr, &ptr, 10);
-					} else if (stage == 1 && strcmp(label, "Gid") == 0) {
-						statData->realGid = strtoul(sptr, &ptr, 10);
-					} else if (stage == 2 && strcmp(label, "Gid") == 0) {
-						statData->effGid = strtoul(sptr, &ptr, 10);
-					} else if (stage == 1 && strcmp(label, "VmPeak") == 0) {
-						statData->vmpeak = strtoul(sptr, &ptr, 10);
-					} else if (stage == 1 && strcmp(label, "VmHWM") == 0) {
-						statData->rsspeak = strtoull(sptr, &ptr, 10);
-					} else if (strcmp(label, "Cpus_allowed") == 0) {
-						statData->cpusAllowed = atoi(sptr);
-					} else if (stage > 0 && strcmp(label, "Groups") == 0) {
+                        statData->realUid = strtoul(sptr, &ptr, 10);
+                    } else if (stage == 2 && strcmp(label, "Uid") == 0) {
+                        statData->effUid = strtoul(sptr, &ptr, 10);
+                    } else if (stage == 1 && strcmp(label, "Gid") == 0) {
+                        statData->realGid = strtoul(sptr, &ptr, 10);
+                    } else if (stage == 2 && strcmp(label, "Gid") == 0) {
+                        statData->effGid = strtoul(sptr, &ptr, 10);
+                    } else if (stage == 1 && strcmp(label, "VmPeak") == 0) {
+                        statData->vmpeak = strtoul(sptr, &ptr, 10);
+                    } else if (stage == 1 && strcmp(label, "VmHWM") == 0) {
+                        statData->rsspeak = strtoull(sptr, &ptr, 10);
+                    } else if (strcmp(label, "Cpus_allowed") == 0) {
+                        statData->cpusAllowed = atoi(sptr);
+                    } else if (stage > 0 && strcmp(label, "Groups") == 0) {
                         int gid = atoi(sptr);
                         if (tgtGid > 0 && tgtGid == gid) {
                             retVal++;
                         }
                     }
-					nextStage++;
-				}
-				sptr = ptr + 1;
-				stage = nextStage;
-			}
-		}
-	}
+                    nextStage++;
+                }
+                sptr = ptr + 1;
+                stage = nextStage;
+            }
+        }
+    }
     fclose(fp);
-	return retVal;
+    return retVal;
 }
 
 /* on first pass:
@@ -527,19 +527,19 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData) {
  *   save all contents in-memory
  */
 int searchProcFs(ProcmonConfig *config) {
-	DIR* procDir;
-	struct dirent* dptr;
-	char buffer[BUFFER_SIZE];
-	FILE* fp;
-	int tgt_pid;
-	int npids = 0;
-	int ntargets = 0;
-	int idx = 0;
-	int nchange = 0;
-	int nNewTargets = ntargets;
-	int nstart = 0;
-	struct timeval before;
-	int foundParent;
+    DIR* procDir;
+    struct dirent* dptr;
+    char buffer[BUFFER_SIZE];
+    FILE* fp;
+    int tgt_pid;
+    int npids = 0;
+    int ntargets = 0;
+    int idx = 0;
+    int nchange = 0;
+    int nNewTargets = ntargets;
+    int nstart = 0;
+    struct timeval before;
+    int foundParent;
     bool procEnv = false;
     int readStatFirst = (config->tgtSid > 0 || config->tgtPgid > 0) ? 1 : 0;
 
@@ -547,29 +547,29 @@ int searchProcFs(ProcmonConfig *config) {
         procEnv = true;
     }
 
-	if (gettimeofday(&before, NULL) != 0) {
-		fprintf(stderr, "FAILED to get time (before)\n");
-		return -4;
-	}
+    if (gettimeofday(&before, NULL) != 0) {
+        fprintf(stderr, "FAILED to get time (before)\n");
+        return -4;
+    }
 
-	if ( (procDir=opendir("/proc")) == NULL) {
-		fprintf(stderr, "FAILED to open /proc\n");
-		return -3;
-	}
+    if ( (procDir=opendir("/proc")) == NULL) {
+        fprintf(stderr, "FAILED to open /proc\n");
+        return -3;
+    }
 
     pids.resize(512);
 
-	while( (dptr = readdir(procDir)) != NULL) {
-		tgt_pid = atoi(dptr->d_name);
-		if (tgt_pid <= 0) {
-			continue;
-		}
+    while( (dptr = readdir(procDir)) != NULL) {
+        tgt_pid = atoi(dptr->d_name);
+        if (tgt_pid <= 0) {
+            continue;
+        }
         if (pids.size() < npids) {
             pids.resize(npids*2,0);
         }
-		pids[npids++] = tgt_pid;
-	}
-	closedir(procDir);
+        pids[npids++] = tgt_pid;
+    }
+    closedir(procDir);
     pids.resize(npids);
 
     keepflag.clear();
@@ -584,66 +584,66 @@ int searchProcFs(ProcmonConfig *config) {
 
     if (readStatFirst) {
         for (idx = 0; idx < npids; idx++) {
-            tgt_pid = pids[idx];	
-		    parseProcStat(tgt_pid, &(tmp_procStat[idx]), &(tmp_procData[idx]), config->boottime, config->clockTicksPerSec);
+            tgt_pid = pids[idx];    
+            parseProcStat(tgt_pid, &(tmp_procStat[idx]), &(tmp_procData[idx]), config->boottime, config->clockTicksPerSec);
         }
     } else {
         for (idx = 0; idx < npids; idx++) {
-            tgt_pid = pids[idx];	
+            tgt_pid = pids[idx];    
             keepflag[idx] = parseProcStatus(tgt_pid, config->tgtGid, &(tmp_procStat[idx]));
         }
     }
 
-	/* === Discover processes of interest === 
-	 * Phase 1:  find target parent process, and all the processes with the target
-	 * gid (if applicable).  Mark each process that is found by setting keepflags.
-	 * store interesting pids in the pids array, and their procstat indices in the
-	 * indices array */
-	int indices[npids];
-	pids[0] = config->targetPPid;
-	foundParent = 0;
+    /* === Discover processes of interest === 
+     * Phase 1:  find target parent process, and all the processes with the target
+     * gid (if applicable).  Mark each process that is found by setting keepflags.
+     * store interesting pids in the pids array, and their procstat indices in the
+     * indices array */
+    int indices[npids];
+    pids[0] = config->targetPPid;
+    foundParent = 0;
     ntargets = 0;
-	for (idx = 0; idx < npids; idx++) {
-		if (tmp_procStat[idx].pid == config->targetPPid ||
+    for (idx = 0; idx < npids; idx++) {
+        if (tmp_procStat[idx].pid == config->targetPPid ||
             keepflag[idx] > 0 ||
             (config->tgtSid > 0 && tmp_procStat[idx].session == config->tgtSid) ||
             (config->tgtPgid > 0 && tmp_procStat[idx].pgrp == config->tgtPgid)
         ) {
-			keepflag[idx] = 1;
-			pids[ntargets] = tmp_procStat[idx].pid;
-			indices[ntargets++] = idx;
-		}
-		if (tmp_procStat[idx].pid == config->targetPPid) {
-			foundParent = 1;
-		}
-	}
-	if (ntargets == 0 || foundParent == 0) {
-		return 0;
-	}
-	/* === Discover processes of interest ===
-	 * Phase 2: loop through all processes looking to find previously 
-	 * undiscovered (keepflag == 0) pids which inherit from any of the already-
-	 * found processes (indices/pids up to ntargets); interate until covergence
-	 */
-	nstart = 0;
-	do {
-		int innerIdx = 0;
-		nchange = 0;
-		nNewTargets = ntargets;
-		for (idx = 0; idx < npids; idx++) {
-			for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
-				if (tmp_procStat[idx].ppid == pids[innerIdx] && keepflag[idx] == 0) {
-					pids[nNewTargets] = tmp_procStat[idx].pid;
-					keepflag[idx] = 1;
-					indices[nNewTargets] = idx;
-					nNewTargets++;
-					nchange++;
-				}
-			}
-		}
-		nstart = ntargets;
-		ntargets = nNewTargets;
-	} while (nchange > 0);
+            keepflag[idx] = 1;
+            pids[ntargets] = tmp_procStat[idx].pid;
+            indices[ntargets++] = idx;
+        }
+        if (tmp_procStat[idx].pid == config->targetPPid) {
+            foundParent = 1;
+        }
+    }
+    if (ntargets == 0 || foundParent == 0) {
+        return 0;
+    }
+    /* === Discover processes of interest ===
+     * Phase 2: loop through all processes looking to find previously 
+     * undiscovered (keepflag == 0) pids which inherit from any of the already-
+     * found processes (indices/pids up to ntargets); interate until covergence
+     */
+    nstart = 0;
+    do {
+        int innerIdx = 0;
+        nchange = 0;
+        nNewTargets = ntargets;
+        for (idx = 0; idx < npids; idx++) {
+            for (innerIdx = nstart; innerIdx < ntargets; innerIdx++) {
+                if (tmp_procStat[idx].ppid == pids[innerIdx] && keepflag[idx] == 0) {
+                    pids[nNewTargets] = tmp_procStat[idx].pid;
+                    keepflag[idx] = 1;
+                    indices[nNewTargets] = idx;
+                    nNewTargets++;
+                    nchange++;
+                }
+            }
+        }
+        nstart = ntargets;
+        ntargets = nNewTargets;
+    } while (nchange > 0);
 
     if (ntargets > 0) {
         global_procStat.clear();
@@ -669,21 +669,21 @@ int searchProcFs(ProcmonConfig *config) {
         }
     }
 
-	/* for each pid, capture:
-	 *   io data, stat values, exe, cwd
-	 */
-	for (idx = 0; idx < ntargets; idx++) {
-		ssize_t rbytes = 0;
+    /* for each pid, capture:
+     *   io data, stat values, exe, cwd
+     */
+    for (idx = 0; idx < ntargets; idx++) {
+        ssize_t rbytes = 0;
         tgt_pid = pids[idx];
-		procstat* statData = &(global_procStat[idx]);
+        procstat* statData = &(global_procStat[idx]);
         procdata* temp_procData = &(global_procData[idx]); 
 
         if (readStatFirst) { 
             /* read status */
             parseProcStatus(tgt_pid, config->tgtGid, statData);
         } else {
-		    /* read stat */
-		    parseProcStat(tgt_pid, statData, temp_procData, config->boottime, config->clockTicksPerSec);
+            /* read stat */
+            parseProcStat(tgt_pid, statData, temp_procData, config->boottime, config->clockTicksPerSec);
         }
 
         /* populate time records */
@@ -698,46 +698,46 @@ int searchProcFs(ProcmonConfig *config) {
 
         statData->recTime = before.tv_sec;
         statData->recTimeUSec = before.tv_usec;
-		
-		/* read io */
-		parseProcIO(tgt_pid, temp_procData, statData);
+        
+        /* read io */
+        parseProcIO(tgt_pid, temp_procData, statData);
 
-		/* read statm */
-		parseProcStatM(tgt_pid, temp_procData, statData);
+        /* read statm */
+        parseProcStatM(tgt_pid, temp_procData, statData);
 
-		/* fix the units of each field */
-		statData->vmpeak *= 1024; // convert from kb to bytes
-		statData->rsspeak *= 1024;
-		statData->rss *= config->pageSize; // convert from pages to bytes
-		statData->m_size *= config->pageSize;
-		statData->m_resident *= config->pageSize;
-		statData->m_share *= config->pageSize;
-		statData->m_text *= config->pageSize;
-		statData->m_data *= config->pageSize;
+        /* fix the units of each field */
+        statData->vmpeak *= 1024; // convert from kb to bytes
+        statData->rsspeak *= 1024;
+        statData->rss *= config->pageSize; // convert from pages to bytes
+        statData->m_size *= config->pageSize;
+        statData->m_resident *= config->pageSize;
+        statData->m_share *= config->pageSize;
+        statData->m_text *= config->pageSize;
+        statData->m_data *= config->pageSize;
 
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", tgt_pid);
-		if ((rbytes = readlink(buffer, temp_procData->exePath, BUFFER_SIZE)) <= 0) {
-			snprintf(temp_procData->exePath, BUFFER_SIZE, "Unknown");
-		} else {
-			temp_procData->exePath[rbytes] = 0;
-		}
-		snprintf(buffer, BUFFER_SIZE, "/proc/%d/cwd", tgt_pid);
-		if ((rbytes = readlink(buffer, temp_procData->cwdPath, BUFFER_SIZE)) <= 0) {
-			snprintf(temp_procData->cwdPath, BUFFER_SIZE, "Unknown");
-		} else {
-			temp_procData->cwdPath[rbytes] = 0;
-		}
+        snprintf(buffer, BUFFER_SIZE, "/proc/%d/exe", tgt_pid);
+        if ((rbytes = readlink(buffer, temp_procData->exePath, BUFFER_SIZE)) <= 0) {
+            snprintf(temp_procData->exePath, BUFFER_SIZE, "Unknown");
+        } else {
+            temp_procData->exePath[rbytes] = 0;
+        }
+        snprintf(buffer, BUFFER_SIZE, "/proc/%d/cwd", tgt_pid);
+        if ((rbytes = readlink(buffer, temp_procData->cwdPath, BUFFER_SIZE)) <= 0) {
+            snprintf(temp_procData->cwdPath, BUFFER_SIZE, "Unknown");
+        } else {
+            temp_procData->cwdPath[rbytes] = 0;
+        }
         snprintf(buffer, BUFFER_SIZE, "/proc/%d/cmdline", tgt_pid);
         fp = fopen(buffer, "r");
         if (fp != NULL) {
             rbytes = fread(temp_procData->cmdArgs, sizeof(char), BUFFER_SIZE, fp);
             temp_procData->cmdArgBytes = rbytes;
-			for (int i = 0; i < rbytes; i++) {
-				if (temp_procData->cmdArgs[i] == 0) {
-					temp_procData->cmdArgs[i] = '|';
-				}
-			}
-			/* can set cmdArgs[rbytes-1]=0 since rbytes includes what was the 0 termination before */
+            for (int i = 0; i < rbytes; i++) {
+                if (temp_procData->cmdArgs[i] == 0) {
+                    temp_procData->cmdArgs[i] = '|';
+                }
+            }
+            /* can set cmdArgs[rbytes-1]=0 since rbytes includes what was the 0 termination before */
             temp_procData->cmdArgs[rbytes-1] = 0;
             fclose(fp);
         } else {
@@ -789,7 +789,7 @@ int searchProcFs(ProcmonConfig *config) {
             snprintf(global_procFD[l_fdidx].identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
             snprintf(global_procFD[l_fdidx].subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         }
-	}
+    }
     global_procFD.resize(fdidx);
     search_procfs_count = ntargets;
 
@@ -798,7 +798,7 @@ int searchProcFs(ProcmonConfig *config) {
     sort(global_procData.begin(), global_procData.end(), cmp_procdata_ident);
     sort(global_procFD.begin(), global_procFD.end(), cmp_procfd_ident);
 
-	return ntargets;
+    return ntargets;
 }
 
 static void craylock() {
@@ -819,34 +819,34 @@ static void craylock() {
 }
 
 static void daemonize() {
-	pid_t pid, sid;
+    pid_t pid, sid;
 
-	if (getppid() == 1) {
-		return; // already daemonized
-	}
-	pid = fork();
-	if (pid < 0) {
-		exit(1); // failed to fork
-	}
-	if (pid > 0) {
-		exit(0); // this is the parent, so exit
-	}
-	umask(077);
+    if (getppid() == 1) {
+        return; // already daemonized
+    }
+    pid = fork();
+    if (pid < 0) {
+        exit(1); // failed to fork
+    }
+    if (pid > 0) {
+        exit(0); // this is the parent, so exit
+    }
+    umask(077);
 
 #ifndef NOSETSID
-	sid = setsid();
-	if (sid < 0) {
-		exit(1);
-	}
+    sid = setsid();
+    if (sid < 0) {
+        exit(1);
+    }
 #endif
 
-	if ((chdir("/")) < 0) {
-		exit(1);
-	}
+    if ((chdir("/")) < 0) {
+        exit(1);
+    }
 
-	freopen("/dev/null", "r", stdin);
-	freopen("/dev/null", "w", stdout);
-	freopen("/dev/null", "w", stderr);
+    freopen("/dev/null", "r", stdin);
+    freopen("/dev/null", "w", stdout);
+    freopen("/dev/null", "w", stderr);
 }
 
 #ifdef SECURED
@@ -951,7 +951,7 @@ static void *reader_thread_start(void *t_config) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
         if (cleanUpFlag == 0) {
-		    retCode = searchProcFs(config);
+            retCode = searchProcFs(config);
         }
         if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Reader failed to unlock token.", err);
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait in late-loop", err);
@@ -1055,8 +1055,8 @@ void writeOutput(ProcmonConfig *config, ProcIO *output, vector<T>& data, unsigne
 }
 
 int main(int argc, char** argv) {
-	int retCode = 0;
-	struct timeval startTime;
+    int retCode = 0;
+    struct timeval startTime;
     ProcmonConfig *config = new ProcmonConfig(argc, argv);
     if (getuid() == 0) {
 #ifdef SECURED
@@ -1069,22 +1069,22 @@ int main(int argc, char** argv) {
 #endif
     }
 
-	/* initialize global variables */
-	cleanUpFlag = 0;
+    /* initialize global variables */
+    cleanUpFlag = 0;
 
-	/* setup signal handlers */
-	signal(SIGINT, sig_handler);
-	signal(SIGTERM, sig_handler);
-	signal(SIGXCPU, sig_handler);
-	signal(SIGUSR1, sig_handler);
-	signal(SIGUSR2, sig_handler);
+    /* setup signal handlers */
+    signal(SIGINT, sig_handler);
+    signal(SIGTERM, sig_handler);
+    signal(SIGXCPU, sig_handler);
+    signal(SIGUSR1, sig_handler);
+    signal(SIGUSR2, sig_handler);
 
     if (config->craylock) {
         craylock();
     }
-	if (config->daemonize) {
-		daemonize();
-	}
+    if (config->daemonize) {
+        daemonize();
+    }
     if (config->pidfile.length() > 0) {
         pidfile(config->pidfile);
     }
@@ -1146,21 +1146,21 @@ int main(int argc, char** argv) {
     }
 #endif
 
-	if (gettimeofday(&startTime, NULL) != 0) {
-		fprintf(stderr, "FAILED to get start time\n");
-		return 4;
-	}
-
-    if (config->verbose) {
-	    std::cout << "targetPPid      : " << config->targetPPid << std::endl;
-	    std::cout << "tgtGid          : " << config->tgtGid << std::endl;
-	    std::cout << "clockTicksPerSec: " << config->clockTicksPerSec << std::endl;
-	    std::cout << "boottime        : " << config->boottime << std::endl;
+    if (gettimeofday(&startTime, NULL) != 0) {
+        fprintf(stderr, "FAILED to get start time\n");
+        return 4;
     }
 
-	for ( ; ; ) {
-		struct timeval cycleTime;
-		gettimeofday(&cycleTime, NULL);
+    if (config->verbose) {
+        std::cout << "targetPPid      : " << config->targetPPid << std::endl;
+        std::cout << "tgtGid          : " << config->tgtGid << std::endl;
+        std::cout << "clockTicksPerSec: " << config->clockTicksPerSec << std::endl;
+        std::cout << "boottime        : " << config->boottime << std::endl;
+    }
+
+    for ( ; ; ) {
+        struct timeval cycleTime;
+        gettimeofday(&cycleTime, NULL);
         retCode = 0;
 
         /* set the global state variables */
@@ -1174,13 +1174,13 @@ int main(int argc, char** argv) {
         retCode = search_procfs_count;
 #else
         if (cleanUpFlag == 0) {
-		    retCode = searchProcFs(config);
+            retCode = searchProcFs(config);
         }
 #endif
-		if (retCode <= 0) {
+        if (retCode <= 0) {
             retCode *= -1;
             cleanUpFlag = 1;
-		} else  {
+        } else  {
             for (std::vector<ProcIO*>::iterator iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
                 /*
                 const char *last_ident = NULL;
@@ -1224,28 +1224,28 @@ int main(int argc, char** argv) {
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Writer failed to barrier wait in late-loop", err);
 #endif
 
-		if (cleanUpFlag == 0) {
-			int sleepInterval = config->frequency;
+        if (cleanUpFlag == 0) {
+            int sleepInterval = config->frequency;
 
-			if (config->initialPhase > 0) {
-				struct timeval currTime;
-				double timeDelta;
-				if (gettimeofday(&currTime, NULL) == 0) {
-					timeDelta = (currTime.tv_sec - startTime.tv_sec) + (double)((currTime.tv_usec - startTime.tv_usec))*1e-06;
-					if (timeDelta > config->initialPhase) {
-						config->initialPhase = 0;
-					} else {
-						sleepInterval = config->initialFrequency;
-					}
-					timeDelta = (currTime.tv_sec - cycleTime.tv_sec) + (double)((currTime.tv_usec - cycleTime.tv_usec))*1e-06;
-					sleepInterval -= floor(timeDelta);
-				}
-			}
-			sleep(sleepInterval);
-		} else {
+            if (config->initialPhase > 0) {
+                struct timeval currTime;
+                double timeDelta;
+                if (gettimeofday(&currTime, NULL) == 0) {
+                    timeDelta = (currTime.tv_sec - startTime.tv_sec) + (double)((currTime.tv_usec - startTime.tv_usec))*1e-06;
+                    if (timeDelta > config->initialPhase) {
+                        config->initialPhase = 0;
+                    } else {
+                        sleepInterval = config->initialFrequency;
+                    }
+                    timeDelta = (currTime.tv_sec - cycleTime.tv_sec) + (double)((currTime.tv_usec - cycleTime.tv_usec))*1e-06;
+                    sleepInterval -= floor(timeDelta);
+                }
+            }
+            sleep(sleepInterval);
+        } else {
             break;
         }
-	}
+    }
     for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {
         delete *ptr;
     }
@@ -1257,5 +1257,5 @@ int main(int argc, char** argv) {
     pthread_mutex_destroy(&token_lock);
     pthread_barrier_destroy(&rbarrier);
 #endif
-	exit(retCode);
+    exit(retCode);
 }
