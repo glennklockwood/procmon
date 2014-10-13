@@ -40,7 +40,7 @@ int procfdbad(const procfd *a) {
     for (int i = 0; i < len; i++) {
         if (a->path[i] > 127) return 6;
     }
-    if (a->fd > 500) return 7;
+    if (a->fd > 500000) return 7;
     return 0;
 }
 
