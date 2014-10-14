@@ -25,7 +25,7 @@ typedef struct _procdata {
     unsigned long startTimeUSec;
     unsigned int pid;
     unsigned int ppid;
-    bool equivRecord(const struct _procdata &other) const {
+    inline bool equivRecord(const struct _procdata &other) const {
         return pid == other.pid && startTime == other.startTime;
     }
 } procdata;
@@ -86,7 +86,7 @@ typedef struct _procstat {
     unsigned long m_share;
     unsigned long m_text;
     unsigned long m_data;
-    bool equivRecord(const struct _procstat &other) const {
+    inline bool equivRecord(const struct _procstat &other) const {
         return pid == other.pid && startTime == other.startTime;
     }
 } procstat;
@@ -103,7 +103,7 @@ typedef struct _procfd {
     char path[BUFFER_SIZE];
 	int fd;
 	unsigned int mode;
-    bool equivRecord(const struct _procfd &other) const {
+    inline bool equivRecord(const struct _procfd &other) const {
         return pid == other.pid && startTime == other.startTime && fd == other.fd;
     }
 } procfd;
@@ -116,10 +116,35 @@ typedef struct _procobs {
     unsigned long recTimeUSec;
     unsigned long startTime;
     unsigned long startTimeUSec;
-    bool equivRecord(const struct _procstat &other) const {
+    inline bool equivRecord(const struct _procstat &other) const {
         return pid == other.pid && startTime == other.startTime;
     }
 } procobs;
+
+struct netstat {
+    char identifier[IDENTIFIER_SIZE];
+    char subidentifier[IDENTIFIER_SIZE];
+    unsigned long recTime;
+    unsigned long recTimeUSec;
+    unsigned long local_address;
+    unsigned int local_port;
+    unsigned long remote_address;
+    unsigned int remote_port;
+    unsigned short state;
+    unsigned long tx_queue;
+    unsigned long rx_queue;
+    unsigned short tr;
+    unsigned long ticks_expire;
+    unsigned long retransmit;
+    unsigned long uid;
+    unsigned long timeout;
+    unsigned long inode;
+    unsigned int refCount;
+    int type; // 0 = tcp, 1 = udp
+    inline bool equivRecord(const netstat& other) const {
+        return inode == other.inode && local_address == other.local_address && remote_address == other.remote_address && local_port == other.local_port && remote_port == other.remote_port;
+    }
+};
 
 class ProcmonDataset {
     public:

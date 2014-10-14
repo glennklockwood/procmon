@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <string.h>
 #include <iostream>
+#include <unordered_map>
+#include <vector>
 #include "ProcReducerData.hh"
 
 #include <sys/types.h>
@@ -13,6 +15,7 @@
 #include <boost/program_options.hpp>
 #define POSTREDUCER_VERSION "2.4"
 namespace po = boost::program_options;
+using namespace std;
 
 /* ProcReducer
     * Takes in procmon data from all sources and only writes the minimal record
@@ -24,6 +27,25 @@ void version() {
     cout << endl;
     exit(0);
 }
+
+class ReducerInput {
+    public:
+    ReducerInput(const string input_filename) {
+        file = new ProcHDF5IO(input_filename, FILE_MODE_READ);
+        file->get_hosts(hosts);
+    }
+    ~ReducerInput() {
+        delete file;
+    }
+    ProcHDF5IO *file;
+    vector<string> hosts;
+    bool has_host(const string& host) {
+        vector<string>::iterator iter = find(hosts.begin(), hosts.end(), host);
+        return iter != hosts.end();
+    }
+
+};
+
 
 static int cmp_procstat_rec(const void *p1, const void *p2) {
     const procstat *a = *((const procstat **) p1);
@@ -82,6 +104,159 @@ static int cmp_procfd_rec(const void *p1, const void *p2) {
     return 0;
 }
 
+static int cmp_netstat_rec(const void *p1, const void *p2) {
+    const netstat *a = *((const netstat **) p1);
+    const netstat *b = *((const netstat **) p2);
+
+    if (a->recTime < b->recTime) {
+        return -1;
+    }
+    if (a->recTime > b->recTime) {
+        return 1;
+    }
+    if (a->recTimeUSec < b->recTimeUSec) {
+        return -1;
+    }
+    if (a->recTimeUSec > b->recTimeUSec) {
+        return 1;
+    }
+    return 0;
+}
+
+template<class T> size_t get_dataset_count(ProcHDF5IO *);
+template<class T> unsigned int read_dataset(ProcHDF5IO *input, T *data, size_t n);
+template<class T> unsigned int write_dataset(ProcHDF5IO *input, T *data, size_t n);
+template<class T> bool isBad(const T&);
+template<class T> bool isChanged(const T&, const T&);
+
+template <>
+size_t get_dataset_count<netstat>(ProcHDF5IO *input) {
+    return input->get_nnetstat();
+}
+
+template <>
+unsigned int read_dataset<netstat>(ProcHDF5IO *input, netstat *data, size_t n) {
+    return input->read_netstat(data, 0, n);
+}
+
+template <>
+unsigned int write_dataset<netstat>(ProcHDF5IO *input, netstat *data, size_t n) {
+    return input->write_netstat(data, 0, n);
+}
+
+template <class pmType>
+const inline bool lessRecTime(const pmType& a, const pmType& b) {
+    return (a.recTime + (double)a.recTimeUSec * 1e-6) < (b.recTime + (double)b.recTimeUSec * 1e-6);
+}
+
+template <class pmType>
+struct SelfSameRecHasher {
+    size_t operator()(const pmType&) const { } 
+};
+
+template <class pmType>
+struct SelfSameRecEqual {
+    bool operator()(const pmType&, const pmType&) const { }
+};
+
+
+template <>
+struct SelfSameRecHasher<netstat*> {
+
+    size_t operator()(const netstat* net) const {
+        // ip addresses should be relatively well distributed over the 32bit address space
+        // port numbers favor the lower bits, so shift them left 16 bits
+        size_t remoteAddrHash = net->remote_address ^ (net->remote_port << 16);
+        size_t localAddrHash  = net->local_address ^ (net->local_port << 16);
+        size_t inodeHashUpper = net->inode >> 16;
+        size_t inodeHashLower = net->inode & 0xFFFFFFFF;
+        remoteAddrHash ^= inodeHashUpper;
+        localAddrHash ^= inodeHashLower;
+        return (remoteAddrHash << 32) ^ localAddrHash;
+    }
+};
+
+template <>
+struct SelfSameRecEqual<netstat*> {
+    bool operator()(const netstat* a, const netstat* b) const {
+        return a->remote_address == b->remote_address && a->remote_port == b->remote_port &&
+            a->local_address == b->local_address && a->local_port == b->local_port &&
+            a->inode == b->inode;
+    }
+};
+
+template <>
+bool isBad<netstat>(const netstat& a) {
+    return false;
+}
+
+template <>
+bool isChanged<netstat>(const netstat& a, const netstat& b) {
+    return true;
+}
+
+template <class pmType>
+size_t read_and_reduce_data(const string &hostname, vector<ReducerInput*> &local_inputs, ProcHDF5IO *bad_outputFile, ProcHDF5IO *outputFile) {
+    /* read all the procfd records */
+    vector<pmType> data;
+    size_t n_read = 0;
+    for (auto iter = local_inputs.begin(); iter != local_inputs.end(); ++iter) {
+        ReducerInput *input = *iter;
+        input->file->set_context(hostname, "", "");
+        size_t local_n = get_dataset_count<pmType>(input->file);
+        data.resize(data.size() + local_n);
+        pmType *ptr = &(data[n_read]);
+        unsigned int l_nRead = read_dataset<pmType>(input->file, ptr, local_n);
+        n_read += l_nRead;
+    }
+
+    /* sort the procfd records by observation time */
+    sort(data.begin(), data.end(), lessRecTime<pmType>);
+
+    /* reduce the data */
+    size_t nBad = 0;
+    size_t nWrite = 0;
+    unordered_map<pmType*,pmType*,SelfSameRecHasher<pmType*>,SelfSameRecEqual<pmType*> > dataMap;
+    vector<pmType*> writeRecords;
+    for (pmType &obj: data) {
+        if (isBad<pmType>(obj)) {
+            bad_outputFile->set_context(hostname, obj.identifier, obj.subidentifier);
+            write_dataset<pmType>(bad_outputFile, &obj, 1);
+            nBad++;
+            continue;
+        }
+
+        /* find the most recent record we've examined with this pid */
+        auto it = dataMap.find(&obj);
+
+        /* if this record differs from previous observation, mark previous
+           observation for explicit write (everything in map will be written
+           as well */
+        if (it != dataMap.end() && isChanged<pmType>(obj, *(it->second))) {
+            writeRecords.push_back(it->second);
+        }
+        dataMap[&obj] = &obj;
+    }
+    for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
+        writeRecords.push_back(it->second);
+    }
+
+    if (writeRecords.size() > 0) {
+        vector<pmType> scratch(writeRecords.size());
+        pmType *ptr = &*scratch.begin();;
+        for (auto it = writeRecords.begin(); it != writeRecords.end(); ++it) {
+            memcpy(ptr++, *it, sizeof(pmType));
+        }
+        sort(scratch.begin(), scratch.end(), lessRecTime<pmType>);
+
+        outputFile->set_context(hostname, "Any", "Any");
+        outputFile->set_override_context(true);
+        write_dataset<pmType>(outputFile, &*scratch.begin(), scratch.size());
+        outputFile->set_override_context(false);
+    }
+    return writeRecords.size();
+}
+
 class PostReducerConfig {
 public:
     PostReducerConfig(int argc, char **argv) {
@@ -134,21 +309,6 @@ public:
     int dataBlockSize;
     int statBlockSize;
     int fdBlockSize;
-};
-
-class ReducerInput {
-    public:
-    ReducerInput(const string input_filename) {
-        file = new ProcHDF5IO(input_filename, FILE_MODE_READ);
-        file->get_hosts(hosts);
-    }
-    ProcHDF5IO *file;
-    vector<string> hosts;
-    bool has_host(const string& host) {
-        vector<string>::iterator iter = find(hosts.begin(), hosts.end(), host);
-        return iter != hosts.end();
-    }
-
 };
 
 
@@ -229,6 +389,7 @@ int main(int argc, char **argv) {
         int n_procdata = 0;
         int n_procstat = 0;
         int n_procfd = 0;
+        int n_netstat = 0;
 
         host_num++;
         cout << "Processing " << hostname << " (" << host_num << "/" << all_hosts.size() << ")" << endl;
@@ -242,6 +403,7 @@ int main(int argc, char **argv) {
                 n_procdata += input->file->get_nprocdata();
                 n_procstat += input->file->get_nprocstat();
                 n_procfd += input->file->get_nprocfd();
+                n_netstat += input->file->get_nnetstat();
             }
         }
 
@@ -253,8 +415,11 @@ int main(int argc, char **argv) {
         size_t alloc_size = sizeof(procstat) * n_procstat;
         size_t talloc = sizeof(procdata) * n_procdata;
         size_t talloc2 = sizeof(procfd) * n_procfd;
+        size_t talloc3 = sizeof(netstat) * n_netstat;
         alloc_size = alloc_size > talloc ? alloc_size : talloc;
         alloc_size = alloc_size > talloc2 ? alloc_size : talloc2;
+        alloc_size = alloc_size > talloc3 ? alloc_size : talloc3;
+
         if (data == NULL || data_size < alloc_size) {
             data = realloc(data, alloc_size);
             data_size = alloc_size;
@@ -482,6 +647,8 @@ int main(int argc, char **argv) {
         }
         delete fd_buff;
 
+        read_and_reduce_data<netstat>(hostname, local_inputs, bad_outputFile, outputFile);
+
         cout << *ptr << "," << n_procstat << "(" << nReadPS << "," << nWritePS << ", BAD:" << nBadPS << "),";
         cout << "," << n_procdata << "(" << nReadPD << "," << nWritePD << ", BAD:" << nBadPD << "),";
         cout << "," << n_procfd << "(" << nReadFD << "," << nWriteFD << ", BAD:" << nBadFD << "),";
@@ -490,6 +657,7 @@ int main(int argc, char **argv) {
         outputFile->trim_segments(time(NULL)+1);
         outputFile->flush();
         bad_outputFile->flush();
+
     }
 
     delete outputFile;
