@@ -16,6 +16,7 @@ ProcIO::ProcIO() {
 
 ProcIO::~ProcIO() {
 }
+/*
 bool ProcIO::set_context(const string& hostname, const string& identifier, const string& subidentifier) {
 	cout << "set_context: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << endl;
 	return false;
@@ -40,6 +41,7 @@ unsigned int ProcIO::write_netstat(netstat* start_ptr, int count) {
     cout << "write_netstat: ProcIO BaseClass called -- THIS IS BAD -- YOU REALLY SHOULDN'T SEE THIS!" << endl;
     return 0;
 }
+*/
 
 #ifdef USE_AMQP
 ProcAMQPIO::ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, 
@@ -1129,6 +1131,19 @@ void ProcHDF5IO::initialize_types() {
     H5Tinsert(type_netstat, "type", HOFFSET(netstat, type), H5T_NATIVE_INT);
 }
 
+unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, int count) {
+    return write_procdata(start_pointer, 0, count);
+}
+unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, int count) {
+    return write_procstat(start_pointer, 0, count);
+}
+unsigned int ProcHDF5IO::write_procfd(procfd* start_pointer, int count) {
+    return write_procfd(start_pointer, 0, count);
+}
+unsigned int ProcHDF5IO::write_netstat(netstat* start_pointer, int count) {
+    return write_netstat(start_pointer, 0, count);
+}
+
 unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int start_id, int count) {
     if (!override_context) {
 	    for (int i = 0; i < count; i++) {
@@ -1718,7 +1733,8 @@ unsigned int ProcTextIO::write_netstat(netstat* start_ptr, int cnt) {
     for (int i = 0; i < cnt; i++) {
         netstat* net = &(start_ptr[i]);
         ptr += fprintf(filePtr,
-            "%lu,%lu,%lu,%u,%lu,%u,%u,%lu,%lu,%u,%lu,%lu,%lu,%lu,%lu,%u,%d\n",
+            "netstat,%s,%s,%s,%lu,%lu,%lu,%u,%lu,%u,%u,%lu,%lu,%u,%lu,%lu,%lu,%lu,%lu,%u,%d\n",
+            hostname.c_str(), net->identifier, net->subidentifier,
             net->recTime, net->recTimeUSec, net->local_address,
             net->local_port, net->remote_address, net->remote_port,
             net->state, net->tx_queue, net->rx_queue, net->tr,

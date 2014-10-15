@@ -932,12 +932,18 @@ int searchProcFs(ProcmonConfig *config) {
     global_netstat.clear();
     parseNetstat("tcp", global_netstat);
     parseNetstat("udp", global_netstat);
-    for (auto net: global_netstat) {
-        snprintf(net.identifier, IDENTIFIER_SIZE, config->identifier.c_str());
-        snprintf(net.subidentifier, IDENTIFIER_SIZE, config->subidentifier.c_str());
-        net.recTime = before.tv_sec;
-        net.recTimeUSec = before.tv_usec;
+    for (vector<netstat>::iterator it = global_netstat.begin(); it != global_netstat.end(); ++it) {
+        netstat *net = &*it;
+        snprintf(net->identifier, IDENTIFIER_SIZE, config->identifier.c_str());
+        snprintf(net->subidentifier, IDENTIFIER_SIZE, config->subidentifier.c_str());
+        net->recTime = before.tv_sec;
+        net->recTimeUSec = before.tv_usec;
     }
+
+    if (config->debug) {
+        printf("ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
+    }
+
 
     return ntargets;
 }
@@ -1277,7 +1283,7 @@ int main(int argc, char** argv) {
     }
 #ifdef USE_HDF5
     if (config->outputFlags & OUTPUT_TYPE_HDF5) {
-        ProcIO* out = new ProcHDF5IO(config->outputTextFilename, FILE_MODE_WRITE);
+        ProcIO* out = new ProcHDF5IO(config->outputHDF5Filename, FILE_MODE_WRITE);
         out->set_context(config->hostname, config->identifier, config->subidentifier);
         outputMethods.push_back(out);
     }

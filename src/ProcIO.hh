@@ -64,11 +64,11 @@ class ProcIO {
 public:
 	ProcIO();
 	virtual ~ProcIO();
-    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
-    virtual unsigned int write_procdata(procdata* start_ptr, int count);
-    virtual unsigned int write_procstat(procstat* start_ptr, int count);
-    virtual unsigned int write_procfd(procfd* start_ptr, int count);
-    virtual unsigned int write_netstat(netstat* start_ptr, int count);
+    virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier) = 0;
+    virtual unsigned int write_procdata(procdata* start_ptr, int count) = 0;
+    virtual unsigned int write_procstat(procstat* start_ptr, int count) = 0;
+    virtual unsigned int write_procfd(procfd* start_ptr, int count) = 0;
+    virtual unsigned int write_netstat(netstat* start_ptr, int count) = 0;
 protected:
 	bool contextSet;
     string identifier;
@@ -79,7 +79,7 @@ protected:
 class ProcTextIO : public ProcIO {
 public:
     ProcTextIO(const string& _filename, ProcIOFileMode _mode);
-    ~ProcTextIO();
+    virtual ~ProcTextIO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
@@ -132,8 +132,12 @@ private:
 class ProcHDF5IO : public ProcIO {
 public:
     ProcHDF5IO(const string& filename, ProcIOFileMode mode, unsigned int statBlockSize=DEFAULT_STAT_BLOCK_SIZE, unsigned int dataBlockSize=DEFAULT_DATA_BLOCK_SIZE, unsigned int fdBlockSize=DEFAULT_FD_BLOCK_SIZE, unsigned int obsBlockSize=DEFAULT_OBS_BLOCK_SIZE, unsigned int netBlockSize=10);
-    ~ProcHDF5IO();
+    virtual ~ProcHDF5IO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
+    virtual unsigned int write_procdata(procdata* start_ptr, int count);
+    virtual unsigned int write_procstat(procstat* start_ptr, int count);
+    virtual unsigned int write_procfd(procfd* start_ptr, int count);
+    virtual unsigned int write_netstat(netstat* start_ptr, int count);
     virtual unsigned int write_procdata(procdata* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, unsigned int start_id, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, unsigned int start_id, int count);
@@ -202,7 +206,7 @@ private:
 class ProcAMQPIO : public ProcIO {
 public:
     ProcAMQPIO(const string& _mqServer, int _port, const string& _mqVHost, const string& _username, const string& _password, const string& _exchangeName, const int _frameSize, const ProcIOFileMode _mode);
-    ~ProcAMQPIO();
+    virtual ~ProcAMQPIO();
     virtual bool set_context(const string& hostname, const string& identifier, const string& subidentifier);
     virtual unsigned int write_procdata(procdata* start_ptr, int count);
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
