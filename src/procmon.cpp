@@ -259,7 +259,7 @@ int parseNetstat(const char *protocol, vector<netstat>& data) {
     char lbuffer[LBUFFER_SIZE] = "";
     FILE* fp = NULL;
     netstat *dataPtr = NULL;
-    size_t dataCount = 0;
+    size_t dataCount = data.size();
     int netType = -1;
     snprintf(filename, BUFFER_SIZE, "/proc/net/%s", protocol);
     if (strcmp(protocol, "tcp") == 0) {
@@ -299,17 +299,21 @@ int parseNetstat(const char *protocol, vector<netstat>& data) {
             bool currInvalid = isspace(*ptr) || *ptr == ':' || *ptr == 0;
             if (lastInvalid && currInvalid) {
                 // still between tokens
+                if (newline) {
+                    fieldCount = 0;
+                    dataPtr = NULL;
+                }
                 continue;
             }
             if (currInvalid) {
                 // end of token
                 *ptr = 0;
                 if (dataPtr == NULL) {
-                    if (data.size() == dataCount) {
+                    if (data.size() <= dataCount) {
                         data.resize(dataCount + 10);
-                        dataPtr = &(data[dataCount++]);
-                        dataPtr->type = netType;
                     }
+                    dataPtr = &(data[dataCount++]);
+                    dataPtr->type = netType;
                 }
                 switch (fieldCount) {
                     case 0: break;
