@@ -131,17 +131,17 @@ template<class T> bool isChanged(const T&, const T&);
 
 template <>
 size_t get_dataset_count<netstat>(ProcHDF5IO *input) {
-    return input->get_nnetstat();
+    return 0; //input->get_nnetstat();
 }
 
 template <>
 unsigned int read_dataset<netstat>(ProcHDF5IO *input, netstat *data, size_t n) {
-    return input->read_netstat(data, 0, n);
+    return 0;//input->read_netstat(data, 0, n);
 }
 
 template <>
 unsigned int write_dataset<netstat>(ProcHDF5IO *input, netstat *data, size_t n) {
-    return input->write_netstat(data, 0, n);
+    return 0;//input->write_netstat(data, 0, n);
 }
 
 template <class pmType>
@@ -389,7 +389,6 @@ int main(int argc, char **argv) {
         int n_procdata = 0;
         int n_procstat = 0;
         int n_procfd = 0;
-        int n_netstat = 0;
 
         host_num++;
         cout << "Processing " << hostname << " (" << host_num << "/" << all_hosts.size() << ")" << endl;
@@ -403,7 +402,6 @@ int main(int argc, char **argv) {
                 n_procdata += input->file->get_nprocdata();
                 n_procstat += input->file->get_nprocstat();
                 n_procfd += input->file->get_nprocfd();
-                n_netstat += input->file->get_nnetstat();
             }
         }
 
@@ -415,10 +413,8 @@ int main(int argc, char **argv) {
         size_t alloc_size = sizeof(procstat) * n_procstat;
         size_t talloc = sizeof(procdata) * n_procdata;
         size_t talloc2 = sizeof(procfd) * n_procfd;
-        size_t talloc3 = sizeof(netstat) * n_netstat;
         alloc_size = alloc_size > talloc ? alloc_size : talloc;
         alloc_size = alloc_size > talloc2 ? alloc_size : talloc2;
-        alloc_size = alloc_size > talloc3 ? alloc_size : talloc3;
 
         if (data == NULL || data_size < alloc_size) {
             data = realloc(data, alloc_size);
@@ -647,7 +643,7 @@ int main(int argc, char **argv) {
         }
         delete fd_buff;
 
-        read_and_reduce_data<netstat>(hostname, local_inputs, bad_outputFile, outputFile);
+        //read_and_reduce_data<netstat>(hostname, local_inputs, bad_outputFile, outputFile);
 
         cout << *ptr << "," << n_procstat << "(" << nReadPS << "," << nWritePS << ", BAD:" << nBadPS << "),";
         cout << "," << n_procdata << "(" << nReadPD << "," << nWritePD << ", BAD:" << nBadPD << "),";

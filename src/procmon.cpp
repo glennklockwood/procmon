@@ -25,6 +25,7 @@
 #include <iostream>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <vector>
 #include <algorithm>
 
@@ -54,7 +55,7 @@ vector<procdata> tmp_procData;
 vector<procstat> global_procStat;
 vector<procdata> global_procData;
 vector<procfd>   global_procFD;
-vector<netstat>  global_netstat;
+unordered_map<size_t,netstat>  global_netstat;
 
 void sig_handler(int signum) {
     /* if we receive any trapped signal, just set the cleanUpFlag
@@ -249,7 +250,7 @@ int parseProcIO(int pid, procdata* procData, procstat* statData) {
     return 0;
 }
 
-int parseNetstat(const char *protocol, vector<netstat>& data) {
+int parseNetstat(const char *protocol, unordered_map<size_t,netstat>& data) {
     char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
@@ -258,7 +259,9 @@ int parseNetstat(const char *protocol, vector<netstat>& data) {
     char filename[BUFFER_SIZE];
     char lbuffer[LBUFFER_SIZE] = "";
     FILE* fp = NULL;
-    netstat *dataPtr = NULL;
+    netstat local_data;
+    bool uncommitedChange = false;
+    memset(&local_data, 0, sizeof(netstat));
     size_t dataCount = data.size();
     int netType = -1;
     snprintf(filename, BUFFER_SIZE, "/proc/net/%s", protocol);
@@ -301,69 +304,67 @@ int parseNetstat(const char *protocol, vector<netstat>& data) {
                 // still between tokens
                 if (newline) {
                     fieldCount = 0;
-                    dataPtr = NULL;
+                    data[local_data.inode] = local_data;
+                    uncommitedChange = false;
+                    memset(&local_data, 0, sizeof(netstat));
                 }
                 continue;
             }
             if (currInvalid) {
                 // end of token
                 *ptr = 0;
-                if (dataPtr == NULL) {
-                    if (data.size() <= dataCount) {
-                        data.resize(dataCount + 10);
-                    }
-                    dataPtr = &(data[dataCount++]);
-                    dataPtr->type = netType;
-                }
                 switch (fieldCount) {
                     case 0: break;
                     case 1:
-                        dataPtr->local_address = strtoul(sptr, &ptr, 16);
+                        local_data.local_address = strtoul(sptr, &ptr, 16);
                         break;
                     case 2:
-                        dataPtr->local_port = strtoul(sptr, &ptr, 16);
+                        local_data.local_port = strtoul(sptr, &ptr, 16);
                         break;
                     case 3:
-                        dataPtr->remote_address = strtoul(sptr, &ptr, 16);
+                        local_data.remote_address = strtoul(sptr, &ptr, 16);
                         break;
                     case 4:
-                        dataPtr->remote_port = strtoul(sptr, &ptr, 16);
+                        local_data.remote_port = strtoul(sptr, &ptr, 16);
                         break;
                     case 5:
-                        dataPtr->state = strtoul(sptr, &ptr, 16);
+                        local_data.state = strtoul(sptr, &ptr, 16);
                         break;
                     case 6:
-                        dataPtr->tx_queue = strtoul(sptr, &ptr, 16);
+                        local_data.tx_queue = strtoul(sptr, &ptr, 16);
                         break;
                     case 7:
-                        dataPtr->rx_queue = strtoul(sptr, &ptr, 16);
+                        local_data.rx_queue = strtoul(sptr, &ptr, 16);
                         break;
                     case 8:
-                        dataPtr->tr = strtoul(sptr, &ptr, 16);
+                        local_data.tr = strtoul(sptr, &ptr, 16);
                         break;
                     case 9:
-                        dataPtr->ticks_expire = strtoul(sptr, &ptr, 16);
+                        local_data.ticks_expire = strtoul(sptr, &ptr, 16);
                         break;
                     case 10:
-                        dataPtr->retransmit = strtoul(sptr, &ptr, 16);
+                        local_data.retransmit = strtoul(sptr, &ptr, 16);
                         break;
                     case 11:
-                        dataPtr->uid = strtoul(sptr, &ptr, 10);
+                        local_data.uid = strtoul(sptr, &ptr, 10);
                         break;
                     case 12:
-                        dataPtr->timeout = strtoul(sptr, &ptr, 10);
+                        local_data.timeout = strtoul(sptr, &ptr, 10);
                         break;
                     case 13:
-                        dataPtr->inode = strtoul(sptr, &ptr, 10);
+                        local_data.inode = strtoul(sptr, &ptr, 10);
                         break;
                     case 14:
-                        dataPtr->refCount = strtoul(sptr, &ptr, 10);
+                        local_data.refCount = strtoul(sptr, &ptr, 10);
                         break;
                 }
                 if (newline) {
                     fieldCount = 0;
-                    dataPtr = NULL;
+                    data[local_data.inode] = local_data;
+                    uncommitedChange = false;
+                    memset(&local_data, 0, sizeof(netstat));
                 } else {
+                    uncommitedChange = true;
                     fieldCount++;
                 }
             } else if (lastInvalid) {
@@ -373,7 +374,9 @@ int parseNetstat(const char *protocol, vector<netstat>& data) {
             lastInvalid = currInvalid;
         }
     }
-    data.resize(dataCount);
+    if (uncommitedChange) {
+        data[local_data.inode] = local_data;
+    }
     fclose(fp);
     return 0;
 }
@@ -519,12 +522,32 @@ int parse_fds(int pid, size_t maxfd, vector<procfd> &all_procfd, size_t *p_idx, 
     struct stat link;
     int start_idx = *p_idx;
     int rbytes = 0;
-    for (int fd = 3; fd < maxfd+3; fd++) {
+    int count = 0;
+    DIR *fdDir;
+    struct dirent *dptr;
+    snprintf(buffer, BUFFER_SIZE, "/proc/%d/fd", pid);
+    if ( (fdDir=opendir(buffer)) == NULL) {
+        return 0;
+    }
+    vector<int> seen_fds;
+    while( (dptr = readdir(fdDir)) != NULL ) {
+        int tgt_fd = atoi(dptr->d_name);
+        if (tgt_fd == 0 && dptr->d_name[0] != '0') {
+            continue;
+        }
+        seen_fds.push_back(tgt_fd);
+    }
+    closedir(fdDir);
+    sort(seen_fds.begin(), seen_fds.end());
+    for (vector<int>::iterator it = seen_fds.begin(); (it != seen_fds.end()) && (count < maxfd); ++it) {
+        int &fd = *it;
+
         snprintf(buffer, BUFFER_SIZE, "/proc/%d/fd/%d", pid, fd);
         if (lstat(buffer, &link) != 0) {
-            break;
+            continue;
         }
         int idx = (*p_idx)++;
+        count++;
         all_procfd[idx].pid = pid;
         all_procfd[idx].ppid = statData->ppid;
         all_procfd[idx].recTime = statData->recTime;
@@ -650,6 +673,24 @@ int parseProcStatus(int pid, int tgtGid, procstat* statData) {
     }
     fclose(fp);
     return retVal;
+}
+
+int format_socket_connection(char *buffer, size_t len, netstat *net) {
+    if (net == NULL || buffer == NULL || len == 0 || net->type > 1 || net->type < 0) return -1;
+    const char *labels[] = {"tcp","udp","unknown"};
+    unsigned short local_addr[4];
+    unsigned short remote_addr[4];
+    memset(local_addr, 0, sizeof(short) * 4);
+    memset(remote_addr, 0, sizeof(short) * 4);
+    size_t addr = net->remote_address;
+    for (int i = 0; i < 4; ++i, addr >>= 8) {
+        remote_addr[i] = addr & 0xFF;
+    }
+    addr = net->local_address;
+    for (int i = 0; i < 4; ++i, addr >>= 8) {
+        local_addr[i] = addr & 0xFF;
+    }
+    return snprintf(buffer, len, "%s:%u.%u.%u.%u:%u:%u.%u.%u.%u:%u", labels[net->type], local_addr[0], local_addr[1], local_addr[2], local_addr[3], net->local_port, remote_addr[0], remote_addr[1], remote_addr[2], remote_addr[3], net->remote_port);
 }
 
 /* on first pass:
@@ -783,7 +824,7 @@ int searchProcFs(ProcmonConfig *config) {
         global_procStat.resize(ntargets);
         global_procData.resize(ntargets);
         if (config->maxfd > 0) {
-            global_procFD.resize(ntargets*config->maxfd);
+            global_procFD.resize(ntargets);
         }
     }
     size_t fdidx = 0;
@@ -879,13 +920,11 @@ int searchProcFs(ProcmonConfig *config) {
            fd information, then parse it!
         */
         size_t start_fdidx = fdidx;
-        size_t n_fd = global_procFD.size() - fdidx;
-        if (config->maxfd < n_fd) {
-            n_fd = config->maxfd;
+        if (global_procFD.size() - fdidx < config->maxfd) {
+            global_procFD.resize(global_procFD.size() + config->maxfd);
         }
-
-        if (n_fd > 0) {
-            parse_fds(tgt_pid, n_fd, global_procFD, &fdidx, statData);
+        if (config->maxfd > 0) {
+            parse_fds(tgt_pid, config->maxfd, global_procFD, &fdidx, statData);
         }
         std::map<std::string, std::string> env;
         std::map<std::string, std::string>::iterator it;
@@ -929,21 +968,28 @@ int searchProcFs(ProcmonConfig *config) {
     sort(global_procFD.begin(), global_procFD.end(), cmp_procfd_ident);
 
     // get machine-level stats
-    global_netstat.clear();
-    parseNetstat("tcp", global_netstat);
-    parseNetstat("udp", global_netstat);
-    for (vector<netstat>::iterator it = global_netstat.begin(); it != global_netstat.end(); ++it) {
-        netstat *net = &*it;
-        snprintf(net->identifier, IDENTIFIER_SIZE, config->identifier.c_str());
-        snprintf(net->subidentifier, IDENTIFIER_SIZE, config->subidentifier.c_str());
-        net->recTime = before.tv_sec;
-        net->recTimeUSec = before.tv_usec;
+    if (global_procFD.size() > 0) {
+        global_netstat.clear();
+        parseNetstat("tcp", global_netstat);
+        parseNetstat("udp", global_netstat);
+        for (vector<procfd>::iterator it = global_procFD.begin(); it != global_procFD.end(); ++it) {
+            procfd *fd = &*it;
+            if (strncmp(fd->path, "socket:[", 8) == 0) {
+                char *ptr = fd->path + 8;
+                char *eptr = fd->path + strlen(fd->path) - 1; // -1 to consume trailing ']'
+                size_t inode = strtoul(ptr, &eptr, 10);
+                auto mapSocket = global_netstat.find(inode);
+                if (mapSocket != global_netstat.end()) {
+                    netstat *net = &(mapSocket->second);
+                    format_socket_connection(fd->path, BUFFER_SIZE, net);
+                }
+            }
+        }
     }
 
     if (config->debug) {
         printf("ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
     }
-
 
     return ntargets;
 }
@@ -1170,9 +1216,6 @@ unsigned int write_procdata(ProcIO *output, procdata *data, int count) {
 unsigned int write_procfd(ProcIO *output, procfd *data, int count) {
     return output->write_procfd(data, count);
 }
-unsigned int write_netstat(ProcIO *output, netstat *data, int count) {
-    return output->write_netstat(data, count);
-}
 bool set_context(ProcIO *output, const std::string& host, const std::string& identifier, const std::string &subidentifier) {
     return output->set_context(host, identifier, subidentifier);
 }
@@ -1367,7 +1410,6 @@ int main(int argc, char** argv) {
                 writeOutput(config, *iter, global_procStat, write_procstat);
                 writeOutput(config, *iter, global_procData, write_procdata);
                 writeOutput(config, *iter, global_procFD, write_procfd);
-                writeOutput(config, *iter, global_netstat, write_netstat);
             }
         }
 
