@@ -1,7 +1,7 @@
 cmake_minimum_required (VERSION 2.8)
 
 PROJECT( procmon )
-SET( PROCMON_VERSION 2.5 )
+SET( PROCMON_VERSION 2.6 )
 
 
 OPTION ( USE_RABBITMQ_C "Use rabbitmq-c" ON )
