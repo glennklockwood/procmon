@@ -106,6 +106,8 @@ struct ProcessSummary {
     char command[BUFFER_SIZE];
     char execCommand[BUFFER_SIZE];
     char script[BUFFER_SIZE];
+    char user[EXEBUFFER_SIZE];
+    char project[EXEBUFFER_SIZE];
     double derived_startTime;
     double derived_recTime;
     double baseline_startTime;
@@ -246,6 +248,8 @@ class ProcessSummaryIO {
         H5Tinsert(h5type, "command", HOFFSET(ProcessSummary, command), strType_buffer);
         H5Tinsert(h5type, "execCommand", HOFFSET(ProcessSummary, execCommand), strType_buffer);
         H5Tinsert(h5type, "script", HOFFSET(ProcessSummary, script), strType_buffer);
+        H5Tinsert(h5type, "user", HOFFSET(ProcessSummary, user), strType_exeBuffer);
+        H5Tinsert(h5type, "project", HOFFSET(ProcessSummary, project), strType_exeBuffer);
         H5Tinsert(h5type, "derived_startTime", HOFFSET(ProcessSummary, derived_startTime), H5T_NATIVE_DOUBLE);
         H5Tinsert(h5type, "derived_recTime", HOFFSET(ProcessSummary, derived_recTime), H5T_NATIVE_DOUBLE);
         H5Tinsert(h5type, "baseline_startTime", HOFFSET(ProcessSummary, baseline_startTime), H5T_NATIVE_DOUBLE);

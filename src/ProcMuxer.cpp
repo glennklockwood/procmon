@@ -343,11 +343,6 @@ int main(int argc, char **argv) {
             outputFile->write_procfd(ptr, 0, nRecords);
             file_n_writes++;
             message_type = "procfd";
-        } else if (recordType == TYPE_NETSTAT) {
-            netstat *ptr = (netstat *) data;
-            outputFile->write_netstat(ptr, 0, nRecords);
-            file_n_writes++;
-            message_type = "netstat";
         }
         cerr << "Received message: " << hostname << "." << identifier << "." << subidentifier << "." << message_type << endl;
 

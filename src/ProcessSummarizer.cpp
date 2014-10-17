@@ -15,29 +15,29 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include <tbb/tbb.h>
-#include <tbb/task.h>
-#include <tbb/task_scheduler_init.h>
-#include <tbb/cache_aligned_allocator.h>
-#include <tbb/blocked_range.h>
-#include <tbb/spin_mutex.h>
-#include <tbb/concurrent_hash_map.h>
-#include <tbb/concurrent_vector.h>
+#include <pwd.h>
 
 #include <boost/program_options.hpp>
 #define PROCMON_SUMMARIZE_VERSION 2.0
 namespace po = boost::program_options;
 using namespace std;
 
+namespace std {
+    template <>
+    struct hash<pair<time_t,int> > {
+        size_t operator()(const pair<time_t,int> &k) const {
+            return ((hash<time_t>()(k.first) ^ (hash<int>()(k.second) << 1)) >> 1);
+        }
+    };
+}
+
 class ProcessSummary;
-typedef tbb::concurrent_hash_map<pair<time_t,int>, ProcessSummary *> SummaryHashMap;
+typedef unordered_map<pair<time_t,int>, ProcessSummary *> SummaryHashMap;
 
 class AnalysisTask;
 
 struct H5FileControl {
     ProcHDF5IO *file;
-    tbb::spin_mutex mutex;
 
     H5FileControl(ProcHDF5IO *_file):
         file(_file)
@@ -171,26 +171,14 @@ class ProcessMasker {
         count = 0;
     }
 
-    ProcessMasker(ProcessMasker<pmType>& other, tbb::split) {
-        start_ptr = other.start_ptr;
-        nelem = other.nelem;
-        mask = other.mask;
-        ownmask = false;
-        count = other.count;
-    }
-
     ~ProcessMasker() {
         if (ownmask) delete mask;
     }
 
-    void join(ProcessMasker<pmType>& other) {
-        count += other.count;
-    }
+    void operator()(const pmType *begin, const pmType *end) {
+        count += end - begin;
 
-    void operator()(const tbb::blocked_range<pmType*> &r) {
-        count += r.end() - r.begin();
-
-        for (pmType *ptr = r.begin(); ptr != r.end(); ++ptr) {
+        for (const pmType *ptr = begin; ptr != end; ++ptr) {
             size_t idx = ptr - start_ptr;
             mask[idx] = (idx == 0) || !equiv_byprocess<pmType>(*(ptr-1), *ptr);
         }
@@ -221,24 +209,17 @@ class ProcessMasker {
 template <class pmType>
 class ProcessReducer {
     public:
-    ProcessReducer(SummaryHashMap& _index, tbb::concurrent_vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname):
+    ProcessReducer(SummaryHashMap& _index, vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname):
         hostname(_hostname)
     {
         summaries    = &_summaries;
         maxSummaries = _maxSummaries;
         summaryIndex = &_index;
     }
-    ProcessReducer(ProcessReducer<pmType>& other, tbb::split) {
-        summaries = other.summaries;
-        maxSummaries = other.maxSummaries;
-        summaryIndex = other.summaryIndex;
-    }
-    void join(ProcessReducer<pmType>& other) {
-    }
 
-    void operator()(const tbb::blocked_range<const pair<pmType*,pmType*>* > &r) {
-        for (auto it: r) {
-            reduce(it.first, it.second);
+    void operator()(const pair<pmType*,pmType*> *begin, const pair<pmType*,pmType*> *end) {
+        for (const pair<pmType*,pmType*> *ptr = begin; ptr != end; ++ptr) {
+            reduce(ptr->first, ptr->second);
         }
     }
 
@@ -246,21 +227,21 @@ class ProcessReducer {
     void reduce(pmType *, pmType *);
 
     SummaryHashMap *summaryIndex;
-    tbb::concurrent_vector<ProcessSummary> *summaries;
+    vector<ProcessSummary> *summaries;
     size_t maxSummaries;
     string hostname;
 
     ProcessSummary *findSummary(const string& identifier, const string& subidentifier, time_t start, int pid) {
         ProcessSummary *ret = NULL;
-        SummaryHashMap::accessor a;
         pair<time_t,int> key(start, pid);
-        if (!summaryIndex->find(a, key)) {
-            auto pos = summaries->emplace_back(hostname, identifier, subidentifier, start, pid);
+        auto it = summaryIndex->find(key);
+        if (it == summaryIndex->end()) {
+            summaries->emplace_back(hostname, identifier, subidentifier, start, pid);
+            auto pos = summaries->rbegin();
             ret = &*pos;
-            summaryIndex->insert(a, key);
-            a->second = ret;
+            (*summaryIndex)[key] = ret;
         } else {
-            ret = a->second;
+            ret = it->second;
         }
         return ret;
     }
@@ -349,6 +330,13 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
     summary->m_share = record->m_share;
     summary->m_text = record->m_text;
     summary->m_data = record->m_data;
+
+    struct passwd *pwd = getpwuid(summary->realUid);
+    if (pwd != NULL) {
+        snprintf(summary->user, EXEBUFFER_SIZE, "%s", pwd->pw_name);
+    } else {
+        snprintf(summary->user, EXEBUFFER_SIZE, "%d", summary->realUid);
+    }
 
     for (procstat *ptr = start; ptr < end; ++ptr) {
         size_t idx = ptr - start;
@@ -483,7 +471,7 @@ void ProcessReducer<procobs>::reduce(procobs *start, procobs *end) {
 class ProcessData {
     private:
     SummaryHashMap summaryIndex;
-    tbb::concurrent_vector<ProcessSummary> summaries;
+    vector<ProcessSummary> summaries;
 
     public:
     procstat *ps;
@@ -561,20 +549,20 @@ class ProcessData {
         /* summarization algorithm:
          *    sort process datastructures by identifier,subidentifier,starttime, pid, rectime
          */
-        tbb::parallel_sort(ps, ps+n_ps, less_byprocess<procstat>);
-        tbb::parallel_sort(pd, pd+n_pd, less_byprocess<procdata>);
-        tbb::parallel_sort(fd, fd+n_fd, less_byprocess<procfd>);
-        tbb::parallel_sort(obs, obs+n_obs, less_byprocess<procobs>);
+        sort(ps, ps+n_ps, less_byprocess<procstat>);
+        sort(pd, pd+n_pd, less_byprocess<procdata>);
+        sort(fd, fd+n_fd, less_byprocess<procfd>);
+        sort(obs, obs+n_obs, less_byprocess<procobs>);
 
         ProcessMasker<procstat> ps_mask(ps, n_ps);
         ProcessMasker<procdata> pd_mask(pd, n_pd);
         ProcessMasker<procfd>   fd_mask(fd, n_fd);
         ProcessMasker<procobs>  obs_mask(obs, n_obs);
 
-        tbb::parallel_reduce(tbb::blocked_range<procstat*>(ps, (ps+n_ps), sizeof(procstat)), ps_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procdata*>(pd, (pd+n_pd), sizeof(procdata)), pd_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procfd*>(fd, (fd+n_fd), sizeof(procfd)), fd_mask);
-        tbb::parallel_reduce(tbb::blocked_range<procobs*>(obs, (obs+n_obs), sizeof(procobs)), obs_mask);
+        ps_mask(ps, ps+n_ps);
+        pd_mask(pd, pd+n_pd);
+        fd_mask(fd, fd+n_fd);
+        obs_mask(obs, obs+n_obs);
 
         auto &ps_boundaries = ps_mask.getProcessBoundaries();
         auto &pd_boundaries = pd_mask.getProcessBoundaries();
@@ -594,34 +582,12 @@ class ProcessData {
         ProcessReducer<procfd>   fd_red(summaryIndex, summaries, maxRecords, hostname);
         ProcessReducer<procobs>  obs_red(summaryIndex, summaries, maxRecords, hostname);
 
-        tbb::parallel_reduce(
-                tbb::blocked_range<const pair<procstat*,procstat*>* >(
-                    &*ps_boundaries.begin(),
-                    &*ps_boundaries.end(),
-                    sizeof(pair<procstat*,procstat*>)
-                ),
-                ps_red
-        );
-        tbb::parallel_reduce(
-                tbb::blocked_range<const pair<procdata*,procdata*>* >(
-                    &*pd_boundaries.begin(),
-                    &*pd_boundaries.end(),
-                    sizeof(pair<procdata*,procdata*>)
-                ),
-                pd_red
-        );
-        tbb::parallel_reduce(
-                tbb::blocked_range<const pair<procobs*,procobs*>* >(
-                    &*obs_boundaries.begin(),
-                    &*obs_boundaries.end(),
-                    sizeof(pair<procobs*,procobs*>)
-                ),
-                obs_red
-        );
+        ps_red(&*ps_boundaries.begin(), &*ps_boundaries.end());
+        pd_red(&*pd_boundaries.begin(), &*pd_boundaries.end());
+        obs_red(&*obs_boundaries.begin(), &*obs_boundaries.end());
 
         /* XXX HERE XXX
         tbb::parallel_reduce(tbb::blocked_range<procfd>(fd_boundaries.begin(), fd_boundaries.end()), fd_red);
-        tbb::parallel_reduce(tbb::blocked_range<procobs>(obs_boundaries.begin(), obs_boundaires.end()), obs_red);
         */
     }
 
@@ -637,9 +603,9 @@ class ProcessData {
 
     ProcessSummary *findSummary(time_t start, int pid) {
         pair<time_t,int> key(start,pid);
-        SummaryHashMap::accessor a;
-        if (summaryIndex.find(a, key)) {
-            return a->second;
+        auto it = summaryIndex.find(key);
+        if (it != summaryIndex.end()) {
+            return it->second;
         }
         return NULL;
     }
@@ -691,7 +657,7 @@ class ProcmonSummarizeConfig {
             po::store(po::command_line_parser(argc, argv).options(options).run(), vm);
             po::notify(vm);
             if (vm.count("help")) {
-                std::cout << options << std::endl;
+                cout << options << endl;
                 exit(0);
             }
             if (vm.count("version")) {
@@ -701,9 +667,9 @@ class ProcmonSummarizeConfig {
             if (vm.count("debug")) {
                 debug = true;
             }
-        } catch (std::exception &e) {
-            std::cout << e.what() << std::endl;
-            std::cout << options << std::endl;
+        } catch (exception &e) {
+            cout << e.what() << endl;
+            cout << options << endl;
             exit(1);
         }
 
@@ -746,8 +712,6 @@ class ProcmonSummarizeConfig {
 
 int main(int argc, char **argv) {
     ProcmonSummarizeConfig config(argc, argv);
-
-    tbb::task_scheduler_init init(config.getNThreads() != 0 ? config.getNThreads() : tbb::task_scheduler_init::automatic);
 
     /* open input h5 files, walk the metadata */
     H5FileControl *baselineInput = NULL;
