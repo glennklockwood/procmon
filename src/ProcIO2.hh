@@ -55,10 +55,24 @@ struct Context {
     string contextString;
 
     Context(const string &_system, const string &_hostname,
-            const string &_identifier, const string &_subidentifier):
-        system(_system), hostname(_hostname), identifier(_identifier),
-        subidentifier(_subidentifier)
+            const string &_identifier, const string &_subidentifier)
     {
+        size_t endPos = _system.find('.');
+        endPos = endPos == string::npos ? _system.size() : endPos;
+        system(_system, 0, endPos);
+
+        endPos = _hostname.find('.');
+        endPos = endPos == string::npos ? _hostname.size() : endPos;
+        hostname(_hostname, 0, endPos);
+
+        endPos = _identifier.find('.');
+        endPos = endPos == string::npos ? _identifier.size() : endPos;
+        identifier(_identifier, 0, endPos);
+
+        endPos = _subidentifier.find('.');
+        endPos = endPos == string::npos ? _subidentifier.size() : endPos;
+        subidentifier(_subidentifier, 0, endPos);
+
         contextString = system + "." + hostname + "." + identifier + "." + subidentifier;
     };
 };
@@ -77,6 +91,7 @@ namespace std {
 namespace pmio2 {
 
 class Dataset;
+class DatasetFactory;
 
 class IoMethod {
     public:
@@ -84,6 +99,7 @@ class IoMethod {
         contextSet = false;
         contextOverride = false;
     }
+    virtual ~IoMethod() { }
     virtual bool setContext(const string& _system, const string& _hostname, const string& _identifier, const string& _subidentifier) {
         Context context(_system, _hostname, _identifier, _subidentifier);
         setContext(context);
@@ -96,13 +112,21 @@ class IoMethod {
        contextOverride = _override;
     } 
 
-    virtual bool addDataset(shared_ptr<Dataset> ptr, const Context &context, const string &dataset) {
-        pair<Context, string> key(context, dataset);
-        dsMap[key] = ptr;
-        auto ds = find(registeredDatasets.begin(), registeredDatasets.end(), dsName);
+    virtual bool addDataset(shared_ptr<Dataset> ptr, const string &dsName, DatasetFactory &dsGen) {
+        auto ds = find_if(
+                registeredDatasets.begin(),
+                registeredDatasets.end(),
+                [dsName](pair<string,DatasetFactory>& e) { return dsName == e.first; }
+        );
         if (ds == registeredDatasets.end()) {
-            registeredDatasets.push_back(dsName);
+            registeredDatasets.emplace_back(dsName, dsGen);
+            return true;
         }
+        return false;
+    }
+    virtual bool addDatasetContext(shared_ptr<Dataset> ptr, const Context &context, const string &dsetName) {
+        pair<Context,string> key(context, dsetName);
+        dsMap[key] = ptr;
         return true;
     }
 
@@ -111,21 +135,28 @@ class IoMethod {
     bool contextOverride;
     Context context;
     unordered_map<pair<Context, string>, shared_ptr<Dataset> > dsMap;
-    vector<shared_ptr<Dataset> > currentDatasets;
-    vector<string> registeredDatasets;
+    unordered_map<string, shared_ptr<Dataset> > currentDatasets;
+    vector<pair<string,DatasetFactory> > registeredDatasets;
 };
 
 class Dataset : public enable_shared_from_this<Dataset> {
     public:
-    Dataset(shared_ptr<IoMethod> &_ioMethod, const Context &context, const string &dsName) {
+    Dataset(shared_ptr<IoMethod> &_ioMethod, const string &dsName) {
         ioMethod = _ioMethod;
-        ioMethod->addDataset(shared_from_this(), dsName);
     }
+    virtual ~Dataset() { }
 
     protected:
     shared_ptr<IoMethod> ioMethod;
 };
 
+class DatasetFactory {
+    public:
+    virtual shared_ptr<Dataset> operator()() = 0;
+    virtual ~DatasetFactory() = 0;
+};
+
+/*
 class TextIO : public IoMethod {
 public:
     TextIO(const string& _filename, IoMode _mode);
@@ -139,58 +170,148 @@ private:
 	char *sPtr, *ePtr, *ptr;
 	char buffer[TEXT_BUFFER_SIZE];
 };
+*/
 
 #ifdef USE_HDF5
+template <class pmType>
 class Hdf5Type {
     friend class Hdf5DatasetBase;
     public:
-
-    protected:
-    hid_t type;
-};
-
-class Hdf5DatasetBase : public Dataset {
-    public:
-    Hdf5DatasetBase(
-            shared_ptr<Hdf5File> &_ioMethod,
-            shared_ptr<Hdf5Type> &_h5type,
-            unsigned int &_blockSize,
-            const Context &_context,
-            const string &_dsName
-    ):
-        Dataset(_ioMethod, _context, _dsName)
-    {
-        type = _h5type;
-        blockSize = _blockSize;
+    Hdf5Type() {
+        initializeType();
+    }
+    ~Hdf5Type() {
+        if (set) {
+            H5Tclose(type);
+            set = false;
+        }
     }
 
     protected:
-    shared_ptr<Hdf5Type> type;
+    bool set;
+    hid_t type;
+
+    void initializeType() {
+        // no-op for default, must be specialized
+        set = false;
+    }
+};
+
+class Hdf5Group {
+    public:
+    Hdf5Group(const string &basePath, const string &groupName);
+    ~Hdf5Group() {
+        H5Gclose(group);
+    }
+    private:
     hid_t group;
+    bool set;
+};
+
+template <class pmType>
+class Hdf5Dataset: public Dataset {
+    public:
+    Hdf5Dataset(
+            shared_ptr<Hdf5File> &_ioMethod,
+            shared_ptr<Hdf5Type> &_h5type,
+            unsigned int &_blockSize,
+            unsigned int &_zipLevel,
+            const string &_dsName
+    ):
+        Dataset(_ioMethod, _dsName), dsName(_dsName),
+    {
+        type = _h5type;
+        blockSize = _blockSize;
+        zipLevel = _zipLevel;
+        lastUpdate = 0;
+        group = _ioMethod->getGroup();
+        initializeDataset();
+
+    }
+    ~Hdf5Dataset() {
+        if (size_id >= 0) {
+            H5Aclose(size_id);
+        }
+        if (dataset >= 0) {
+            H5Dclose(dataset);
+        }
+    }
+
+    size_t write(pmType *start, pmType *end);
+    size_t read(pmType *start, size_t maxRead);
+    inline const size_t howmany() const { return size }
+
+    protected:
+    shared_ptr<Hdf5Type> type;
+    shared_ptr<Hdf5Group> group;
+    string dsName;
+    int zip_level;
     hid_t dataset;
     hid_t size_id;
     unsigned int blockSize;
-    unsigned int size;
+    size_t size;
     time_t lastUpdate;
+
+    void initializeDataset();
 };
 
+template <class pmType>
+class Hdf5DatasetFactory : public DatasetFactory {
+    public:
+    Hdf5DatasetFactory(
+        shared_ptr<Hdf5File> &_ioMethod,
+        shared_ptr<Hdf5Type> &_h5type,
+        unsigned int &_blockSize,
+        unsigned int &_zipLevel,
+        const string &_dsName
+    ):
+        ioMethod(_ioMethod), h5type(_h5type), blockSize(_blockSize),
+        zipLevel(_zipLevel), dsName(_dsName)
+    { }
+
+    shared_ptr<Dataset> operator()() {
+        shared_ptr<Dataset> ptr(new Hdf5Dataset<pmType>(
+            ioMethod, h5type, blockSize, zipLevel, dsName
+        ));
+        return ptr;
+    }
+
+    private:
+    shared_ptr<Hdf5File> ioMethod;
+    shared_ptr<Hdf5Type> h5type;
+    unsigned int blockSize;
+    unsigned int zipLevel;
+    string dsName;
+};
+
+
 class Hdf5Io : public IoMethod {
+    friend class Hdf5Type;
+    friend class Hdf5Group;
     public:
     Hdf5Io(const string& filename, IoMode mode);
     ~Hdf5Io();
-    bool metadata_set_string(const char*, const char*);
-    bool metadata_set_uint(const char*, unsigned long);
-    bool metadata_get_string(const char*, char**);
-    bool metadata_get_uint(const char*, unsigned long*);
+    bool metadataSetString(const char*, const char*);
+    bool metadataSetUint(const char*, unsigned long);
+    bool metadataGetString(const char*, char**);
+    bool metadataGetUint(const char*, unsigned long*);
 
-    bool get_hosts(vector<string>& hosts);
+    template <class pmType>
+    size_t write(const string &dsName, pmType *start, pmType *end);
+
+    template <class pmType>
+    size_t read(const string &dsName, pmType *start, size_t count);
+
+    size_t howmany(const string &dsName);
+
+
+
+    const vector<string>& getGroups();
 	void flush();
-	void trim_segments(time_t cutoff);
+	void trimDatasets(time_t cutoff);
 
     protected:
-    unsigned int read_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count);
-    unsigned int write_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, int count, int chunkSize);
-    void initialize_types();
+    void initializeTypes();
 
     string filename;
     ProcIOFileMode mode;
@@ -202,11 +323,13 @@ class Hdf5Io : public IoMethod {
     hid_t strType_buffer;
 	hid_t strType_idBuffer;
     hid_t strType_variable;
+    unordered_map<Context,shared_ptr<Hdf5Group> > groups;
 };
 #endif
 
 #ifdef USE_AMQP
 
+/*
 template <typename pmType>
 class AmqpDataset : public Dataset {
     public:
@@ -278,6 +401,7 @@ class AmqpIo : public IoMethod {
 
 	char buffer[AMQP_BUFFER_SIZE];
 };
+*/
 #endif
 
 class IoException : public exception {

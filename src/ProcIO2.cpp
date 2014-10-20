@@ -13,6 +13,7 @@ using namespace std;
 namespace pmio2 {
 
 #ifdef USE_AMQP
+    /*
 AmqpIo::AmqpIo(const string& _mqServer, int _port, const string& _mqVHost, 
 	const string& _username, const string& _password,
     const string& _exchangeName, const int _frameSize, const IoMode _mode):
@@ -30,6 +31,12 @@ AmqpIo::AmqpIo(const string& _mqServer, int _port, const string& _mqVHost,
     } catch (const IoException &e) {
         cerr << "Caught (and ignored) exception: " << e.what() << endl;
     }
+}
+
+bool AmqpIo::addDataset(shared_ptr<Dataset> ptr, const Context &context, const string &dsName) {
+    IoMethod::addDataset(ptr, context, dsName);
+    currentDatasets[dsName] = ptr;
+    return true;
 }
 
 bool AmqpIo::_amqp_open() {
@@ -149,7 +156,7 @@ AmqpIo::~AmqpIo() {
     _amqp_close(false);
 }
 
-/*
+//
 ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, int *nRec) {
 	ProcRecordType recType = TYPE_INVALID;
     for ( ; ; ) {
@@ -261,7 +268,6 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
     }
 	return recType;
 }
-*/
 
 
 
@@ -547,7 +553,7 @@ bool ProcAMQPIO::_send_message(const char *tag, amqp_bytes_t& message) {
                 break;
             case AMQP_STATUS_SOCKET_ERROR:
             case AMQP_STATUS_CONNECTION_CLOSED:
-                /* deconstruct existing connection (if it exists), and rebuild */
+                // deconstruct existing connection (if it exists), and rebuild 
                 _amqp_close(false); //close the connection without acting on errors
                 try {
                     _amqp_open();   //attempt to reconnect
@@ -717,67 +723,36 @@ bool ProcAMQPIO::_amqp_bind_context() {
 	amqp_bytes_free(queue);
     return true;
 }
+*/
 #endif
 
 #ifdef USE_HDF5
-hdf5Ref::hdf5Ref(hid_t file, hid_t type_procstat, hid_t type_procdata, hid_t type_procfd, hid_t type_procobs, hid_t type_netstat, const string& hostname, ProcIOFileMode mode, unsigned int statBlockSize, unsigned int dataBlockSize, unsigned int fdBlockSize, unsigned int obsBlockSize, unsigned int netBlockSize) {
-	group = -1;
-	procstatDS = -1;
-	procdataDS = -1;
-    procfdDS = -1;
-    procobsDS = -1;
-    netstatDS = -1;
-	procstatSizeID = -1;
-	procdataSizeID = -1;
-    procfdSizeID = -1;
-    procobsSizeID = -1;
-    netstatSizeID = -1;
-	procstatSize = 0;
-	procdataSize = 0;
-    procfdSize = 0;
-    procobsSize = 0;
-    netstatSize = 0;
-
-    if (H5Lexists(file, hostname.c_str(), H5P_DEFAULT) == 1) {
-        group = H5Gopen2(file, hostname.c_str(), H5P_DEFAULT);
-	} else if (mode == FILE_MODE_WRITE) {
-        group = H5Gcreate(file, hostname.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+Hdf5Group::Hdf5Group(shared_ptr<Hdf5File> &h5File, const string &groupName) {
+    if (H5Lexists(h5File->file, groupName.c_str(), H5P_DEFAULT) == 1) {
+        group = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+        set = true;
+    } else if (h5File->writable()) {
+        group = H5Gcreate(file, groupName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        set = true;
     }
     if (group < 0) {
-       	throw ProcIOException("Failed to access hostname group: " + hostname);
-    }
-
-    if (H5Lexists(group, "procstat", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
-	    procstatSize = open_dataset("procstat", type_procstat, statBlockSize, &procstatDS, &procstatSizeID, 0);
-    }
-    if (H5Lexists(group, "procdata", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
-	    procdataSize = open_dataset("procdata", type_procdata, dataBlockSize, &procdataDS, &procdataSizeID, 0);
-    }
-    if (H5Lexists(group, "procfd", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
-        procfdSize = open_dataset("procfd", type_procfd, fdBlockSize, &procfdDS, &procfdSizeID, 9);
-    }
-    if (H5Lexists(group, "procobs", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
-        procobsSize = open_dataset("procobs", type_procobs, obsBlockSize, &procobsDS, &procobsSizeID, 9);
-    }
-    if (H5Lexists(group, "netstat", H5P_DEFAULT) == 1 || mode == FILE_MODE_WRITE) {
-        netstatSize = open_dataset("netstat", type_netstat, netBlockSize, &netstatDS, &netstatSizeID, 9);
+        throw IoException("Failed to access group: " + groupName);
     }
 }
 
-unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize, hid_t *dataset, hid_t *attribute, unsigned int zip_level) {
-	unsigned int size = 0;
-
-	if (group < 0) {
-		throw ProcIOException("Called openDataset before group was opened!");
-	}
-
-    if (H5Lexists(group, dsName, H5P_DEFAULT) == 1) {
-        *dataset = H5Dopen2(group, dsName, H5P_DEFAULT);
-		*attribute = H5Aopen(*dataset, "nRecords", H5P_DEFAULT);
-        hid_t attr_type = H5Aget_type(*attribute);
-		H5Aread(*attribute, attr_type, &size);
+template <class pmType>
+size_t Hdf5Dataset::initializeDataset() {
+    size_t size = 0;
+    if (group->group < 0) {
+        throw IoException("Called initializeDataset before group was opened!");
+    }
+    if (H5Lexists(group->group, dsName.c_str(), H5P_DEFAULT) == 1) {
+        dataset = H5Dopen2(group->group, dsName.c_str(), H5P_DEFAULT);
+		size_id = H5Aopen(dataset, "nRecords", H5P_DEFAULT);
+        hid_t attr_type = H5Aget_type(attribute);
+		H5Aread(attribute, attr_type, &size);
         H5Tclose(attr_type);
-    } else {
+    } else if (h5File->writable()) {
         hid_t param;
 		hsize_t rank = 1;
         hsize_t initial_dims = chunkSize;
@@ -790,74 +765,112 @@ unsigned int hdf5Ref::open_dataset(const char* dsName, hid_t type, int chunkSize
             H5Pset_deflate(param, zip_level);
         }
         H5Pset_chunk(param, rank, &chunk_dims);
-        *dataset = H5Dcreate(group, dsName, type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
+        dataset = H5Dcreate(group->group, dsName.c_str(), type->type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
         H5Pclose(param);
         H5Sclose(dataspace);
 
         hid_t a_id = H5Screate(H5S_SCALAR);
-		*attribute = H5Acreate2(*dataset, "nRecords", H5T_NATIVE_UINT, a_id, H5P_DEFAULT, H5P_DEFAULT);
-		H5Awrite(*attribute, H5T_NATIVE_UINT, &size);
+		size_id = H5Acreate2(dataset, "nRecords", H5T_NATIVE_UINT, a_id, H5P_DEFAULT, H5P_DEFAULT);
+		H5Awrite(size_id, H5T_NATIVE_UINT, &size);
         H5Sclose(a_id);
     }
 	return size;
 }
 
-hdf5Ref::~hdf5Ref() {
-	if (procstatSizeID >= 0) {
-		H5Aclose(procstatSizeID);
-	}
-	if (procdataSizeID >= 0) {
-		H5Aclose(procdataSizeID);
-	}
-    if (procfdSizeID >= 0) {
-        H5Aclose(procfdSizeID);
+template <class pmType>
+size_t Hdf5Dataset::read(pmType *start_pointer, size_t count, size_t start_id = 0) {
+    lastUpdate = time(NULL);
+
+    hsize_t targetRecords = 0;
+    hsize_t localRecords = count;
+    hsize_t remoteStart = start_id > 0 ? start_id - 1 : 0;
+    hsize_t localStart = 0;
+    hsize_t nRecords = 0;
+
+    hid_t dataspace = H5Dget_space(dataset);
+    hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
+    herr_t status = 0;
+
+    //int rank = H5Sget_simple_extent_ndims(dataspace);
+    status = H5Sget_simple_extent_dims(dataspace, &nRecords, NULL);
+    if (remoteStart < nRecords) {
+        targetRecords = count < (nRecords - remoteStart) ? count : (nRecords - remoteStart);
+
+        status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, &remoteStart, H5P_DEFAULT, &targetRecords, H5P_DEFAULT);
+        status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, &localStart, H5P_DEFAULT, &localRecords, H5P_DEFAULT);
+        status = H5Dread(dataset, type, H5S_ALL, dataspace, H5P_DEFAULT, start_pointer);
     }
-    if (procobsSizeID >= 0) {
-        H5Aclose(procobsSizeID);
-    }
-    if (netstatSizeID >= 0) {
-        H5Aclose(netstatSizeID);
-    }
-	if (procstatDS >= 0) {
-		H5Dclose(procstatDS);
-	}
-	if (procdataDS >= 0) {
-		H5Dclose(procdataDS);
-	}
-    if (procfdDS >= 0) {
-        H5Dclose(procfdDS);
-    }
-    if (procobsDS >= 0) {
-        H5Dclose(procobsDS);
-    }
-    if (netstatDS >= 0) {
-        H5Dclose(netstatDS);
-    }
-	if (group >= 0) {
-		H5Gclose(group);
-	}
+
+    H5Sclose(dataspace);
+    H5Sclose(memspace);
+
+    return (size_t) targetRecords;
 }
 
-ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode, 
-	unsigned int _statBlockSize, unsigned int _dataBlockSize,
-    unsigned int _fdBlockSize, unsigned int _obsBlockSize,
-    unsigned int _netBlockSize): 
-	
-	filename(_filename),mode(_mode),statBlockSize(_statBlockSize),
-	dataBlockSize(_dataBlockSize),fdBlockSize(_fdBlockSize),
-    obsBlockSize(_obsBlockSize),netBlockSize(_netBlockSize)
+template <class pmType>
+size_t Hdf5Dataset::write(pmType *start, pmType *end, size_t start_id = 0) {
+    if (!h5file->getOverrideContext()) {
+        for (pmType *ptr = start_pointer; ptr != end; ++end) {
+            snprintf(ptr->identifier, IDENTIFIER_SIZE, "%s", h5file->getContext().identifier.c_str());
+            snprintf(ptr->subidentifier, IDENTIFIER_SIZE, "%s", h5file->getContext().subidentifier.c_str());
+        }
+    }
+
+    hsize_t rank = 1;
+    hsize_t maxRecords = 0;
+	hsize_t startRecord = 0;
+    hsize_t targetRecords = 0;
+    hsize_t newRecords = end - start;
+	unsigned int old_nRecords = 0;
+
+	bool append = start_id == 0;
+	startRecord = start_id > 0 ? start_id - 1 : 0;
+
+    unsigned int *nRecords = &size;
+    nRecords = &size;
+
+    hid_t filespace;
+    herr_t status;
+
+	if (hdf5Segment == nullptr) return 0;
+	hdf5Segment->lastUpdate = time(NULL);
+
+    hid_t dataspace = H5Dget_space(dataset);
+    status = H5Sget_simple_extent_dims(dataspace, &maxRecords, NULL);
+    H5Sclose(dataspace);
+
+	if (append) startRecord = *nRecords;
+    targetRecords = startRecord + count > maxRecords ? startRecord + count : maxRecords;
+
+    status = H5Dset_extent(dataset, &targetRecords);
+    filespace = H5Dget_space(dataset);
+
+    status = H5Sselect_hyperslab(filespace, H5S_SELECT_SET, &startRecord, NULL, &newRecords, NULL);
+    dataspace = H5Screate_simple(rank, &newRecords, NULL);
+
+    H5Dwrite(dataset, type, dataspace, filespace, H5P_DEFAULT, start_pointer);
+
+	old_nRecords = *nRecords;
+	*nRecords = startRecord + count > *nRecords ? startRecord + count : *nRecords;
+
+	H5Awrite(size_attribute, H5T_NATIVE_UINT, nRecords);
+
+	start_id = startRecord+1;
+
+    H5Sclose(filespace);
+    H5Sclose(dataspace);
+    return start_id;
+}
+
+
+Hdf5Io::Hdf5Io(const string& _filename, IoMode _mode):
+    IoMethod(), filename(_filename), mode(_mode)
 {
 	file = -1;
 	strType_exeBuffer = -1;
 	strType_buffer = -1;
 	strType_idBuffer = -1;
     strType_variable = -1;
-	type_procdata = -1;
-	type_procstat = -1;
-    type_procfd = -1;
-    type_procobs = -1;
-    type_netstat = -1;
-    override_context = false;
 
 	if (mode == FILE_MODE_WRITE) {
     	file = H5Fopen(filename.c_str(), H5F_ACC_CREAT | H5F_ACC_RDWR, H5P_DEFAULT);
@@ -868,56 +881,75 @@ ProcHDF5IO::ProcHDF5IO(const string& _filename, ProcIOFileMode _mode,
     	file = H5Fopen(filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
 	}
 	if (file < 0) {
-		throw ProcIOException("Failed to open HDF5 file: " + filename);
+		throw IoException("Failed to open HDF5 file: " + filename);
 	}
     root = H5Gopen2(file, "/", H5P_DEFAULT);
     if (root < 0) throw ProcIOException("Failed to open root group in file: " + filename);
-    initialize_types();
+    initializeTypes();
 }
 	
-ProcHDF5IO::~ProcHDF5IO() {
+Hdf5Io::~Hdf5Io() {
     herr_t status;
 	for (auto iter = openRefs.begin(), end = openRefs.end(); iter != end; ++iter) {
 		delete (*iter).second;
 	}
-    if (type_procdata > 0) status = H5Tclose(type_procdata);
-    if (type_procstat > 0) status = H5Tclose(type_procstat);
-    if (type_procfd > 0) status = H5Tclose(type_procfd);
-    if (type_procobs > 0) status = H5Tclose(type_procobs);
-    if (type_netstat > 0) status = H5Tclose(type_netstat);
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
     if (strType_variable > 0) status = H5Tclose(strType_variable);
     if (root > 0) status = H5Gclose(root);
     if (file > 0) status = H5Fclose(file);
-    //status = H5close();
 }
 
-void ProcHDF5IO::set_override_context(bool val) {
-    override_context = val;
+template <class pmType>
+size_t Hdf5Io::write(const string &dsName, pmType *start, pmType *end) {
+    auto it = currentDatasets.find(dsName);
+    if (it == currentDatasets.end()) {
+        return 0;
+    }
+    shared_ptr<Dataset> baseDs = it->second;
+    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
+    return dataset->write(start, end);
 }
 
-unsigned int ProcHDF5IO::read_procdata(procdata* procData, unsigned int id) {
-    return read_procdata(procData, id, 1);
+template <class pmType>
+size_t Hdf5Io::read(const string &dsName, pmType *start, size_t count) {
+    auto it = currentDatasets.find(dsName);
+    if (it == currentDatasets.end()) {
+        return 0;
+    }
+    shared_ptr<Dataset> baseDs = it->second;
+    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
+    return dataset->read(start, count);
 }
 
-unsigned int ProcHDF5IO::read_procstat(procstat* procStat, unsigned int id) {
-    return read_procstat(procStat, id, 1);
+bool Hdf5Io::setContext(const Context& _context) {
+    context = _context;
+    group = nullptr;
+    currentDatasets.clear();
+
+    auto it = groups.find(context);
+    if (it != groups.end()) {
+        group = it->second;
+    } else {
+        group = new Hdf5Group(context.hostname);
+        groups[context] = group;
+    }
+    pair<Context, string> dsKey(context, "");
+    for (const pair<string, DatasetFactory>& dset: registeredDatasets) {
+        key.second = dset.first;
+        auto it = dsMap.find(key);
+        if (it != dsMap.end()) {
+            currentDatasets[dset] = it->second;
+        } else {
+            shared_ptr<Dataset> ptr = (dset.second)();
+            currentDatasets[dset] = ptr;
+            addDatasetContext(ptr, context, dset.first);
+        }
+    }
+    return true;
 }
 
-unsigned int ProcHDF5IO::read_procfd(procfd* procFD, unsigned int id) {
-    return read_procfd(procFD, id, 1);
-}
-
-unsigned int ProcHDF5IO::read_procobs(procobs* procObs, unsigned int id) {
-    return read_procobs(procObs, id, 1);
-}
-
-unsigned int ProcHDF5IO::read_netstat(netstat* netData, unsigned int id) {
-    return read_netstat(netData, id, 1);
-}
-
-bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
+bool Hdf5Io::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
 	size_t endPos = _hostname.find('.');
 	endPos = endPos == string::npos ? _hostname.size() : endPos;
 	string t_hostname(_hostname, 0, endPos);
@@ -952,7 +984,7 @@ bool ProcHDF5IO::set_context(const string& _hostname, const string& _identifier,
 	return true;
 }
 
-void ProcHDF5IO::initialize_types() {
+void Hdf5Io::initializeTypes() {
     herr_t status; 
 
     /* setup data structure types */
@@ -980,308 +1012,12 @@ void ProcHDF5IO::initialize_types() {
         throw ProcIOException("Failed to set strType_variable size");
     }
 
-    type_procdata = H5Tcreate(H5T_COMPOUND, sizeof(procdata));
-    if (type_procdata < 0) throw ProcIOException("Failed to create type_procdata");
-	H5Tinsert(type_procdata, "identifier", HOFFSET(procdata, identifier), strType_idBuffer);
-	H5Tinsert(type_procdata, "subidentifier", HOFFSET(procdata, subidentifier), strType_idBuffer);
-    H5Tinsert(type_procdata, "execName", HOFFSET(procdata, execName), strType_exeBuffer);
-    H5Tinsert(type_procdata, "cmdArgBytes", HOFFSET(procdata, cmdArgBytes), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procdata, "cmdArgs", HOFFSET(procdata, cmdArgs), strType_buffer);
-    H5Tinsert(type_procdata, "exePath", HOFFSET(procdata, exePath), strType_buffer);
-    H5Tinsert(type_procdata, "cwdPath", HOFFSET(procdata, cwdPath), strType_buffer);
-    H5Tinsert(type_procdata, "recTime", HOFFSET(procdata, recTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procdata, "recTimeUSec", HOFFSET(procdata, recTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procdata, "startTime", HOFFSET(procdata, startTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procdata, "startTimeUSec", HOFFSET(procdata, startTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procdata, "pid", HOFFSET(procdata, pid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procdata, "ppid", HOFFSET(procdata, ppid), H5T_NATIVE_UINT);
-
-    type_procstat = H5Tcreate(H5T_COMPOUND, sizeof(procstat));
-    if (type_procstat < 0) throw ProcIOException("Failed to create type_procstat");
-	H5Tinsert(type_procstat, "identifier", HOFFSET(procstat, identifier), strType_idBuffer);
-	H5Tinsert(type_procstat, "subidentifier", HOFFSET(procstat, subidentifier), strType_idBuffer);
-    H5Tinsert(type_procstat, "pid", HOFFSET(procstat, pid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procstat, "recTime", HOFFSET(procstat, recTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "recTimeUSec", HOFFSET(procstat, recTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "startTime", HOFFSET(procstat, startTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "startTimeUSec", HOFFSET(procstat, startTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "state", HOFFSET(procstat, state), H5T_NATIVE_CHAR);
-    H5Tinsert(type_procstat, "ppid", HOFFSET(procstat, ppid), H5T_NATIVE_INT);
-    H5Tinsert(type_procstat, "pgrp", HOFFSET(procstat, pgrp), H5T_NATIVE_INT);
-    H5Tinsert(type_procstat, "session", HOFFSET(procstat, session), H5T_NATIVE_INT);
-    H5Tinsert(type_procstat, "tty", HOFFSET(procstat, tty), H5T_NATIVE_INT);
-    H5Tinsert(type_procstat, "tpgid", HOFFSET(procstat, tpgid), H5T_NATIVE_INT);
-    H5Tinsert(type_procstat, "realUid", HOFFSET(procstat, realUid), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "effUid", HOFFSET(procstat, effUid), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "realGid", HOFFSET(procstat, realGid), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "effGid", HOFFSET(procstat, effGid), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "flags", HOFFSET(procstat, flags), H5T_NATIVE_UINT);
-    H5Tinsert(type_procstat, "utime", HOFFSET(procstat, utime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "stime", HOFFSET(procstat, stime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "priority", HOFFSET(procstat, priority), H5T_NATIVE_LONG);
-    H5Tinsert(type_procstat, "nice", HOFFSET(procstat, nice), H5T_NATIVE_LONG);
-    H5Tinsert(type_procstat, "numThreads", HOFFSET(procstat, numThreads), H5T_NATIVE_LONG);
-    H5Tinsert(type_procstat, "vsize", HOFFSET(procstat, vsize), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "rss", HOFFSET(procstat, rss), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "rsslim", HOFFSET(procstat, rsslim), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "signal", HOFFSET(procstat, signal), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "blocked", HOFFSET(procstat, blocked), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "sigignore", HOFFSET(procstat, sigignore), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "sigcatch", HOFFSET(procstat, sigcatch), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "rtPriority", HOFFSET(procstat, rtPriority), H5T_NATIVE_UINT);
-    H5Tinsert(type_procstat, "policy", HOFFSET(procstat, policy), H5T_NATIVE_UINT);
-    H5Tinsert(type_procstat, "delayacctBlkIOTicks", HOFFSET(procstat, delayacctBlkIOTicks), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "guestTime", HOFFSET(procstat, guestTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "vmpeak", HOFFSET(procstat, vmpeak), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "rsspeak", HOFFSET(procstat, rsspeak), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "cpusAllowed", HOFFSET(procstat, cpusAllowed), H5T_NATIVE_INT);
-    H5Tinsert(type_procstat, "io_rchar", HOFFSET(procstat, io_rchar), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "io_wchar", HOFFSET(procstat, io_wchar), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "io_syscr", HOFFSET(procstat, io_syscr), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "io_syscw", HOFFSET(procstat, io_syscw), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "io_readBytes", HOFFSET(procstat, io_readBytes), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "io_writeBytes", HOFFSET(procstat, io_writeBytes), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "io_cancelledWriteBytes", HOFFSET(procstat, io_cancelledWriteBytes), H5T_NATIVE_ULLONG);
-    H5Tinsert(type_procstat, "m_size", HOFFSET(procstat, m_size), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "m_resident", HOFFSET(procstat, m_resident), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "m_share", HOFFSET(procstat, m_share), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "m_text", HOFFSET(procstat, m_text), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procstat, "m_data", HOFFSET(procstat, m_data), H5T_NATIVE_ULONG);
-
-    type_procfd = H5Tcreate(H5T_COMPOUND, sizeof(procfd));
-    if (type_procfd < 0) throw ProcIOException("Failed to create type_procfd");
-	H5Tinsert(type_procfd, "identifier", HOFFSET(procfd, identifier), strType_idBuffer);
-	H5Tinsert(type_procfd, "subidentifier", HOFFSET(procfd, subidentifier), strType_idBuffer);
-    H5Tinsert(type_procfd, "pid", HOFFSET(procfd, pid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procfd, "ppid", HOFFSET(procfd, ppid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procfd, "recTime", HOFFSET(procfd, recTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procfd, "recTimeUSec", HOFFSET(procfd, recTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procfd, "startTime", HOFFSET(procfd, startTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procfd, "startTimeUSec", HOFFSET(procfd, startTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procfd, "path", HOFFSET(procfd, path), strType_buffer);
-    H5Tinsert(type_procfd, "fd", HOFFSET(procfd, fd), H5T_NATIVE_UINT);
-    H5Tinsert(type_procfd, "mode", HOFFSET(procfd, mode), H5T_NATIVE_UINT);
-
-    type_procobs = H5Tcreate(H5T_COMPOUND, sizeof(procobs));
-    if (type_procobs < 0) throw ProcIOException("Failed to create type_procobs");
-	H5Tinsert(type_procobs, "identifier", HOFFSET(procobs, identifier), strType_idBuffer);
-	H5Tinsert(type_procobs, "subidentifier", HOFFSET(procobs, subidentifier), strType_idBuffer);
-    H5Tinsert(type_procobs, "pid", HOFFSET(procobs, pid), H5T_NATIVE_UINT);
-    H5Tinsert(type_procobs, "recTime", HOFFSET(procobs, recTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procobs, "recTimeUSec", HOFFSET(procobs, recTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procobs, "startTime", HOFFSET(procobs, startTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_procobs, "startTimeUSec", HOFFSET(procobs, startTimeUSec), H5T_NATIVE_ULONG);
-
-    type_netstat = H5Tcreate(H5T_COMPOUND, sizeof(netstat));
-    if (type_netstat < 0) throw ProcIOException("Failed to create type_netstat");
-	H5Tinsert(type_netstat, "identifier", HOFFSET(netstat, identifier), strType_idBuffer);
-	H5Tinsert(type_netstat, "subidentifier", HOFFSET(netstat, subidentifier), strType_idBuffer);
-    H5Tinsert(type_netstat, "recTime", HOFFSET(netstat, recTime), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "recTimeUSec", HOFFSET(netstat, recTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "local_address", HOFFSET(netstat, local_address), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "local_port", HOFFSET(netstat, local_port), H5T_NATIVE_UINT);
-    H5Tinsert(type_netstat, "remote_address", HOFFSET(netstat, remote_address), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "remote_port", HOFFSET(netstat, remote_port), H5T_NATIVE_UINT);
-    H5Tinsert(type_netstat, "state", HOFFSET(netstat, state), H5T_NATIVE_USHORT);
-    H5Tinsert(type_netstat, "tx_queue", HOFFSET(netstat, tx_queue), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "rx_queue", HOFFSET(netstat, rx_queue), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "tr", HOFFSET(netstat, tr), H5T_NATIVE_USHORT);
-    H5Tinsert(type_netstat, "ticks_expire", HOFFSET(netstat, ticks_expire), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "retransmit", HOFFSET(netstat, retransmit), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "uid", HOFFSET(netstat, uid), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "timeout", HOFFSET(netstat, timeout), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "inode", HOFFSET(netstat, inode), H5T_NATIVE_ULONG);
-    H5Tinsert(type_netstat, "refCount", HOFFSET(netstat, refCount), H5T_NATIVE_UINT);
-    H5Tinsert(type_netstat, "type", HOFFSET(netstat, type), H5T_NATIVE_INT);
 }
 
-unsigned int ProcHDF5IO::write_procstat(procstat* start_pointer, unsigned int start_id, int count) {
-    if (!override_context) {
-	    for (int i = 0; i < count; i++) {
-		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	    }
-    }
-    return write_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count, statBlockSize);
-}
+template <class pmType>
+size_t Hdf5Io::write(pmType *start, pmType *end) {
 
-unsigned int ProcHDF5IO::write_procdata(procdata* start_pointer, unsigned int start_id, int count) {
-    if (!override_context) {
-	    for (int i = 0; i < count; i++) {
-		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	    }
-    }
-    return write_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count, dataBlockSize);
-}
 
-unsigned int ProcHDF5IO::write_procfd(procfd* start_pointer, unsigned int start_id, int count) {
-    if (!override_context) {
-	    for (int i = 0; i < count; i++) {
-		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	    }
-    }
-    return write_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count, fdBlockSize);
-}
-
-unsigned int ProcHDF5IO::write_procobs(procobs* start_pointer, unsigned int start_id, int count) {
-    if (!override_context) {
-	    for (int i = 0; i < count; i++) {
-		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	    }
-    }
-    return write_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count, obsBlockSize);
-}
-
-unsigned int ProcHDF5IO::write_netstat(netstat* start_pointer, unsigned int start_id, int count) {
-    if (!override_context) {
-	    for (int i = 0; i < count; i++) {
-		    snprintf(start_pointer[i].identifier, IDENTIFIER_SIZE, "%s", identifier.c_str());
-		    snprintf(start_pointer[i].subidentifier, IDENTIFIER_SIZE, "%s", subidentifier.c_str());
-	    }
-    }
-    return write_dataset(TYPE_NETSTAT, type_netstat, (void*) start_pointer, start_id, count, netBlockSize);
-}
-
-unsigned int ProcHDF5IO::read_procstat(procstat* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset(TYPE_PROCSTAT, type_procstat, (void*) start_pointer, start_id, count);
-}
-
-unsigned int ProcHDF5IO::read_procdata(procdata* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset(TYPE_PROCDATA, type_procdata, (void*) start_pointer, start_id, count);
-}
-
-unsigned int ProcHDF5IO::read_procfd(procfd* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset(TYPE_PROCFD, type_procfd, (void*) start_pointer, start_id, count);
-}
-
-unsigned int ProcHDF5IO::read_procobs(procobs* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset(TYPE_PROCOBS, type_procobs, (void*) start_pointer, start_id, count);
-}
-
-unsigned int ProcHDF5IO::read_netstat(netstat* start_pointer, unsigned int start_id, unsigned int count) {
-    return read_dataset(TYPE_NETSTAT, type_netstat, (void*) start_pointer, start_id, count);
-}
-
-unsigned int ProcHDF5IO::read_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, unsigned int count) {
-    if (hdf5Segment == nullptr) {
-        return 0;
-    }
-	hdf5Segment->lastUpdate = time(NULL);
-
-    hsize_t targetRecords = 0;
-    hsize_t localRecords = count;
-    hsize_t remoteStart = start_id > 0 ? start_id - 1 : 0;
-    hsize_t localStart = 0;
-    hsize_t nRecords = 0;
-
-	hid_t ds = -1;
-    if (recordType == TYPE_PROCSTAT) {
-        ds = hdf5Segment->procstatDS;
-    } else if (recordType == TYPE_PROCDATA) {
-        ds = hdf5Segment->procdataDS;
-    } else if (recordType == TYPE_PROCFD) {
-        ds = hdf5Segment->procfdDS;
-    } else if (recordType == TYPE_PROCOBS) {
-        ds = hdf5Segment->procobsDS;
-    } else if (recordType == TYPE_NETSTAT) {
-        ds = hdf5Segment->netstatDS;
-    }
-    hid_t dataspace = H5Dget_space(ds);
-    hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
-    herr_t status = 0;
-
-    //int rank = H5Sget_simple_extent_ndims(dataspace);
-    status = H5Sget_simple_extent_dims(dataspace, &nRecords, NULL);
-    if (remoteStart < nRecords) {
-        targetRecords = count < (nRecords - remoteStart) ? count : (nRecords - remoteStart);
-
-        status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, &remoteStart, H5P_DEFAULT, &targetRecords, H5P_DEFAULT);
-        status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, &localStart, H5P_DEFAULT, &localRecords, H5P_DEFAULT);
-        status = H5Dread(ds, type, H5S_ALL, dataspace, H5P_DEFAULT, start_pointer);
-    }
-
-    H5Sclose(dataspace);
-    H5Sclose(memspace);
-
-    return (int) targetRecords;
-}
-
-unsigned int ProcHDF5IO::write_dataset(ProcRecordType recordType, hid_t type, void* start_pointer, unsigned int start_id, int count, int chunkSize) {
-    hsize_t rank = 1;
-    hsize_t maxRecords = 0;
-	hsize_t startRecord = 0;
-    hsize_t targetRecords = 0;
-    hsize_t newRecords = count;
-	unsigned int old_nRecords = 0;
-
-	bool append = start_id == 0;
-	startRecord = start_id > 0 ? start_id - 1 : 0;
-
-	hid_t ds = -1;
-    hid_t size_attribute = -1;
-    unsigned int *nRecords = NULL;
-    if (recordType == TYPE_PROCSTAT) {
-       ds = hdf5Segment->procstatDS;
-       size_attribute = hdf5Segment->procstatSizeID;
-       nRecords = &(hdf5Segment->procstatSize);
-    } else if (recordType == TYPE_PROCDATA) {
-       ds = hdf5Segment->procdataDS;
-       size_attribute = hdf5Segment->procdataSizeID;
-       nRecords = &(hdf5Segment->procdataSize);
-    } else if (recordType == TYPE_PROCFD) {
-       ds = hdf5Segment->procfdDS;
-       size_attribute = hdf5Segment->procfdSizeID;
-       nRecords = &(hdf5Segment->procfdSize);
-    } else if (recordType == TYPE_PROCOBS) {
-       ds = hdf5Segment->procobsDS;
-       size_attribute = hdf5Segment->procobsSizeID;
-       nRecords = &(hdf5Segment->procobsSize);
-    } else if (recordType == TYPE_NETSTAT) {
-        ds = hdf5Segment->netstatDS;
-        size_attribute = hdf5Segment->netstatSizeID;
-        nRecords = &(hdf5Segment->netstatSize);
-    }
-    hid_t filespace;
-    herr_t status;
-
-	if (nRecords == NULL) {
-        char errBuffer[1024];
-        snprintf(errBuffer, 1024, "Couldn't identify dataset size records (recordType %d invalid)", (int)recordType);
-        throw ProcIOException(errBuffer);
-	}
-
-	if (hdf5Segment == nullptr) return 0;
-	hdf5Segment->lastUpdate = time(NULL);
-
-    hid_t dataspace = H5Dget_space(ds);
-    status = H5Sget_simple_extent_dims(dataspace, &maxRecords, NULL);
-    H5Sclose(dataspace);
-
-	if (append) startRecord = *nRecords;
-    targetRecords = startRecord + count > maxRecords ? startRecord + count : maxRecords;
-
-    status = H5Dset_extent(ds, &targetRecords);
-    filespace = H5Dget_space(ds);
-
-    status = H5Sselect_hyperslab(filespace, H5S_SELECT_SET, &startRecord, NULL, &newRecords, NULL);
-    dataspace = H5Screate_simple(rank, &newRecords, NULL);
-
-    H5Dwrite(ds, type, dataspace, filespace, H5P_DEFAULT, start_pointer);
-
-	old_nRecords = *nRecords;
-	*nRecords = startRecord + count > *nRecords ? startRecord + count : *nRecords;
-
-	H5Awrite(size_attribute, H5T_NATIVE_UINT, nRecords);
-
-	start_id = startRecord+1;
-
-    H5Sclose(filespace);
-    H5Sclose(dataspace);
-    return start_id;
-}
 
 void ProcHDF5IO::flush() {
 	H5Fflush(file, H5F_SCOPE_GLOBAL);
@@ -1338,7 +1074,7 @@ bool ProcHDF5IO::get_hosts(vector<string>& hosts) {
 
 /* metadata_set_string
    writes string-type metadata into the root group of the HDF5 file */
-bool ProcHDF5IO::metadata_set_string(const char *ident, const char *value) {
+bool Hdf5Io::metadataSetString(const char *ident, const char *value) {
     hid_t attr = -1;
     hid_t ds = H5Screate(H5S_SCALAR);
     herr_t status;
@@ -1354,7 +1090,7 @@ bool ProcHDF5IO::metadata_set_string(const char *ident, const char *value) {
     return status >= 0;
 }
 
-bool ProcHDF5IO::metadata_set_uint(const char *ident, unsigned long value) {
+bool Hdf5Io::metadataSetUint(const char *ident, unsigned long value) {
     hid_t attr = -1;
     hid_t ds = H5Screate(H5S_SCALAR);
     herr_t status;
@@ -1369,7 +1105,7 @@ bool ProcHDF5IO::metadata_set_uint(const char *ident, unsigned long value) {
     return status >= 0;
 }
 
-bool ProcHDF5IO::metadata_get_string(const char *ident, char **value) {
+bool Hdf5Io::metadataGetString(const char *ident, char **value) {
     hid_t attr = -1;
     hid_t type = -1;
     herr_t status;
@@ -1385,7 +1121,7 @@ bool ProcHDF5IO::metadata_get_string(const char *ident, char **value) {
     return status > 0;
 }
 
-bool ProcHDF5IO::metadata_get_uint(const char *ident, unsigned long *value) {
+bool Hdf5Io::metadataGetUint(const char *ident, unsigned long *value) {
     hid_t attr = -1;
     hid_t type = -1;
     herr_t status;
@@ -1403,6 +1139,7 @@ bool ProcHDF5IO::metadata_get_uint(const char *ident, unsigned long *value) {
 
 #endif
 
+/*
 int ProcTextIO::fill_buffer() {
     if (sPtr != NULL) {
         bcopy(buffer, sPtr, sizeof(char)*(ptr-sPtr));
@@ -1731,5 +1468,6 @@ ProcTextIO::~ProcTextIO() {
 		fclose(filePtr);
 	}
 }
+*/
 
 }
