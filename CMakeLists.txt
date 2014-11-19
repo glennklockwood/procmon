@@ -34,7 +34,7 @@ IF ( USE_BOOST )
     SET( Boost_USE_STATIC_LIBS ON )
     SET( Boost_USE_MULTITHREADED OFF )
     SET( Boost_USE_STATIC_RUNTIME ON )
-    FIND_PACKAGE( Boost 1.50.0 COMPONENTS program_options )
+    FIND_PACKAGE( Boost 1.50.0 COMPONENTS program_options filesystem system )
 ENDIF ( USE_BOOST )
 
 ## get a private and patched installation of rabbitmq 0.4.1

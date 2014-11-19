@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <syslog.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
@@ -96,6 +97,61 @@ static bool cmp_procfd_ident(const procfd &a, const procfd &b) {
     if (cmp < 0) return true;
     if (cmp > 0) return false;
     return a.pid < b.pid;
+}
+
+ostream& operator<<(ostream& os, const ProcmonConfig& pc) {
+    os << "Procmon Configuration:" << endl
+        << "\ttargetPPid: " << pc.targetPPid << endl
+        << "\tfrequency: " << pc.frequency << endl
+        << "\tinitialFrequency: " << pc.initialFrequency << endl
+        << "\tinitialPhase: " << pc.initialPhase << endl
+        << "\tdaemonize: " << pc.daemonize << endl
+        << "\tverbose: " << pc.verbose << endl
+        << "\tcraylock: " << pc.craylock << endl
+        << "\tdebug: " << pc.debug << endl
+        << "\tmaxfd: " << pc.maxfd << endl
+#ifdef SECURED
+        << "\ttarget_uid: " << pc.target_uid << endl
+        << "\ttarget_gid: " << pc.target_gid << endl
+        << "\tuser: " << pc.user << endl
+        << "\tgroup: " << pc.group << endl
+#endif
+        << "\tsystem: " << pc.system << endl
+        << "\tidentifier: " << pc.identifier << endl
+        << "\tsubidentifier: " << pc.subidentifier << endl
+        << "\tidentifier_env: " << pc.identifier_env << endl
+        << "\tsubidentifier_env: " << pc.subidentifier_env << endl
+        << "\tgid_range_min: " << pc.gid_range_min << endl
+        << "\tgid_range_max: " << pc.gid_range_max << endl
+        << "\ttgtGid: " << pc.tgtGid << endl
+        << "\ttgtSid: " << pc.tgtSid << endl
+        << "\ttgtPgid: " << pc.tgtPgid << endl
+        << "\tclockTicksPerSec: " << pc.clockTicksPerSec << endl
+        << "\tpageSize: " << pc.pageSize << endl
+        << "\tboottime: " << pc.boottime << endl
+        << "\thostname: " << pc.hostname << endl
+        << "\toutputFlags: " << pc.outputFlags << endl
+        << "\toutputTextFilename: " << pc.outputTextFilename << endl
+#ifdef USE_HDF5
+        << "\toutputHDF5Filename: " << pc.outputHDF5Filename << endl
+#endif
+        << "\tnoOutput: " << pc.noOutput << endl
+        << "\tpidfile: " << pc.pidfile << endl
+#ifdef USE_AMQP
+        << "\tmqServer: " << pc.mqServer << endl
+        << "\tmqServers:" << endl;
+    for (const string &server: pc.mqServers) {
+        cout << "\t\t" << server << endl;
+    }
+    cout << "\tmqPort: " << pc.mqPort << endl
+        << "\tmqVHost: " << pc.mqVHost << endl
+        << "\tmqUser: " << pc.mqUser << endl
+        << "\tmqPassword: " << pc.mqPassword << endl
+        << "\tmqExchangeName: " << pc.mqExchangeName << endl
+        << "\tmqFrameSize: " << pc.mqFrameSize << endl
+    ;
+#endif
+    return os;
 }
 
 int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
@@ -714,7 +770,7 @@ int searchProcFs(ProcmonConfig *config) {
     bool procEnv = false;
     int readStatFirst = (config->tgtSid > 0 || config->tgtPgid > 0) ? 1 : 0;
 
-    if (config->check_mpi != NULL || config->identifier_env != NULL || config->subidentifier_env != NULL) {
+    if (config->identifier_env != "" || config->subidentifier_env != "") {
         procEnv = true;
     }
 
@@ -933,21 +989,12 @@ int searchProcFs(ProcmonConfig *config) {
 
         if (procEnv) {
             parseProcEnvironment(tgt_pid, env);
-        }
-
-        if (config->identifier_env != NULL && (it = env.find(config->identifier_env)) != env.end()) {
-            my_identifier = (*it).second;
-        }
-        if (config->subidentifier_env != NULL && (it = env.find(config->subidentifier_env)) != env.end()) {
-            my_subidentifier = (*it).second;
-        }
-        if (config->check_mpi != NULL) {
-            int mpi_rank = -1;
-            if ((it = env.find(config->check_mpi)) != env.end()) {
-                const char *rank_str = (*it).second.c_str();
-                mpi_rank = atoi(rank_str);
+            if ((it = env.find(config->identifier_env)) != env.end()) {
+                my_identifier = (*it).second;
             }
-            statData->rtPriority = mpi_rank;
+            if ((it = env.find(config->subidentifier_env)) != env.end()) {
+                my_subidentifier = (*it).second;
+            }
         }
 
         snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
@@ -1250,7 +1297,12 @@ void writeOutput(ProcmonConfig *config, ProcIO *output, vector<T>& data, unsigne
 int main(int argc, char** argv) {
     int retCode = 0;
     struct timeval startTime;
-    ProcmonConfig *config = new ProcmonConfig(argc, argv);
+    ProcmonConfig *config = new ProcmonConfig();
+    config->parseOptions(argc, argv);
+    if (config->verbose) {
+        const ProcmonConfig &pc = *config;
+        cout << pc << endl;
+    }
     if (getuid() == 0) {
 #ifdef SECURED
         if (config->target_uid <= 0) {
