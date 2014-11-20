@@ -10,6 +10,7 @@
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/bind.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -58,8 +59,20 @@ class ProcmonConfig {
     protected:
     po::options_description procmonOptions;
     string userConfigFile;
+    int syslog_facility;
+    int syslog_priority_min;
+
+    void setSyslogFacility(const string &facility);
+    void setSyslogPriorityMin(const string &priority);
 
     public:
+    inline const int getSyslogFacility() {
+        return syslog_facility;
+    }
+    inline const int getSyslogPriorityMin() {
+        return syslog_priority_min;
+    }
+
     /* Configurable monitoring options */
     int targetPPid;
     int frequency;
@@ -175,11 +188,21 @@ class ProcmonConfig {
         basic.add_options()
             ("version", "Print version information")
             ("help,h", "Print help message")
-            ("verbose,v", "Print extra (debugging) information")
+            ("verbose,v", "Print extra information (syslog mirrored to stderr)")
             ("daemonize,d", "Daemonize the procmon process")
             ("craylock,c", "Create and lock /tmp/procmon; exit if no lock")
-            ("config.file", po::value<string>(&userConfigFile)->default_value(""), "Configuration"
-                " file to read options from")
+            ("config.file", po::value<string>(&userConfigFile)
+                ->default_value(""), "Configuration file from which to read "
+                "options.")
+            ("syslog.facility", po::value<string>()
+                ->notifier(boost::bind(&ProcmonConfig::setSyslogFacility, this, _1))
+                ->default_value("USER"), "Name of syslog facility to use for"
+                " info/error output. Supports: DAEMON, USER, LOCAL0 - LOCAL7")
+            ("syslog.level.min", po::value<string>()
+                ->notifier(boost::bind(&ProcmonConfig::setSyslogPriorityMin, this, _1))
+                ->default_value("NOTICE"), "Minimum level of log data to send."
+                " Supports: EMERG, ALERT, CRIT, ERR, WARNING, NOTICE, INFO, "
+                " DEBUG" )
         ;
         procmonOptions.add(basic);
 
@@ -481,6 +504,8 @@ class ProcmonConfig {
         }
     }
 
+    const string getContext();
+
     void version() {
         cout << "Procmon " << PROCMON_VERSION;
 #ifdef SECURED
@@ -492,6 +517,8 @@ class ProcmonConfig {
 
     friend ostream& operator<<(ostream&, ProcmonConfig&);
 };
+
+
 
 ostream& operator<<(ostream& os, const ProcmonConfig& pc);
 

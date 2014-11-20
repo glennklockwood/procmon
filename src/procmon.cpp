@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <boost/algorithm/string.hpp>
 
 #ifdef SECURED
 #include <pthread.h>
@@ -1089,6 +1090,76 @@ static void daemonize() {
     freopen("/dev/null", "w", stderr);
 }
 
+const string ProcmonConfig::getContext() {
+    string context;
+    context = hostname + "." + identifier + "." + subidentifier + ".*";
+    return context;
+}
+
+void ProcmonConfig::setSyslogFacility(const string& _facility) {
+    string facility(_facility);
+    boost::to_upper(facility);
+    int value = -1;
+    if (facility == "DAEMON") {
+        value = LOG_DAEMON;
+    } else if (facility == "USER") {
+        value = LOG_USER;
+    } else if (facility.substr(0, 5) == "LOCAL") {
+        int number = atoi(facility.substr(5).c_str());
+        switch (number) {
+            case 0: value = LOG_LOCAL0; break;
+            case 1: value = LOG_LOCAL1; break;
+            case 2: value = LOG_LOCAL2; break;
+            case 3: value = LOG_LOCAL3; break;
+            case 4: value = LOG_LOCAL4; break;
+            case 5: value = LOG_LOCAL5; break;
+            case 6: value = LOG_LOCAL6; break;
+            case 7: value = LOG_LOCAL7; break;
+            default: value = -1; break;
+        }
+    }
+    syslog_facility = value;
+}
+
+void ProcmonConfig::setSyslogPriorityMin(const string& _priority) {
+    string priority(_priority);
+    boost::to_upper(priority);
+    int value = -1;
+    if (priority == "EMERG") {
+        value = LOG_EMERG;
+    } else if (priority == "ALERT") {
+        value = LOG_ALERT;
+    } else if (priority == "CRIT") {
+        value = LOG_CRIT;
+    } else if (priority == "ERR") {
+        value = LOG_ERR;
+    } else if (priority == "WARNING") {
+        value = LOG_WARNING;
+    } else if (priority == "NOTICE") {
+        value = LOG_NOTICE;
+    } else if (priority == "INFO") {
+        value = LOG_INFO;
+    } else if (priority == "DEBUG") {
+        value = LOG_DEBUG;
+    }
+    syslog_priority_min = value;
+}
+
+void setupSyslog(ProcmonConfig &pc) {
+    const int facility = pc.getSyslogFacility();
+    if (facility < 0) return;
+    int options = LOG_PID;
+    if (pc.verbose) {
+        options |= LOG_PERROR;
+    }
+    openlog("procmon", options, facility);
+
+    const int level = pc.getSyslogPriorityMin();
+    if (level >= 0) {
+        setlogmask(LOG_UPTO(level));
+    }
+}
+
 #ifdef SECURED
 void display_perms_ownership(const char *thread_id) {
     gid_t curr_groups[512];
@@ -1299,6 +1370,9 @@ int main(int argc, char** argv) {
     struct timeval startTime;
     ProcmonConfig *config = new ProcmonConfig();
     config->parseOptions(argc, argv);
+    setupSyslog(*config);
+    syslog(LOG_NOTICE, "procmon starting with context %s",
+            config->getContext().c_str());
     if (config->verbose) {
         const ProcmonConfig &pc = *config;
         cout << pc << endl;
