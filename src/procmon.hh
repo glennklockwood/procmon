@@ -59,6 +59,7 @@ class ProcmonConfig {
     protected:
     po::options_description procmonOptions;
     string userConfigFile;
+    int maxIterations;
     int syslog_facility;
     int syslog_priority_min;
 
@@ -66,10 +67,10 @@ class ProcmonConfig {
     void setSyslogPriorityMin(const string &priority);
 
     public:
-    inline const int getSyslogFacility() {
+    inline const int getSyslogFacility() const {
         return syslog_facility;
     }
-    inline const int getSyslogPriorityMin() {
+    inline const int getSyslogPriorityMin() const {
         return syslog_priority_min;
     }
 
@@ -81,7 +82,6 @@ class ProcmonConfig {
     bool daemonize;
     bool verbose;
     bool craylock;
-	int debug;
     int maxfd;
 #ifdef SECURED
     int target_uid;
@@ -141,12 +141,12 @@ class ProcmonConfig {
         daemonize = false;
         verbose = false;
         craylock = false;
-		debug = 0;
         outputFlags = DEFAULT_OUTPUT_FLAGS;
         tgtGid = 0;
         maxfd = 0;
         tgtSid = 0;
         tgtPgid = 0;
+        maxIterations = 0;
 #ifdef SECURED
         target_uid = -1;
         target_gid = -1;
@@ -227,8 +227,8 @@ class ProcmonConfig {
 #endif
             ("pid,q", po::value<string>(&pidfile)->default_value(""), "filename for "
                 "optional pid file")
-            ("debug,D", po::value<int>(&debug)->default_value(0), "debugging "
-                "level")
+            ("debug.maxiterations", po::value<int>(&maxIterations)
+                ->default_value(0), "Debugging: max iterations to complete")
 #ifdef SECURED
             ("user,u", po::value<string>(&user)->default_value(""), "username/uid to "
                 "setuid")
@@ -314,9 +314,6 @@ class ProcmonConfig {
         po::variables_map vm;
         try {
             po::store(po::command_line_parser(argc, argv).options(procmonOptions).run(), vm);
-            cout << "userConfigFile: " << userConfigFile << endl;
-            cout << vm.count("config.file") << endl;
-            cout << (vm["config.file"].as<string>()) << endl;
 
             if (vm.count("config.file") > 0) {
                 userConfigFile = vm["config.file"].as<string>();
@@ -449,11 +446,6 @@ class ProcmonConfig {
                 exit(1);
             }
         }
-        if (debug < 0) {
-            cerr << "debug level must be a non-negative integer" << endl;
-            cerr << procmonOptions << endl;
-            exit(1);
-        }
 
         if (outputTextFilename != "") {
             outputFlags |= OUTPUT_TYPE_TEXT;
@@ -502,6 +494,10 @@ class ProcmonConfig {
                 }
             }
         }
+    }
+
+    inline const int getMaxIterations() const {
+        return maxIterations;
     }
 
     const string getContext();

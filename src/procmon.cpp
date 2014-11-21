@@ -109,7 +109,7 @@ ostream& operator<<(ostream& os, const ProcmonConfig& pc) {
         << "\tdaemonize: " << pc.daemonize << endl
         << "\tverbose: " << pc.verbose << endl
         << "\tcraylock: " << pc.craylock << endl
-        << "\tdebug: " << pc.debug << endl
+        << "\tmaxIterations: " << pc.getMaxIterations() << endl
         << "\tmaxfd: " << pc.maxfd << endl
 #ifdef SECURED
         << "\ttarget_uid: " << pc.target_uid << endl
@@ -792,7 +792,7 @@ int searchProcFs(ProcmonConfig *config) {
         if (tgt_pid <= 0) {
             continue;
         }
-        if (pids.size() < npids) {
+        if (pids.size() <= npids) {
             pids.resize(npids*2,0);
         }
         pids[npids++] = tgt_pid;
@@ -1035,9 +1035,7 @@ int searchProcFs(ProcmonConfig *config) {
         }
     }
 
-    if (config->debug) {
-        printf("ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
-    }
+    syslog(LOG_DEBUG, "ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
 
     return ntargets;
 }
@@ -1477,6 +1475,8 @@ int main(int argc, char** argv) {
         std::cout << "boottime        : " << config->boottime << std::endl;
     }
 
+    int iterations = 0;
+
     for ( ; ; ) {
         struct timeval cycleTime;
         gettimeofday(&cycleTime, NULL);
@@ -1501,38 +1501,6 @@ int main(int argc, char** argv) {
             cleanUpFlag = 1;
         } else  {
             for (std::vector<ProcIO*>::iterator iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
-                /*
-                const char *last_ident = NULL;
-                const char *last_subident = NULL;
-                int sidx = 0;
-                int i = 0;
-                for (i = 0; i < global_procStat.count; i++) {
-                    procstat *temp_ps = &(global_procStat.data[i]);
-                    if (last_ident == NULL || last_subident == NULL
-                        || strncmp(temp_ps->identifier, last_ident, IDENTIFIER_SIZE) != 0
-                        || strncmp(temp_ps->subidentifier, last_subident, IDENTIFIER_SIZE) != 0)
-                    {
-                        last_ident = temp_ps->identifier;
-                        last_subident = temp_ps->subidentifier;
-                        if (i != 0) {
-                            (*iter)->set_context(config->hostname, global_procStat.data[sidx].identifier, global_procStat.data[sidx].subidentifier);
-                            (*iter)->write_procstat(&(global_procStat.data[sidx]), i - sidx);
-                        }
-                        sidx = i;
-                    }
-                }
-                if (i > 0) {
-                    (*iter)->set_context(config->hostname, global_procStat.data[sidx].identifier, global_procStat.data[sidx].subidentifier);
-                    (*iter)->write_procstat(&(global_procStat.data[sidx]), i - sidx);
-                }
-
-                if (global_procData.count > 0) {
-                    (*iter)->write_procdata(global_procData.data, global_procData.count);
-                }
-                if (global_procFD.count > 0) {
-                    (*iter)->write_procfd(global_procFD.data, global_procFD.count);
-                }
-                */
                 writeOutput(config, *iter, global_procStat, write_procstat);
                 writeOutput(config, *iter, global_procData, write_procdata);
                 writeOutput(config, *iter, global_procFD, write_procfd);
@@ -1564,10 +1532,16 @@ int main(int argc, char** argv) {
         } else {
             break;
         }
+        if (++iterations == config->getMaxIterations()) {
+            // maxIterations defaults to 0, so look for exact
+            // match
+            break;
+        }
     }
     for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {
         delete *ptr;
     }
+    outputMethods.resize(0);
     if (config->pidfile.length() > 0) {
         unlink(config->pidfile.c_str());
     }
