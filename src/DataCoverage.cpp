@@ -84,11 +84,14 @@ struct ObsData {
     time_t end;
     unsigned int nObs;
     unordered_map<ProcIdent, int> *procMap;
+    vector<time_t> obsTimes;
+    int gap;
 
     ObsData(const string &_host, const string &_messageType, const time_t _start, const time_t _end, unsigned int _nObs):
         host(_host), messageType(_messageType), start(_start), end(_end), nObs(_nObs)
     {
         procMap = new unordered_map<ProcIdent, int>();
+        gap = 0;
     }
     ~ObsData() {
     }
@@ -111,8 +114,20 @@ struct ObsData {
                     (*procMap)[it.first] += it.second;
                 }
             }
+            obsTimes.insert(obsTimes.end(), other.obsTimes.begin(), other.obsTimes.end());
         }
     }
+
+    void calculateGap() {
+        sort(obsTimes.begin(), obsTimes.end());
+        for (size_t idx = 1; idx < obsTimes.size(); ++idx) {
+            int l_gap = obsTimes[idx] - obsTimes[idx-1];
+            if (idx == 1 || l_gap > gap) {
+                gap = l_gap;
+            }
+        }
+    }
+
     const bool operator<(const ObsData &other) const {
         int cmp1 = strcmp(host.c_str(), other.host.c_str());
         if (cmp1 < 0) return true;
@@ -148,7 +163,7 @@ ostream& operator<<(ostream &os, const Ident &id) {
 }
 
 ostream& operator<<(ostream &os, const ObsData &obs) {
-    os << obs.host << "," << obs.messageType << "," << obs.start << "," << obs.end << "," << obs.nObs << "," << obs.procMap->size();
+    os << obs.host << "," << obs.messageType << "," << obs.start << "," << obs.end << "," << obs.nObs << "," << obs.procMap->size() << "," << obs.gap;
     return os;
 }
 
@@ -240,6 +255,7 @@ void set_summary(const string &host, const string &messageType, unordered_map<Id
             vector<ObsData> &obsvec = *vec;
             obsvec.emplace_back(host, messageType, data[idx].recTime, data[idx].recTime, 1);
             currObs = &(obsvec.back());
+            currObs->obsTimes.push_back(data[idx].recTime);
         }
         if (currObs != NULL) {
             ProcIdent key(host, data[idx].pid, data[idx].startTime);
@@ -335,6 +351,9 @@ int main(int argc, char **argv) {
         delete it.second;
 
         sort(final->begin(), final->end());
+        for (ObsData &obs: *final) {
+            obs.calculateGap();
+        }
         for (const ObsData &obs: *final) {
             cout << key << "," << obs << endl;
         }
