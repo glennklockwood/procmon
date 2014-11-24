@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <syslog.h>
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
@@ -28,6 +29,7 @@
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
+#include <boost/algorithm/string.hpp>
 
 #ifdef SECURED
 #include <pthread.h>
@@ -96,6 +98,61 @@ static bool cmp_procfd_ident(const procfd &a, const procfd &b) {
     if (cmp < 0) return true;
     if (cmp > 0) return false;
     return a.pid < b.pid;
+}
+
+ostream& operator<<(ostream& os, const ProcmonConfig& pc) {
+    os << "Procmon Configuration:" << endl
+        << "\ttargetPPid: " << pc.targetPPid << endl
+        << "\tfrequency: " << pc.frequency << endl
+        << "\tinitialFrequency: " << pc.initialFrequency << endl
+        << "\tinitialPhase: " << pc.initialPhase << endl
+        << "\tdaemonize: " << pc.daemonize << endl
+        << "\tverbose: " << pc.verbose << endl
+        << "\tcraylock: " << pc.craylock << endl
+        << "\tmaxIterations: " << pc.getMaxIterations() << endl
+        << "\tmaxfd: " << pc.maxfd << endl
+#ifdef SECURED
+        << "\ttarget_uid: " << pc.target_uid << endl
+        << "\ttarget_gid: " << pc.target_gid << endl
+        << "\tuser: " << pc.user << endl
+        << "\tgroup: " << pc.group << endl
+#endif
+        << "\tsystem: " << pc.system << endl
+        << "\tidentifier: " << pc.identifier << endl
+        << "\tsubidentifier: " << pc.subidentifier << endl
+        << "\tidentifier_env: " << pc.identifier_env << endl
+        << "\tsubidentifier_env: " << pc.subidentifier_env << endl
+        << "\tgid_range_min: " << pc.gid_range_min << endl
+        << "\tgid_range_max: " << pc.gid_range_max << endl
+        << "\ttgtGid: " << pc.tgtGid << endl
+        << "\ttgtSid: " << pc.tgtSid << endl
+        << "\ttgtPgid: " << pc.tgtPgid << endl
+        << "\tclockTicksPerSec: " << pc.clockTicksPerSec << endl
+        << "\tpageSize: " << pc.pageSize << endl
+        << "\tboottime: " << pc.boottime << endl
+        << "\thostname: " << pc.hostname << endl
+        << "\toutputFlags: " << pc.outputFlags << endl
+        << "\toutputTextFilename: " << pc.outputTextFilename << endl
+#ifdef USE_HDF5
+        << "\toutputHDF5Filename: " << pc.outputHDF5Filename << endl
+#endif
+        << "\tnoOutput: " << pc.noOutput << endl
+        << "\tpidfile: " << pc.pidfile << endl
+#ifdef USE_AMQP
+        << "\tmqServer: " << pc.mqServer << endl
+        << "\tmqServers:" << endl;
+    for (const string &server: pc.mqServers) {
+        cout << "\t\t" << server << endl;
+    }
+    cout << "\tmqPort: " << pc.mqPort << endl
+        << "\tmqVHost: " << pc.mqVHost << endl
+        << "\tmqUser: " << pc.mqUser << endl
+        << "\tmqPassword: " << pc.mqPassword << endl
+        << "\tmqExchangeName: " << pc.mqExchangeName << endl
+        << "\tmqFrameSize: " << pc.mqFrameSize << endl
+    ;
+#endif
+    return os;
 }
 
 int parseProcStat(int pid, procstat* statData, procdata* procData, time_t boottime, long clockTicksPerSec) {
@@ -714,7 +771,7 @@ int searchProcFs(ProcmonConfig *config) {
     bool procEnv = false;
     int readStatFirst = (config->tgtSid > 0 || config->tgtPgid > 0) ? 1 : 0;
 
-    if (config->check_mpi != NULL || config->identifier_env != NULL || config->subidentifier_env != NULL) {
+    if (config->identifier_env != "" || config->subidentifier_env != "") {
         procEnv = true;
     }
 
@@ -735,7 +792,7 @@ int searchProcFs(ProcmonConfig *config) {
         if (tgt_pid <= 0) {
             continue;
         }
-        if (pids.size() < npids) {
+        if (pids.size() <= npids) {
             pids.resize(npids*2,0);
         }
         pids[npids++] = tgt_pid;
@@ -933,21 +990,12 @@ int searchProcFs(ProcmonConfig *config) {
 
         if (procEnv) {
             parseProcEnvironment(tgt_pid, env);
-        }
-
-        if (config->identifier_env != NULL && (it = env.find(config->identifier_env)) != env.end()) {
-            my_identifier = (*it).second;
-        }
-        if (config->subidentifier_env != NULL && (it = env.find(config->subidentifier_env)) != env.end()) {
-            my_subidentifier = (*it).second;
-        }
-        if (config->check_mpi != NULL) {
-            int mpi_rank = -1;
-            if ((it = env.find(config->check_mpi)) != env.end()) {
-                const char *rank_str = (*it).second.c_str();
-                mpi_rank = atoi(rank_str);
+            if ((it = env.find(config->identifier_env)) != env.end()) {
+                my_identifier = (*it).second;
             }
-            statData->rtPriority = mpi_rank;
+            if ((it = env.find(config->subidentifier_env)) != env.end()) {
+                my_subidentifier = (*it).second;
+            }
         }
 
         snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
@@ -987,9 +1035,7 @@ int searchProcFs(ProcmonConfig *config) {
         }
     }
 
-    if (config->debug) {
-        printf("ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
-    }
+    syslog(LOG_DEBUG, "ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
 
     return ntargets;
 }
@@ -1040,6 +1086,76 @@ static void daemonize() {
     freopen("/dev/null", "r", stdin);
     freopen("/dev/null", "w", stdout);
     freopen("/dev/null", "w", stderr);
+}
+
+const string ProcmonConfig::getContext() {
+    string context;
+    context = hostname + "." + identifier + "." + subidentifier + ".*";
+    return context;
+}
+
+void ProcmonConfig::setSyslogFacility(const string& _facility) {
+    string facility(_facility);
+    boost::to_upper(facility);
+    int value = -1;
+    if (facility == "DAEMON") {
+        value = LOG_DAEMON;
+    } else if (facility == "USER") {
+        value = LOG_USER;
+    } else if (facility.substr(0, 5) == "LOCAL") {
+        int number = atoi(facility.substr(5).c_str());
+        switch (number) {
+            case 0: value = LOG_LOCAL0; break;
+            case 1: value = LOG_LOCAL1; break;
+            case 2: value = LOG_LOCAL2; break;
+            case 3: value = LOG_LOCAL3; break;
+            case 4: value = LOG_LOCAL4; break;
+            case 5: value = LOG_LOCAL5; break;
+            case 6: value = LOG_LOCAL6; break;
+            case 7: value = LOG_LOCAL7; break;
+            default: value = -1; break;
+        }
+    }
+    syslog_facility = value;
+}
+
+void ProcmonConfig::setSyslogPriorityMin(const string& _priority) {
+    string priority(_priority);
+    boost::to_upper(priority);
+    int value = -1;
+    if (priority == "EMERG") {
+        value = LOG_EMERG;
+    } else if (priority == "ALERT") {
+        value = LOG_ALERT;
+    } else if (priority == "CRIT") {
+        value = LOG_CRIT;
+    } else if (priority == "ERR") {
+        value = LOG_ERR;
+    } else if (priority == "WARNING") {
+        value = LOG_WARNING;
+    } else if (priority == "NOTICE") {
+        value = LOG_NOTICE;
+    } else if (priority == "INFO") {
+        value = LOG_INFO;
+    } else if (priority == "DEBUG") {
+        value = LOG_DEBUG;
+    }
+    syslog_priority_min = value;
+}
+
+void setupSyslog(ProcmonConfig &pc) {
+    const int facility = pc.getSyslogFacility();
+    if (facility < 0) return;
+    int options = LOG_PID;
+    if (pc.verbose) {
+        options |= LOG_PERROR;
+    }
+    openlog("procmon", options, facility);
+
+    const int level = pc.getSyslogPriorityMin();
+    if (level >= 0) {
+        setlogmask(LOG_UPTO(level));
+    }
 }
 
 #ifdef SECURED
@@ -1250,7 +1366,15 @@ void writeOutput(ProcmonConfig *config, ProcIO *output, vector<T>& data, unsigne
 int main(int argc, char** argv) {
     int retCode = 0;
     struct timeval startTime;
-    ProcmonConfig *config = new ProcmonConfig(argc, argv);
+    ProcmonConfig *config = new ProcmonConfig();
+    config->parseOptions(argc, argv);
+    setupSyslog(*config);
+    syslog(LOG_NOTICE, "procmon starting with context %s",
+            config->getContext().c_str());
+    if (config->verbose) {
+        const ProcmonConfig &pc = *config;
+        cout << pc << endl;
+    }
     if (getuid() == 0) {
 #ifdef SECURED
         if (config->target_uid <= 0) {
@@ -1351,6 +1475,8 @@ int main(int argc, char** argv) {
         std::cout << "boottime        : " << config->boottime << std::endl;
     }
 
+    int iterations = 0;
+
     for ( ; ; ) {
         struct timeval cycleTime;
         gettimeofday(&cycleTime, NULL);
@@ -1375,38 +1501,6 @@ int main(int argc, char** argv) {
             cleanUpFlag = 1;
         } else  {
             for (std::vector<ProcIO*>::iterator iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
-                /*
-                const char *last_ident = NULL;
-                const char *last_subident = NULL;
-                int sidx = 0;
-                int i = 0;
-                for (i = 0; i < global_procStat.count; i++) {
-                    procstat *temp_ps = &(global_procStat.data[i]);
-                    if (last_ident == NULL || last_subident == NULL
-                        || strncmp(temp_ps->identifier, last_ident, IDENTIFIER_SIZE) != 0
-                        || strncmp(temp_ps->subidentifier, last_subident, IDENTIFIER_SIZE) != 0)
-                    {
-                        last_ident = temp_ps->identifier;
-                        last_subident = temp_ps->subidentifier;
-                        if (i != 0) {
-                            (*iter)->set_context(config->hostname, global_procStat.data[sidx].identifier, global_procStat.data[sidx].subidentifier);
-                            (*iter)->write_procstat(&(global_procStat.data[sidx]), i - sidx);
-                        }
-                        sidx = i;
-                    }
-                }
-                if (i > 0) {
-                    (*iter)->set_context(config->hostname, global_procStat.data[sidx].identifier, global_procStat.data[sidx].subidentifier);
-                    (*iter)->write_procstat(&(global_procStat.data[sidx]), i - sidx);
-                }
-
-                if (global_procData.count > 0) {
-                    (*iter)->write_procdata(global_procData.data, global_procData.count);
-                }
-                if (global_procFD.count > 0) {
-                    (*iter)->write_procfd(global_procFD.data, global_procFD.count);
-                }
-                */
                 writeOutput(config, *iter, global_procStat, write_procstat);
                 writeOutput(config, *iter, global_procData, write_procdata);
                 writeOutput(config, *iter, global_procFD, write_procfd);
@@ -1438,10 +1532,16 @@ int main(int argc, char** argv) {
         } else {
             break;
         }
+        if (++iterations == config->getMaxIterations()) {
+            // maxIterations defaults to 0, so look for exact
+            // match
+            break;
+        }
     }
     for (std::vector<ProcIO*>::iterator ptr = outputMethods.begin(), end = outputMethods.end(); ptr != end; ptr++) {
         delete *ptr;
     }
+    outputMethods.resize(0);
     if (config->pidfile.length() > 0) {
         unlink(config->pidfile.c_str());
     }

@@ -3,11 +3,22 @@
 
 #include "ProcData.hh"
 #include <unistd.h>
-#include <getopt.h>
 #include <stdlib.h>
 #include <vector>
 #include <pwd.h>
 #include <grp.h>
+
+#include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/bind.hpp>
+
+#include <iostream>
+#include <fstream>
+
+namespace po = boost::program_options;
+namespace fs = boost::filesystem;
+
+using namespace std;
 
 #include "config.h"
 
@@ -16,6 +27,7 @@
 #define DEFAULT_INITIAL_PHASE 0
 #define DEFAULT_INITIAL_PHASE_FREQUENCY 1
 #define DEFAULT_OUTPUT_FLAGS 0
+#define DEFAULT_SYSTEM "cluster"
 #define DEFAULT_IDENTIFIER "proc"
 #define DEFAULT_SUBIDENTIFIER "mon"
 #define DEFAULT_AMQP_HOST "localhost"
@@ -30,7 +42,7 @@
 time_t getBootTime();
 int fileFillBuffer(FILE* fp, char* buffer, int buffSize, char** sptr, char** ptr, char** eptr);
 
-class ProcmonException : public std::exception {
+class ProcmonException : public exception {
 public:
     ProcmonException(const char* t_error) {
         error = t_error;
@@ -44,26 +56,47 @@ private:
 };
 
 class ProcmonConfig {
-public:
+    protected:
+    po::options_description procmonOptions;
+    string userConfigFile;
+    int maxIterations;
+    int syslog_facility;
+    int syslog_priority_min;
+
+    void setSyslogFacility(const string &facility);
+    void setSyslogPriorityMin(const string &priority);
+
+    public:
+    inline const int getSyslogFacility() const {
+        return syslog_facility;
+    }
+    inline const int getSyslogPriorityMin() const {
+        return syslog_priority_min;
+    }
+
     /* Configurable monitoring options */
     int targetPPid;
     int frequency;
     int initialFrequency;
     int initialPhase;
-    char *check_mpi;
     bool daemonize;
     bool verbose;
     bool craylock;
-	int debug;
     int maxfd;
 #ifdef SECURED
     int target_uid;
     int target_gid;
+    string user;
+    string group;
 #endif
-    std::string identifier;
-    std::string subidentifier;
-    char *identifier_env;
-    char *subidentifier_env;
+    string system;
+    string identifier;
+    string subidentifier;
+    string identifier_env;
+    string subidentifier_env;
+
+    int gid_range_min;
+    int gid_range_max;
 
     /* Derived monitoring inputs */
     int tgtGid;
@@ -72,32 +105,32 @@ public:
     long clockTicksPerSec;
     long pageSize;
     time_t boottime;
-    std::string hostname;
+    string hostname;
 
     /* Output Options */
     unsigned int outputFlags;
-    std::string outputTextFilename;
+    string outputTextFilename;
 #ifdef USE_HDF5
-    std::string outputHDF5Filename;
+    string outputHDF5Filename;
 #endif
     bool noOutput;
     string pidfile;
 
 #ifdef USE_AMQP
     /* AMQP options */
-    std::string mqServer;
-    std::vector<std::string> mqServers;
+    string mqServer;
+    vector<string> mqServers;
     unsigned int mqPort;
-	std::string mqVHost;
-	std::string mqUser;
-	std::string mqPassword;
-    std::string mqExchangeName;
+	string mqVHost;
+	string mqUser;
+	string mqPassword;
+    string mqExchangeName;
     unsigned int mqFrameSize;
 #endif
 
-    ProcmonConfig(int argc, char** argv) {
-        int gid_range_min = -1;
-        int gid_range_max = -1;
+    ProcmonConfig() {
+        gid_range_min = -1;
+        gid_range_max = -1;
         /* Initialize defaults */
         targetPPid = 1;
         frequency = DEFAULT_FREQUENCY;
@@ -105,18 +138,15 @@ public:
         initialPhase = DEFAULT_INITIAL_PHASE;
         clockTicksPerSec = 0;
         pageSize = 0;
-        check_mpi = NULL;
         daemonize = false;
         verbose = false;
         craylock = false;
-		debug = 0;
         outputFlags = DEFAULT_OUTPUT_FLAGS;
         tgtGid = 0;
         maxfd = 0;
-        identifier_env = NULL;
-        subidentifier_env = NULL;
         tgtSid = 0;
         tgtPgid = 0;
+        maxIterations = 0;
 #ifdef SECURED
         target_uid = -1;
         target_gid = -1;
@@ -139,235 +169,284 @@ public:
         /* Setup Context-derived values */
         char buffer[BUFFER_SIZE];
         bzero(buffer, BUFFER_SIZE);
-        if (gethostname(buffer, BUFFER_SIZE) != 0) {
-            snprintf(buffer, BUFFER_SIZE, "Unknown");
+        if (gethostname(buffer, BUFFER_SIZE) == 0) {
+            hostname = buffer;
         }
-        hostname = buffer;
 
         clockTicksPerSec = sysconf(_SC_CLK_TCK);
         pageSize = sysconf(_SC_PAGESIZE);
         boottime = getBootTime();
 
-        /* Parse command line arguments */
-        struct option prg_options[] = {
-            {"help",    no_argument, 0, 'h'},
-            {"version", no_argument, 0, 'V'},
-            {"verbose", no_argument, 0, 'v'},
-            {"daemonize", no_argument, 0, 'd'},
-            {"frequency", required_argument, 0, 'f'},
-            {"initialphase", required_argument, 0, 'i'},
-            {"initialfrequency", required_argument, 0, 'F'},
-#ifdef SECURED
-            {"user", required_argument, 0, 'u'},
-            {"group", required_argument, 0, 'r'},
-#endif
-            {"ppid", required_argument, 0, 'p'},
-            {"group_min", required_argument, 0, 'g'},
-            {"group_max", required_argument, 0, 'G'},
-            {"sid", optional_argument, 0, 's'},
-            {"pgid", optional_argument, 0, 'l'},
-            {"fd_max", required_argument, 0, 'W'},
-            {"mpirank", required_argument, 0, 'm'},
-            {"identifier", required_argument, 0, 'I'},
-            {"subidentifier", required_argument, 0, 'S'},
-            {"identifier_env", required_argument, 0, 'x'},
-            {"subidentifier_env", required_argument, 0, 'X'},
-            {"nooutput", no_argument, 0, 'n'},
-            {"outputtext", required_argument, 0, 'o'},
-            {"pid", required_argument, 0, 'q'},
-#ifdef USE_HDF5
-            {"outputhdf5", required_argument, 0, 'O'},
-#endif
-            {"debug", required_argument, 0, 'D'},
-#ifdef USE_AMQP
-            {"mqhostname", required_argument, 0, 'H'},
-            {"mqport", required_argument, 0, 'P'},
-            {"mqvhost", required_argument, 0, 'Q'},
-            {"mqexchange", required_argument, 0, 'E'},
-            {"mquser", required_argument, 0, 'U'},
-            {"mqpassword", required_argument, 0, 'Y'},
-            {"mqframe", required_argument, 0, 'R'},
-#endif
-            {"craylock", required_argument, 0, 'c'},
-            { 0, 0, 0, 0},
-        };
-        int c;
-        string getopt_str = "chVvdm:nf:i:F:p:W:g:G:s::l::I:S:x:X:o:q:D:";
-#ifdef USE_AMQP
-        getopt_str += "H:P:E:Q:U:Y:R:";
-#endif
-#ifdef USE_HDF5
-        getopt_str += "O:";
-#endif
-#ifdef SECURED
-        getopt_str += "u:r:";
-#endif
+        setupDefaultProcmonOptions();
+    }
 
-        for ( ; ; ) {
-            int option_index = 0;
-            c = getopt_long(argc, argv, getopt_str.c_str(),
-                    prg_options, &option_index
-            );
-            if (c == -1) {
-                break;
+    ~ProcmonConfig() {
+    }
+
+    void setupDefaultProcmonOptions() {
+        po::options_description basic("Basic Options");
+        basic.add_options()
+            ("version", "Print version information")
+            ("help,h", "Print help message")
+            ("verbose,v", "Print extra information (syslog mirrored to stderr)")
+            ("daemonize,d", "Daemonize the procmon process")
+            ("craylock,c", "Create and lock /tmp/procmon; exit if no lock")
+            ("config.file", po::value<string>(&userConfigFile)
+                ->default_value(""), "Configuration file from which to read "
+                "options.")
+            ("syslog.facility", po::value<string>()
+                ->notifier(boost::bind(&ProcmonConfig::setSyslogFacility, this, _1))
+                ->default_value("USER"), "Name of syslog facility to use for"
+                " info/error output. Supports: DAEMON, USER, LOCAL0 - LOCAL7")
+            ("syslog.level.min", po::value<string>()
+                ->notifier(boost::bind(&ProcmonConfig::setSyslogPriorityMin, this, _1))
+                ->default_value("NOTICE"), "Minimum level of log data to send."
+                " Supports: EMERG, ALERT, CRIT, ERR, WARNING, NOTICE, INFO, "
+                " DEBUG" )
+        ;
+        procmonOptions.add(basic);
+
+        po::options_description configOptions("Configuration Options");
+        configOptions.add_options()
+            ("frequency,f", po::value<int>(&frequency)
+                ->default_value(DEFAULT_FREQUENCY), "Time elapsed between "
+                "measurements during normal data collection (in seconds)")
+            ("initialphase,i", po::value<int>(&initialPhase)
+                ->default_value(DEFAULT_INITIAL_PHASE_FREQUENCY), "Length of the "
+                "initial phase (in seconds)")
+            ("initialfrequency,F", po::value<int>(&initialFrequency)
+                ->default_value(DEFAULT_INITIAL_PHASE_FREQUENCY), "Time elapsed "
+                "between measurements during initial phase (in seconds)")
+            ("nooutput,n", "prevent any type of output from being generated "
+                "(for testing)")
+            ("outputtext,o", po::value<string>(&outputTextFilename)->default_value(""),
+                "filename for text output (optional)")
+#ifdef USE_HDF5
+            ("outputhdf5,O", po::value<string>(&outputhdf5)->default_value(""),
+                "filename for HDF5 output (optional)")
+#endif
+            ("pid,q", po::value<string>(&pidfile)->default_value(""), "filename for "
+                "optional pid file")
+            ("debug.maxiterations", po::value<int>(&maxIterations)
+                ->default_value(0), "Debugging: max iterations to complete")
+#ifdef SECURED
+            ("user,u", po::value<string>(&user)->default_value(""), "username/uid to "
+                "setuid")
+            ("group,r", po::value<string>(&group)->default_value(""), "group/gid to "
+                "setgid")
+#endif
+        ;
+        procmonOptions.add(configOptions);
+
+        po::options_description contextOptions("Monitoring Context Options");
+        contextOptions.add_options()
+            ("system", po::value<string>(&system)->default_value(DEFAULT_SYSTEM),
+                "system tag")
+            ("identifier,I", po::value<string>(&identifier)
+                ->default_value(DEFAULT_IDENTIFIER), "identifier for tagging data")
+            ("subidentifier,S", po::value<string>(&subidentifier)
+                ->default_value(DEFAULT_SUBIDENTIFIER), "secondary identifier for "
+                "tagging")
+            ("no_system", "Do not use the system tag in the context identifier"
+                " string")
+        ;
+        procmonOptions.add(contextOptions);
+
+        po::options_description processOptions("Process Monitoring Options");
+        processOptions.add_options()
+            ("ppid,p", po::value<pid_t>(&targetPPid)->default_value(1), "Parent process ID "
+                "of monitoring hierarchy")
+            ("group_min,g", po::value<int>(&gid_range_min), "Minimum "
+                "group id in GridEngine gid range (second group process ident)")
+            ("group_max,G", po::value<int>(&gid_range_max), "Maximum "
+                "group id in GridEngine gid range (second group process ident)")
+            ("sid,s", po::value<int>(&tgtSid)->implicit_value(getsid(0)),
+                "Track any processes (or children) matching the specified"
+                "session id. Use self with just -s")
+            ("pgrp,l", po::value<int>(&tgtPgid)
+                ->implicit_value(getpgrp()), "Track any processes (or children)"
+                " matching the specied pgrp id. Use self with just -l")
+            ("fd_max,W", po::value<int>(&maxfd)->default_value(0), "Maximum"
+                " number of fds per process to track")
+            ("identifier_env,x", po::value<string>(&identifier_env)
+                ->default_value(""), "Read identifier from process environment with "
+                "specified environment value")
+            ("subidentifier_env,X", po::value<string>(&subidentifier_env)
+                ->default_value(""), "Read subidentifier from process environment "
+                "with specified environment value")
+        ;
+        procmonOptions.add(processOptions);
+
+#ifdef USE_AMQP
+        po::options_description amqpConfig("AMQP Configuration Options");
+        amqpConfig.add_options()
+            ("mqhostname,H", po::value<string>(&mqServer)
+                ->default_value(DEFAULT_AMQP_HOST), "hostname for AMQP Server")
+            ("mqport,P", po::value<unsigned int>(&mqPort)
+                ->default_value(DEFAULT_AMQP_PORT), "port for AMQP Server")
+            ("mqvhost,Q", po::value<string>(&mqVHost)
+                ->default_value(DEFAULT_AMQP_VHOST), "virtual-host for AMQP"
+                " Server")
+            ("mqexchange,E", po::value<string>(&mqExchangeName)
+                ->default_value(DEFAULT_AMQP_EXCHANGE_NAME), "exchange name for"
+                " AMQP Server")
+            ("mquser,U", po::value<string>(&mqUser), "username for AMQP "
+                "Server (default built-in)")
+            ("mqpassword,Y", po::value<string>(&mqPassword), "password for "
+                "AMQP Server (default built-in)")
+            ("mqframe,R", po::value<unsigned int>(&mqFrameSize)
+                ->default_value(DEFAULT_AMQP_FRAMESIZE), "maximum frame size "
+                "for AMQP Messages (bytes)")
+        ;
+        procmonOptions.add(amqpConfig);
+#endif
+    }
+
+    void parseOptions(int argc, char **argv) {
+        /* try to read config file first */
+        string baseConfigFile = string(SYSTEM_CONFIG_DIR) + "/procmon.conf";
+        char *configEnv = NULL;
+        if ((configEnv = getenv("PROCMON_DIR")) != NULL) {
+            baseConfigFile = configEnv;
+        }
+
+        /* read command line options first */
+        po::variables_map vm;
+        try {
+            po::store(po::command_line_parser(argc, argv).options(procmonOptions).run(), vm);
+
+            if (vm.count("config.file") > 0) {
+                userConfigFile = vm["config.file"].as<string>();
+                if (userConfigFile.length() > 0 && fs::exists(userConfigFile)) {
+                    ifstream ifs(userConfigFile.c_str());
+                    if (!ifs) {
+                        invalid_argument e(string("Config file doesn't exist: ") + userConfigFile);
+                        throw &e;
+                    }
+                    po::store(po::parse_config_file(ifs, procmonOptions), vm);
+                    ifs.close();
+                }
             }
-            switch (c) {
-                case 'h': usage(0); break;
-                case 'V': version(); break; 
-                case 'c': craylock = true; break;
-                case 'v': verbose = true; break;
-                case 'd': daemonize = true; break;
-                case 'm': check_mpi = strdup(optarg); break;
-                case 'f':
-                    frequency = atoi(optarg);
-                    if (frequency <= 0) {
-                        cerr << "Frequency must be at least 1 second!" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 'i':
-                    initialPhase = atoi(optarg);
-                    if (initialPhase <= 0) {
-                        cerr << "Initial-phase, if specified,  must be at least 1 second!" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 'F':
-                    initialFrequency = atoi(optarg);
-                    if (initialFrequency <= 0) {
-                        cerr << "Initial-frequency, if specified,  must be at least 1 second!" << endl;
-                        usage(1);
-                    }
-                    break;
-#ifdef SECURED
-                case 'u':
-                    /* deal with USER arg */
-                    if (optarg != NULL && strlen(optarg) > 0) {
-                        struct passwd *user_data = getpwnam(optarg);
-                        if (user_data == NULL) {
-                            int uid = atoi(optarg);
-                            if (uid > 0) {
-                                user_data = getpwuid(uid);
-                                if (user_data != NULL) {
-                                    target_uid = user_data->pw_uid;
-                                }
-                            }
-                        } else {
-                            target_uid = user_data->pw_uid;
-                        }
-                    }
-                    if (target_uid <= 0) {
-                        cerr << "user, if specified, must resolve to a uid > 0" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 'r':
-                    /* deal with GROUP arg */
-                    if (optarg != NULL && strlen(optarg) > 0) {
-                        struct group *group_data = getgrnam(optarg);
-                        if (group_data == NULL) {
-                            int gid = atoi(optarg);
-                            if (group_data != NULL) {
-                                target_gid = group_data->gr_gid;
-                            }
-                        } else {
-                            target_gid = group_data->gr_gid;
-                        }
-                    }
-                    if (target_gid <= 0) {
-                        cerr << "group, if specified, must resolve to a gid > 0" << endl;
-                    }
-                    break;
-#endif
-                case 'p':
-                    targetPPid = atoi(optarg);
-                    if (targetPPid <= 0) {
-                        cerr << "ppid must be at least 1 (should be 1 to track all user-space processes)" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 'W':
-                    maxfd = atoi(optarg);
-                    if (maxfd <= 2) {
-                        cerr << "fd_max, if specified, must be at least 3 (fd 0, 1, 2 are never read)" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 'g':
-                    gid_range_min = atoi(optarg);
-                    if (gid_range_min <= 0) {
-                        cerr << "gid range minimum, if specified,  must be at least 1!" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 'G':
-                    gid_range_max = atoi(optarg);
-                    if (gid_range_max <= 1) {
-                        cerr << "gid range maximum, if specified,  must be at least 2!" << endl;
-                        usage(1);
-                    }
-                    break;
-                case 's':
-                    if (optarg != NULL) {
-                        tgtSid = atoi(optarg);
-                        if (tgtSid <= 1) {
-                            cerr << "specified sid must be at least 1!" << endl;
-                            usage(1);
-                        }
-                    } else {
-                        tgtSid = getsid(getpid());
-                    }
-                    break;
-                case 'l':
-                    if (optarg != NULL) {
-                        tgtPgid = atoi(optarg);
-                        if (tgtPgid <= 1) {
-                            cerr << "specified pgid must be at least 1!" << endl;
-                            usage(1);
-                        }
-                    } else {
-                        tgtPgid = getpgid(getpid());
-                    }
-                    break;
-                case 'I': identifier = string(optarg); break;
-                case 'S': subidentifier = string(optarg); break;
-                case 'x': identifier_env = strdup(optarg); break;
-                case 'X': subidentifier_env = strdup(optarg); break;
-                case 'n': noOutput = true; break;
-                case 'o': outputTextFilename = string(optarg); break;
-#ifdef USE_HDF5
-                case 'O':
-                    outputHDF5Filename = string(optarg);
-                    break;
-#endif                   
-                case 'q':
-                    pidfile = string(optarg);
-                    break;
-                case 'D':
-                    debug = atoi(optarg);
-                    if (debug < 0) {
-                        cerr << "debug must be a non-negative integer" << endl;
-                        usage(1);
-                    }
-                    break;
-#ifdef USE_AMQP
-                case 'H': mqServer = string(optarg); break;
-                case 'P':
-                    mqPort = (unsigned int) atoi(optarg);
-                    break;
-                case 'E': mqVHost = string(optarg); break;
-                case 'Q': mqExchangeName = string(optarg); break;
-                case 'U': mqUser = string(optarg); break;
-                case 'Y': mqPassword = string(optarg); break;
-                case 'R': 
-                    mqFrameSize = (unsigned int) atoi(optarg);
-                    break;
-#endif
-                case ':': usage(1); break;
+            if (fs::exists(baseConfigFile)) {
+                ifstream input(baseConfigFile.c_str());
+                if (!input) {
+                    invalid_argument e("Base config file not readable: " + baseConfigFile);
+                    throw &e;
+                }
+                po::store(po::parse_config_file(input, procmonOptions), vm);
+                input.close();
+            }
+        } catch (exception &e) {
+            cout << e.what() << endl;
+            cout << procmonOptions << endl;
+            exit(1);
+        }
+        po::notify(vm);
+        if (vm.count("help")) {
+            cout << procmonOptions << endl;
+            exit(0);
+        }
+        if (vm.count("version")) {
+            version();
+            exit(0);
+        }
 
+        craylock = vm.count("craylock") != 0;
+        daemonize = vm.count("daemonize") != 0;
+        verbose = vm.count("verbose") != 0;
+        noOutput = vm.count("nooutput") != 0;
+
+        if (frequency <= 0) {
+            cerr << "Frequency must be at least 1 second!" << endl;
+            cerr << procmonOptions << endl;
+            exit(1);
+        }
+        if (initialPhase <= 0) {
+            cerr << "Initial-phase, if specified, must be at least 1 second!" << endl;
+            cerr << procmonOptions << endl;
+            exit(1);
+        }
+        if (initialFrequency <= 0) {
+            cerr << "Initial-frequency, if specified, must be at least 1 second!" << endl;
+            cerr << procmonOptions << endl;
+            exit(1);
+        }
+
+#ifdef SECURED
+        if (vm.count("user")) {
+            struct passwd *user_data = getpwnam(user.c_str());
+            if (user_data == NULL) {
+                int uid = atoi(user.c_str());
+                if (uid > 0) {
+                    user_data = getpwuid(uid);
+                    if (user_data != NULL) {
+                        target_uid = user_data->pw_uid;
+                    }
+                }
+            } else {
+                target_uid = user_data->pw_uid;
+            }
+            if (target_uid <= 0) {
+                cerr << "user, if specified, must resolve to a uid > 0" << endl;
+                cerr << procmonOptions << endl;
+                exit(1);
             }
         }
-	
+        if (vm.count("group")) {
+            struct group *group_data = getgrnam(group.c_str());
+            if (group_data == NULL) {
+                int gid = atoi(group.c_str());
+                group_data = getgrgid(gid);
+                if (group_data != NULL) {
+                    target_gid = group_data->gr_gid;
+                }
+            } else {
+                target_gid = group_data->gr_gid;
+            }
+        }
+#endif
+
+        if (targetPPid <= 0) {
+            cerr << "ppid must be at least 1 (should be 1 to track all user-space processes)" << endl;
+            cerr << procmonOptions << endl;
+            exit(1);
+        }
+        if (vm.count("fd_max")) {
+            if (maxfd < 0) {
+                cerr << "fd_max, if specified, must be at least 0!" << endl;
+                cerr << procmonOptions << endl;
+                exit(1);
+            }
+        }
+        if (vm.count("group_min")) {
+            if (gid_range_min <= 0) {
+                cerr << "gid range minimum, if specified, must be at least 1!" << endl;
+                cerr << procmonOptions << endl;
+                exit(1);
+            }
+        }
+        if (vm.count("group_max")) {
+            if (gid_range_max <= 0) {
+                cerr << "gid range maximum, if specified, must be at least 1!" << endl;
+                cerr << procmonOptions << endl;
+                exit(1);
+            }
+        }
+        if (vm.count("sid")) {
+            if (tgtSid <= 0) {
+                cerr << "specified sid must be at least 1!" << endl;
+                cerr << procmonOptions << endl;
+                exit(1);
+            }
+        }
+        if (vm.count("pgrp")) {
+            if (tgtPgid <= 0) {
+                cerr << "specified pgrp id must be at least 1!" << endl;
+                cerr << procmonOptions << endl;
+                exit(1);
+            }
+        }
+
         if (outputTextFilename != "") {
             outputFlags |= OUTPUT_TYPE_TEXT;
         }
@@ -390,16 +469,16 @@ public:
             outputFlags |= OUTPUT_TYPE_AMQP;
         }
 #endif
-
         if (noOutput) {
             outputFlags = OUTPUT_TYPE_NONE;
         }
         if (outputFlags == 0) {
-            cout << "No output mechanism specified (text, hdf5, or AMQP)" << endl;
-            usage(1);
+            cerr << "No output mechanism specified (text, hdf5, or AMQP)" << endl;
+            cerr << procmonOptions << endl;
+            exit(1);
         }
-
-        /* deal with finding secondary gid mapping if applicable */
+        
+        // deal with finding secondary gid mapping if applicable
         if (gid_range_min > 0 && gid_range_max > 0) {
             if (gid_range_min > gid_range_max) {
                 int temp = gid_range_min;
@@ -415,79 +494,14 @@ public:
                 }
             }
         }
-	}
-    ~ProcmonConfig() {
-        if (check_mpi != NULL) {
-            free(check_mpi);
-            check_mpi = NULL;
-        }
     }
 
-    void usage(int err_code) {
-        printf("procmon - NERSC process monitor");
-#ifdef SECURED
-        printf("; **Interactive Edition**");
-#endif
-        printf("\n");
-        printf("Basic Options:\n");
-        printf("  -h [ --help ]      Print help message\n");
-        printf("  -V [ --version ]   Print procmon version\n");
-        printf("  -v [ --verbose ]   Print extra information\n");
-        printf("\n");
-        printf("Configuration Options:\n");
-        printf("  -c [ --craylock ]                       Create and lock /tmp/procmon; exit if no lock\n");
-        printf("  -d [ --daemonize ]                      Daemonize the procmon process\n");
-#ifdef SECURED
-        printf("  -u [ --user ] string/integer            username/uid to setuid\n");
-        printf("  -g [ --group ] string/integer           group/gid to setgid\n");
-#endif
-        printf("  -f [ --frequency ] integer (=%02d)        Time elapsed between measurements\n", DEFAULT_FREQUENCY);
-        printf("                                          during normal data collection (in\n");
-        printf("                                          seconds)\n");
-        printf("  -i [ --initialphase ] integer (=%02d)     Length of the initial phase (in\n", DEFAULT_INITIAL_PHASE);
-        printf("                                          seconds)\n");
-        printf("  -F [ --initialfrequency ] integer (=%02d) Time elapsed between measurements\n", DEFAULT_INITIAL_PHASE_FREQUENCY);
-        printf("                                          during initial phase (in seconds)\n");
-        printf("\n");
-        printf("Process Matching Options:\n");
-        printf("  -p [ --ppid ] integer (=%d)              Parent process ID of monitorying\n", 1);
-        printf("                                          hierarchy\n");
-        printf("  -g [ --group_min ] integer              Minimum group id in GridEngine gid\n");
-        printf("                                          range (second group process ident)\n");
-        printf("  -G [ --group_max ] integer              Maximum group id in GridEngine gid\n");
-        printf("                                          range (second group process ident)\n");
-        printf("  -s [ --sid ] [optional session_id]      Track any process matching the \n");
-        printf("                                          specified session id. Use self with just -s\n");
-        printf("  -l [ --pgrp ] [optional process grp]    Track any process matching the \n");
-        printf("                                          specified pgrp id. Use self with just -l\n");
-        printf("\n");
-        printf("Process Context Options:\n");
-        printf("  -I [ --identifier ] string (=%s)    identifier for tagging data\n", DEFAULT_IDENTIFIER);
-        printf("  -S [ --subidentifier ] string (=%s)\n", DEFAULT_SUBIDENTIFIER);
-        printf("                                          secondary identifier for tagging\n");
-        printf("                                          data\n");
-        printf("  -o [ --outputtext ] string              filename for text output (optional)\n");
-#ifdef USE_HDF5
-        printf("  -O [ --outputhdf5 ] string              filename for HDF5 output (optional)\n");
-#endif
-        printf("  -q [ --pid ] string                     filename for optional pid file\n");
-        printf("  -D [ --debug ] integer (=0)             debugging level\n");
-        printf("\n");
-#ifdef USE_AMQP
-        printf("AMQP Configuration Options:\n");
-        printf("  -H [ --mqhostname ] string (=%s)\n", DEFAULT_AMQP_HOST);
-        printf("                                          hostname for AMQP Server\n");
-        printf("  -P [ --mqport ] integer (=%d)         port for AMQP Server\n", DEFAULT_AMQP_PORT);
-        printf("  -Q [ --mqvhost ] string (=%s)          virtual-host for AMQP Server\n", DEFAULT_AMQP_VHOST);
-        printf("  -E [ --mqexchange ] string (=%s)   exchange name for AMQP Server\n", DEFAULT_AMQP_EXCHANGE_NAME);
-        printf("  -U [ --mquser ] string  (built-in)      username for AMQP Server\n");
-        printf("  -Y [ --mqpasssword ] string (built-in)  password for AMQP Server\n");
-        printf("  -R [ --mqframe ] integer (=%d)      maximum frame size for AMQP Messages\n", DEFAULT_AMQP_FRAMESIZE);
-        printf("                                          (bytes)\n");
-#endif
-        printf("\n");
-        exit(err_code);
+    inline const int getMaxIterations() const {
+        return maxIterations;
     }
+
+    const string getContext();
+
     void version() {
         cout << "Procmon " << PROCMON_VERSION;
 #ifdef SECURED
@@ -496,7 +510,12 @@ public:
         cout << endl;
         exit(0);
     }
+
+    friend ostream& operator<<(ostream&, ProcmonConfig&);
 };
 
+
+
+ostream& operator<<(ostream& os, const ProcmonConfig& pc);
 
 #endif
