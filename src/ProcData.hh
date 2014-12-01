@@ -148,13 +148,14 @@ struct netstat {
 
 class ProcmonDataset {
     public:
-    virtual bool equivRecord(const ProcmonDataset &other) const = 0;
-    virtual bool cmpRecord(const ProcmonDataset &other) const = 0;
-
     char identifier[IDENTIFIER_SIZE];
     char subidentifier[IDENTIFIER_SIZE];
     unsigned long recTime;
     unsigned long recTimeUSec;
+
+    virtual bool equivRecord(const ProcmonDataset &other) const = 0;
+    virtual bool cmpRecord(const ProcmonDataset &other) const = 0;
+
 };
 
 #endif

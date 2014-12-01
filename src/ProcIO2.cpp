@@ -1,4 +1,4 @@
-#include "ProcIO.hh"
+#include "ProcIO2.hh"
 #include "ProcData.hh"
 #include <stdlib.h>
 #include <stdio.h>
@@ -727,12 +727,12 @@ bool ProcAMQPIO::_amqp_bind_context() {
 #endif
 
 #ifdef USE_HDF5
-Hdf5Group::Hdf5Group(shared_ptr<Hdf5File> &h5File, const string &groupName) {
+Hdf5Group::Hdf5Group(shared_ptr<Hdf5Io> &h5File, const string &groupName) {
     if (H5Lexists(h5File->file, groupName.c_str(), H5P_DEFAULT) == 1) {
-        group = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+        group = H5Gopen2(h5File->file, groupName.c_str(), H5P_DEFAULT);
         set = true;
     } else if (h5File->writable()) {
-        group = H5Gcreate(file, groupName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        group = H5Gcreate(h5File->file, groupName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         set = true;
     }
     if (group < 0) {
@@ -1016,6 +1016,7 @@ void Hdf5Io::initializeTypes() {
 
 template <class pmType>
 size_t Hdf5Io::write(pmType *start, pmType *end) {
+}
 
 
 
