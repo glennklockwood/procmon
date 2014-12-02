@@ -124,7 +124,7 @@ class Dataset;
 class DatasetFactory {
     public:
     virtual shared_ptr<Dataset> operator()() = 0;
-    virtual ~DatasetFactory() = 0;
+    virtual ~DatasetFactory() { }
 };
 
 class IoMethod {
@@ -153,7 +153,7 @@ class IoMethod {
         return contextOverride;
     }
 
-    virtual bool addDataset(shared_ptr<Dataset> ptr, const string &dsName, shared_ptr<DatasetFactory> &dsGen) {
+    virtual bool addDataset(const string &dsName, shared_ptr<DatasetFactory> dsGen) {
         auto ds = find_if(
                 registeredDatasets.begin(),
                 registeredDatasets.end(),
@@ -184,7 +184,7 @@ class IoMethod {
 
 class Dataset : public enable_shared_from_this<Dataset> {
     public:
-    Dataset(shared_ptr<IoMethod> &_ioMethod, const string &dsName) {
+    Dataset(shared_ptr<IoMethod> _ioMethod, const string &dsName) {
         ioMethod = _ioMethod;
     }
     virtual ~Dataset() { }
@@ -217,7 +217,7 @@ class Hdf5Io;
 template <class pmType>
 class Hdf5Type {
     public:
-    Hdf5Type(shared_ptr<Hdf5Io> &io) {
+    Hdf5Type(shared_ptr<Hdf5Io> io) {
         initializeType(io);
     }
     ~Hdf5Type() {
@@ -226,12 +226,15 @@ class Hdf5Type {
             set = false;
         }
     }
+    const hid_t getType() {
+        return type;
+    }
 
     protected:
     bool set;
     hid_t type;
 
-    void initializeType(shared_ptr<Hdf5Io> &io) {
+    void initializeType(shared_ptr<Hdf5Io> io) {
         // no-op for default, must be specialized
         set = false;
     }
@@ -243,6 +246,9 @@ class Hdf5Group {
     ~Hdf5Group() {
         H5Gclose(group);
     }
+    const hid_t getGroup() {
+        return group;
+    }
     private:
     hid_t group;
     bool set;
@@ -252,11 +258,11 @@ template <class pmType>
 class Hdf5Dataset: public Dataset {
     public:
     Hdf5Dataset(
-            shared_ptr<Hdf5Io> &_ioMethod,
-            shared_ptr<Hdf5Type<pmType> > &_h5type,
-            unsigned int &_maxSize, // 0 for unlimited
-            unsigned int &_blockSize, // 0 for non-chunked data
-            unsigned int &_zipLevel,
+            shared_ptr<Hdf5Io> _ioMethod,
+            shared_ptr<Hdf5Type<pmType> > _h5type,
+            unsigned int _maxSize, // 0 for unlimited
+            unsigned int _blockSize, // 0 for non-chunked data
+            unsigned int _zipLevel,
             const string &_dsName
     );
     ~Hdf5Dataset() {
@@ -287,15 +293,16 @@ class Hdf5Dataset: public Dataset {
     size_t initializeDataset();
 };
 
+
 template <class pmType>
 class Hdf5DatasetFactory : public DatasetFactory {
     public:
     Hdf5DatasetFactory(
-        shared_ptr<Hdf5Io> &_ioMethod,
-        shared_ptr<Hdf5Type<pmType> > &_h5type,
-        unsigned int &_maxSize,
-        unsigned int &_blockSize,
-        unsigned int &_zipLevel,
+        shared_ptr<Hdf5Io> _ioMethod,
+        shared_ptr<Hdf5Type<pmType> > _h5type,
+        unsigned int _maxSize,
+        unsigned int _blockSize,
+        unsigned int _zipLevel,
         const string &_dsName
     ):
         ioMethod(_ioMethod), h5type(_h5type), maxSize(_maxSize),
@@ -468,11 +475,11 @@ private:
 
 template <class pmType>
 Hdf5Dataset<pmType>::Hdf5Dataset(
-            shared_ptr<Hdf5Io> &_ioMethod,
-            shared_ptr<Hdf5Type<pmType> > &_h5type,
-            unsigned int &_maxSize,
-            unsigned int &_blockSize,
-            unsigned int &_zipLevel,
+            shared_ptr<Hdf5Io> _ioMethod,
+            shared_ptr<Hdf5Type<pmType> > _h5type,
+            unsigned int _maxSize,
+            unsigned int _blockSize,
+            unsigned int _zipLevel,
             const string &_dsName
 ):
     Dataset(_ioMethod, _dsName), dsName(_dsName)
@@ -489,12 +496,13 @@ Hdf5Dataset<pmType>::Hdf5Dataset(
 template <class pmType>
 size_t Hdf5Dataset<pmType>::initializeDataset() {
     size_t size = 0;
-    if (group->group < 0) {
+    const hid_t group_id = group->getGroup();
+    if (group_id < 0) {
         IoException e("Called initializeDataset before group was opened!");
         throw &e;
     }
-    if (H5Lexists(group->group, dsName.c_str(), H5P_DEFAULT) == 1) {
-        dataset = H5Dopen2(group->group, dsName.c_str(), H5P_DEFAULT);
+    if (H5Lexists(group_id, dsName.c_str(), H5P_DEFAULT) == 1) {
+        dataset = H5Dopen2(group_id, dsName.c_str(), H5P_DEFAULT);
 		size_id = H5Aopen(dataset, "nRecords", H5P_DEFAULT);
         hid_t attr_type = H5Aget_type(size_id);
 		H5Aread(size_id, attr_type, &size);
@@ -517,7 +525,7 @@ size_t Hdf5Dataset<pmType>::initializeDataset() {
     	    hsize_t chunk_dims = blockSize;
             H5Pset_chunk(param, rank, &chunk_dims);
         }
-        dataset = H5Dcreate(group->group, dsName.c_str(), type->type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
+        dataset = H5Dcreate(group_id, dsName.c_str(), type->getType(), dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
         H5Pclose(param);
         H5Sclose(dataspace);
 

@@ -629,6 +629,7 @@ class ProcmonSummarizeConfig {
     unsigned int nThreads;
     string baseline_file;
     string outputh5_file;
+    string system;
     bool debug;
 
     public:
@@ -647,6 +648,7 @@ class ProcmonSummarizeConfig {
         config.add_options()
             ("input,i",po::value<vector<string> >(&procmonh5_files)->composing(), "input filename(s) (required)")
             ("output,o",po::value<string>(&outputh5_file)->default_value("output.h5"), "output filename")
+            ("system,s",po::value<string>(&system)->default_value("generic"), "system name")
             ("baseline,b",po::value<string>(&baseline_file), "baseline file for process normalization")
             ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
             ("fsMonitor", po::value<vector<string> >(&fs_monitor)->composing(), "regexes matching filesystems to monitor")
@@ -710,6 +712,9 @@ class ProcmonSummarizeConfig {
     inline const string& getOutputH5Path() const {
         return outputh5_file;
     }
+    inline const string& getSystem() const {
+        return system;
+    }
     inline const vector<pair<string,regex *> >& getFilesystemMonitorRegexes() const {
         return fs_monitor_regex;
     }
@@ -721,6 +726,17 @@ int main(int argc, char **argv) {
     /* open input h5 files, walk the metadata */
     H5FileControl *baselineInput = NULL;
     shared_ptr<pmio2::Hdf5Io> output = make_shared<pmio2::Hdf5Io>(config.getOutputH5Path(), pmio2::IoMode::MODE_WRITE) ;
+    output->addDataset("ProcessSummary",
+            make_shared<pmio2::Hdf5DatasetFactory<ProcessSummary> >(
+                output,
+                make_shared<pmio2::Hdf5Type<ProcessSummary> >(output),
+                0, // unlimited max size
+                256, // 256 processes per block
+                10,  // zipLevel 10
+                "ProcessSummary" // datasetName
+            )
+    );    
+
     vector<H5FileControl *> inputFiles;
     vector<vector<string> > inputHosts;
     vector<string> allHosts;
@@ -761,6 +777,7 @@ int main(int argc, char **argv) {
             processData->readData(host, inputFiles[idx]);
         }
         processData->summarizeProcesses(host, baselineData, 0);
+        //output->setContext(config.getSystem(), host, "*", "*");
 
         if (baselineData != NULL) {
             delete baselineData;

@@ -14,7 +14,7 @@ ProcessSummary::ProcessSummary(const string& _hostname, const string& _identifie
 
 namespace pmio2 {
 template <>
-void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> &file) {
+void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> file) {
     hid_t h5type = H5Tcreate(H5T_COMPOUND, sizeof(IdentifiedFilesystem));
     H5Tinsert(h5type, "identifier",    HOFFSET(IdentifiedFilesystem, identifier),    file->strType_idBuffer);
     H5Tinsert(h5type, "subidentifier", HOFFSET(IdentifiedFilesystem, subidentifier), file->strType_idBuffer);
@@ -30,7 +30,7 @@ void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> &file) {
 }
 
 template <>
-void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> &file) {
+void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     hid_t h5type = H5Tcreate(H5T_COMPOUND, sizeof(ProcessSummary));
     H5Tinsert(h5type, "identifier",    HOFFSET(ProcessSummary, identifier),    file->strType_idBuffer);
     H5Tinsert(h5type, "subidentifier", HOFFSET(ProcessSummary, subidentifier), file->strType_idBuffer);
