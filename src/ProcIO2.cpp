@@ -727,141 +727,18 @@ bool ProcAMQPIO::_amqp_bind_context() {
 #endif
 
 #ifdef USE_HDF5
-Hdf5Group::Hdf5Group(shared_ptr<Hdf5Io> &h5File, const string &groupName) {
-    if (H5Lexists(h5File->file, groupName.c_str(), H5P_DEFAULT) == 1) {
-        group = H5Gopen2(h5File->file, groupName.c_str(), H5P_DEFAULT);
+Hdf5Group::Hdf5Group(Hdf5Io &h5File, const string &groupName) {
+    if (H5Lexists(h5File.file, groupName.c_str(), H5P_DEFAULT) == 1) {
+        group = H5Gopen2(h5File.file, groupName.c_str(), H5P_DEFAULT);
         set = true;
-    } else if (h5File->writable()) {
-        group = H5Gcreate(h5File->file, groupName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    } else if (h5File.writable()) {
+        group = H5Gcreate(h5File.file, groupName.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         set = true;
     }
     if (group < 0) {
         throw IoException("Failed to access group: " + groupName);
     }
 }
-
-template <class pmType>
-size_t Hdf5Dataset::initializeDataset() {
-    size_t size = 0;
-    if (group->group < 0) {
-        throw IoException("Called initializeDataset before group was opened!");
-    }
-    if (H5Lexists(group->group, dsName.c_str(), H5P_DEFAULT) == 1) {
-        dataset = H5Dopen2(group->group, dsName.c_str(), H5P_DEFAULT);
-		size_id = H5Aopen(dataset, "nRecords", H5P_DEFAULT);
-        hid_t attr_type = H5Aget_type(attribute);
-		H5Aread(attribute, attr_type, &size);
-        H5Tclose(attr_type);
-    } else if (h5File->writable()) {
-        hid_t param;
-		hsize_t rank = 1;
-        hsize_t initial_dims = chunkSize;
-        hsize_t maximal_dims = H5S_UNLIMITED;
-        hid_t dataspace = H5Screate_simple(rank, &initial_dims, &maximal_dims);
-    	hsize_t chunk_dims = chunkSize;
-
-        param = H5Pcreate(H5P_DATASET_CREATE);
-        if (zip_level > 0) {
-            H5Pset_deflate(param, zip_level);
-        }
-        H5Pset_chunk(param, rank, &chunk_dims);
-        dataset = H5Dcreate(group->group, dsName.c_str(), type->type, dataspace, H5P_DEFAULT, param, H5P_DEFAULT);
-        H5Pclose(param);
-        H5Sclose(dataspace);
-
-        hid_t a_id = H5Screate(H5S_SCALAR);
-		size_id = H5Acreate2(dataset, "nRecords", H5T_NATIVE_UINT, a_id, H5P_DEFAULT, H5P_DEFAULT);
-		H5Awrite(size_id, H5T_NATIVE_UINT, &size);
-        H5Sclose(a_id);
-    }
-	return size;
-}
-
-template <class pmType>
-size_t Hdf5Dataset::read(pmType *start_pointer, size_t count, size_t start_id = 0) {
-    lastUpdate = time(NULL);
-
-    hsize_t targetRecords = 0;
-    hsize_t localRecords = count;
-    hsize_t remoteStart = start_id > 0 ? start_id - 1 : 0;
-    hsize_t localStart = 0;
-    hsize_t nRecords = 0;
-
-    hid_t dataspace = H5Dget_space(dataset);
-    hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
-    herr_t status = 0;
-
-    //int rank = H5Sget_simple_extent_ndims(dataspace);
-    status = H5Sget_simple_extent_dims(dataspace, &nRecords, NULL);
-    if (remoteStart < nRecords) {
-        targetRecords = count < (nRecords - remoteStart) ? count : (nRecords - remoteStart);
-
-        status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, &remoteStart, H5P_DEFAULT, &targetRecords, H5P_DEFAULT);
-        status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, &localStart, H5P_DEFAULT, &localRecords, H5P_DEFAULT);
-        status = H5Dread(dataset, type, H5S_ALL, dataspace, H5P_DEFAULT, start_pointer);
-    }
-
-    H5Sclose(dataspace);
-    H5Sclose(memspace);
-
-    return (size_t) targetRecords;
-}
-
-template <class pmType>
-size_t Hdf5Dataset::write(pmType *start, pmType *end, size_t start_id = 0) {
-    if (!h5file->getOverrideContext()) {
-        for (pmType *ptr = start_pointer; ptr != end; ++end) {
-            snprintf(ptr->identifier, IDENTIFIER_SIZE, "%s", h5file->getContext().identifier.c_str());
-            snprintf(ptr->subidentifier, IDENTIFIER_SIZE, "%s", h5file->getContext().subidentifier.c_str());
-        }
-    }
-
-    hsize_t rank = 1;
-    hsize_t maxRecords = 0;
-	hsize_t startRecord = 0;
-    hsize_t targetRecords = 0;
-    hsize_t newRecords = end - start;
-	unsigned int old_nRecords = 0;
-
-	bool append = start_id == 0;
-	startRecord = start_id > 0 ? start_id - 1 : 0;
-
-    unsigned int *nRecords = &size;
-    nRecords = &size;
-
-    hid_t filespace;
-    herr_t status;
-
-	if (hdf5Segment == nullptr) return 0;
-	hdf5Segment->lastUpdate = time(NULL);
-
-    hid_t dataspace = H5Dget_space(dataset);
-    status = H5Sget_simple_extent_dims(dataspace, &maxRecords, NULL);
-    H5Sclose(dataspace);
-
-	if (append) startRecord = *nRecords;
-    targetRecords = startRecord + count > maxRecords ? startRecord + count : maxRecords;
-
-    status = H5Dset_extent(dataset, &targetRecords);
-    filespace = H5Dget_space(dataset);
-
-    status = H5Sselect_hyperslab(filespace, H5S_SELECT_SET, &startRecord, NULL, &newRecords, NULL);
-    dataspace = H5Screate_simple(rank, &newRecords, NULL);
-
-    H5Dwrite(dataset, type, dataspace, filespace, H5P_DEFAULT, start_pointer);
-
-	old_nRecords = *nRecords;
-	*nRecords = startRecord + count > *nRecords ? startRecord + count : *nRecords;
-
-	H5Awrite(size_attribute, H5T_NATIVE_UINT, nRecords);
-
-	start_id = startRecord+1;
-
-    H5Sclose(filespace);
-    H5Sclose(dataspace);
-    return start_id;
-}
-
 
 Hdf5Io::Hdf5Io(const string& _filename, IoMode _mode):
     IoMethod(), filename(_filename), mode(_mode)
@@ -872,9 +749,9 @@ Hdf5Io::Hdf5Io(const string& _filename, IoMode _mode):
 	strType_idBuffer = -1;
     strType_variable = -1;
 
-	if (mode == FILE_MODE_WRITE) {
+	if (mode == IoMode::MODE_WRITE) {
     	file = H5Fopen(filename.c_str(), H5F_ACC_CREAT | H5F_ACC_RDWR, H5P_DEFAULT);
-	} else if (mode == FILE_MODE_READ) {
+	} else if (mode == IoMode::MODE_READ) {
         /* open read-only using the STDIO driver 
         hid_t faplist_id = H5Pcreate (H5P_FILE_ACCESS);
         H5Pset_fapl_stdio(faplist_id);*/
@@ -884,15 +761,13 @@ Hdf5Io::Hdf5Io(const string& _filename, IoMode _mode):
 		throw IoException("Failed to open HDF5 file: " + filename);
 	}
     root = H5Gopen2(file, "/", H5P_DEFAULT);
-    if (root < 0) throw ProcIOException("Failed to open root group in file: " + filename);
+    if (root < 0) throw IoException("Failed to open root group in file: " + filename);
     initializeTypes();
 }
 	
 Hdf5Io::~Hdf5Io() {
     herr_t status;
-	for (auto iter = openRefs.begin(), end = openRefs.end(); iter != end; ++iter) {
-		delete (*iter).second;
-	}
+    //XXX TODO: close all open datasets
     if (strType_exeBuffer > 0) status = H5Tclose(strType_exeBuffer);
     if (strType_buffer > 0) status = H5Tclose(strType_buffer);
     if (strType_variable > 0) status = H5Tclose(strType_variable);
@@ -931,57 +806,22 @@ bool Hdf5Io::setContext(const Context& _context) {
     if (it != groups.end()) {
         group = it->second;
     } else {
-        group = new Hdf5Group(context.hostname);
+        group = make_shared<Hdf5Group>(*this, context.hostname);
         groups[context] = group;
     }
-    pair<Context, string> dsKey(context, "");
-    for (const pair<string, DatasetFactory>& dset: registeredDatasets) {
-        key.second = dset.first;
-        auto it = dsMap.find(key);
+    DatasetContext dsKey(context, "");
+    for (const pair<string, shared_ptr<DatasetFactory> >& dset: registeredDatasets) {
+        dsKey.datasetName = dset.first;
+        auto it = dsMap.find(dsKey);
         if (it != dsMap.end()) {
-            currentDatasets[dset] = it->second;
+            currentDatasets[dset.first] = it->second;
         } else {
-            shared_ptr<Dataset> ptr = (dset.second)();
-            currentDatasets[dset] = ptr;
+            shared_ptr<Dataset> ptr = (*(dset.second))();
+            currentDatasets[dset.first] = ptr;
             addDatasetContext(ptr, context, dset.first);
         }
     }
     return true;
-}
-
-bool Hdf5Io::set_context(const string& _hostname, const string& _identifier, const string& _subidentifier) {
-	size_t endPos = _hostname.find('.');
-	endPos = endPos == string::npos ? _hostname.size() : endPos;
-	string t_hostname(_hostname, 0, endPos);
-
-	endPos = _identifier.find('.');
-	endPos = endPos == string::npos ? _identifier.size() : endPos;
-	string t_identifier(_identifier, 0, endPos);
-
-	endPos = _subidentifier.find('.');
-	endPos = endPos == string::npos ? _subidentifier.size() : endPos;
-	string t_subidentifier(_subidentifier, 0, endPos);
-
-	string key = t_hostname;
-	
-	auto refIter = openRefs.find(key);
-	if (refIter == openRefs.end()) {
-		/* need to create new hdf5Ref */
-		hdf5Ref* ref = new hdf5Ref(file, type_procstat, type_procdata, type_procfd, type_procobs, type_netstat, t_hostname, mode, statBlockSize, dataBlockSize, fdBlockSize, obsBlockSize, netBlockSize);
-		auto added = openRefs.insert({key,ref});
-		if (added.second) refIter = added.first;
-	}
-	if (refIter != openRefs.end()) {
-		hdf5Segment = (*refIter).second;
-	} else {
-		hdf5Segment = nullptr;
-	}
-
-	hostname = t_hostname;
-	identifier = t_identifier;
-	subidentifier = t_subidentifier;
-	contextSet = hdf5Segment != nullptr;
-	return true;
 }
 
 void Hdf5Io::initializeTypes() {
@@ -991,35 +831,30 @@ void Hdf5Io::initializeTypes() {
     strType_exeBuffer = H5Tcopy(H5T_C_S1);
     status = H5Tset_size(strType_exeBuffer, EXEBUFFER_SIZE);
     if (status < 0) {
-        throw ProcIOException("Failed to set strType_exeBuffer size");
+        throw IoException("Failed to set strType_exeBuffer size");
     }
     
     strType_buffer = H5Tcopy(H5T_C_S1);
     status = H5Tset_size(strType_buffer, BUFFER_SIZE);
     if (status < 0) {
-        throw ProcIOException("Failed to set strType_buffer size");
+        throw IoException("Failed to set strType_buffer size");
     }
 
 	strType_idBuffer = H5Tcopy(H5T_C_S1);
 	status = H5Tset_size(strType_idBuffer, IDENTIFIER_SIZE);
 	if (status < 0) {
-		throw ProcIOException("Failed to set strType_idBuffer size");
+		throw IoException("Failed to set strType_idBuffer size");
 	}
 
     strType_variable = H5Tcopy(H5T_C_S1);
     status = H5Tset_size(strType_variable, H5T_VARIABLE);
     if (status < 0) {
-        throw ProcIOException("Failed to set strType_variable size");
+        throw IoException("Failed to set strType_variable size");
     }
 
 }
 
-template <class pmType>
-size_t Hdf5Io::write(pmType *start, pmType *end) {
-}
-
-
-
+/*
 void ProcHDF5IO::flush() {
 	H5Fflush(file, H5F_SCOPE_GLOBAL);
 }
@@ -1072,6 +907,7 @@ bool ProcHDF5IO::get_hosts(vector<string>& hosts) {
     status = H5Literate(this->file, H5_INDEX_NAME, H5_ITER_NATIVE, NULL, op_func, (void*) &hosts);
     return status > 0;
 }
+*/
 
 /* metadata_set_string
    writes string-type metadata into the root group of the HDF5 file */
