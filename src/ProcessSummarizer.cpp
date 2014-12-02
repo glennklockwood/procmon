@@ -609,6 +609,10 @@ class ProcessData {
         }
         return NULL;
     }
+
+    vector<ProcessSummary>& getSummaries() {
+        return summaries;
+    }
 };
 
 
@@ -758,6 +762,8 @@ int main(int argc, char **argv) {
     sort(allHosts.begin(), allHosts.end());
     string lastHost = "";
     size_t count = 0;
+    pmio2::Context context(config.getSystem(), "processes", "*", "*");
+    output->setContext(context);
     for (string host: allHosts) {
         if (host == lastHost) continue;
         lastHost = host;
@@ -777,7 +783,10 @@ int main(int argc, char **argv) {
             processData->readData(host, inputFiles[idx]);
         }
         processData->summarizeProcesses(host, baselineData, 0);
-        //output->setContext(config.getSystem(), host, "*", "*");
+
+        ProcessSummary *start = &*(processData->getSummaries().begin());
+        ProcessSummary *end = &*(processData->getSummaries().end());
+        output->write("ProcessSummary", start, end);
 
         if (baselineData != NULL) {
             delete baselineData;

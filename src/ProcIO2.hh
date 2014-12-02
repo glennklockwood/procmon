@@ -134,7 +134,7 @@ class IoMethod {
         contextOverride = false;
     }
     virtual ~IoMethod() { }
-    virtual bool setContext(const string& _system, const string& _hostname, const string& _identifier, const string& _subidentifier) {
+    bool setContext(const string& _system, const string& _hostname, const string& _identifier, const string& _subidentifier) {
         Context context(_system, _hostname, _identifier, _subidentifier);
         setContext(context);
     }
@@ -588,8 +588,7 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
 	bool append = start_id == 0;
 	startRecord = start_id > 0 ? start_id - 1 : 0;
 
-    unsigned int *nRecords = &size;
-    nRecords = &size;
+    size_t *nRecords = &size;
 
     hid_t filespace;
     herr_t status;
@@ -613,7 +612,7 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
     status = H5Sselect_hyperslab(filespace, H5S_SELECT_SET, &startRecord, NULL, &newRecords, NULL);
     dataspace = H5Screate_simple(rank, &newRecords, NULL);
 
-    H5Dwrite(dataset, type, dataspace, filespace, H5P_DEFAULT, start);
+    H5Dwrite(dataset, type->getType(), dataspace, filespace, H5P_DEFAULT, start);
 
 	old_nRecords = *nRecords;
 	*nRecords = startRecord + count > *nRecords ? startRecord + count : *nRecords;
@@ -625,6 +624,28 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
     H5Sclose(filespace);
     H5Sclose(dataspace);
     return start_id;
+}
+
+template <class pmType>
+size_t Hdf5Io::write(const string &dsName, pmType *start, pmType *end) {
+    auto it = currentDatasets.find(dsName);
+    if (it == currentDatasets.end()) {
+        return 0;
+    }
+    shared_ptr<Dataset> baseDs = it->second;
+    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
+    return dataset->write(start, end);
+}
+
+template <class pmType>
+size_t Hdf5Io::read(const string &dsName, pmType *start, size_t count) {
+    auto it = currentDatasets.find(dsName);
+    if (it == currentDatasets.end()) {
+        return 0;
+    }
+    shared_ptr<Dataset> baseDs = it->second;
+    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
+    return dataset->read(start, count);
 }
 
 }

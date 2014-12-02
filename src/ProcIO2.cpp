@@ -775,27 +775,6 @@ Hdf5Io::~Hdf5Io() {
     if (file > 0) status = H5Fclose(file);
 }
 
-template <class pmType>
-size_t Hdf5Io::write(const string &dsName, pmType *start, pmType *end) {
-    auto it = currentDatasets.find(dsName);
-    if (it == currentDatasets.end()) {
-        return 0;
-    }
-    shared_ptr<Dataset> baseDs = it->second;
-    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
-    return dataset->write(start, end);
-}
-
-template <class pmType>
-size_t Hdf5Io::read(const string &dsName, pmType *start, size_t count) {
-    auto it = currentDatasets.find(dsName);
-    if (it == currentDatasets.end()) {
-        return 0;
-    }
-    shared_ptr<Dataset> baseDs = it->second;
-    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
-    return dataset->read(start, count);
-}
 
 bool Hdf5Io::setContext(const Context& _context) {
     context = _context;
