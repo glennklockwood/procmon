@@ -20,13 +20,30 @@ void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "subidentifier", HOFFSET(IdentifiedFilesystem, subidentifier), file->strType_idBuffer);
     H5Tinsert(h5type, "startTime",     HOFFSET(IdentifiedFilesystem, startTime),     H5T_NATIVE_ULONG);
     H5Tinsert(h5type, "startTimeUSec", HOFFSET(IdentifiedFilesystem, startTimeUSec), H5T_NATIVE_ULONG);
-    H5Tinsert(h5type, "recTime", HOFFSET(IdentifiedFilesystem, recTime), H5T_NATIVE_ULONG);
-    H5Tinsert(h5type, "recTimeUSec", HOFFSET(IdentifiedFilesystem, recTimeUSec), H5T_NATIVE_ULONG);
     H5Tinsert(h5type, "pid",           HOFFSET(IdentifiedFilesystem, pid),           H5T_NATIVE_UINT);
-    H5Tinsert(h5type, "hostname", HOFFSET(IdentifiedFilesystem, host), file->strType_exeBuffer);
-    H5Tinsert(h5type, "filesystem", HOFFSET(IdentifiedFilesystem, filesystem), file->strType_buffer);
-    H5Tinsert(h5type, "read",           HOFFSET(IdentifiedFilesystem, read),           H5T_NATIVE_UINT);
-    H5Tinsert(h5type, "write",           HOFFSET(IdentifiedFilesystem, write),           H5T_NATIVE_UINT);
+    H5Tinsert(h5type, "command",       HOFFSET(IdentifiedFilesystem, command),       file->strType_buffer);
+    H5Tinsert(h5type, "hostname",      HOFFSET(IdentifiedFilesystem, host),          file->strType_exeBuffer);
+    H5Tinsert(h5type, "filesystem",    HOFFSET(IdentifiedFilesystem, filesystem),    file->strType_buffer);
+    H5Tinsert(h5type, "read",          HOFFSET(IdentifiedFilesystem, read),          H5T_NATIVE_UINT);
+    H5Tinsert(h5type, "write",         HOFFSET(IdentifiedFilesystem, write),         H5T_NATIVE_UINT);
+    type = h5type;
+}
+
+template<>
+void Hdf5Type<IdentifiedNetworkConnection>::initializeType(shared_ptr<Hdf5Io> file) {
+    hid_t h5type = H5Tcreate(H5T_COMPOUND, sizeof(IdentifiedNetworkConnection));
+    H5Tinsert(h5type, "identifier",    HOFFSET(IdentifiedNetworkConnection, identifier),    file->strType_idBuffer);
+    H5Tinsert(h5type, "subidentifier", HOFFSET(IdentifiedNetworkConnection, subidentifier), file->strType_idBuffer);
+    H5Tinsert(h5type, "startTime",     HOFFSET(IdentifiedNetworkConnection, startTime),     H5T_NATIVE_ULONG);
+    H5Tinsert(h5type, "startTimeUSec", HOFFSET(IdentifiedNetworkConnection, startTimeUSec), H5T_NATIVE_ULONG);
+    H5Tinsert(h5type, "pid",           HOFFSET(IdentifiedNetworkConnection, pid),           H5T_NATIVE_UINT);
+    H5Tinsert(h5type, "command",       HOFFSET(IdentifiedNetworkConnection, command),       file->strType_buffer);
+    H5Tinsert(h5type, "protocol",      HOFFSET(IdentifiedNetworkConnection, protocol),      file->strType_idBuffer);
+    H5Tinsert(h5type, "remoteAddress", HOFFSET(IdentifiedNetworkConnection, remoteAddress), file->strType_exeBuffer);
+    H5Tinsert(h5type, "remotePort",    HOFFSET(IdentifiedNetworkConnection, remotePort),    H5T_NATIVE_INT);
+    H5Tinsert(h5type, "localAddress",  HOFFSET(IdentifiedNetworkConnection, localAddress),  file->strType_exeBuffer);
+    H5Tinsert(h5type, "localPort",     HOFFSET(IdentifiedNetworkConnection, localPort),     H5T_NATIVE_INT);
+    type = h5type;
 }
 
 template <>
@@ -47,10 +64,7 @@ void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "exePath", HOFFSET(ProcessSummary, exePath), file->strType_buffer);
     H5Tinsert(h5type, "cwdPath", HOFFSET(ProcessSummary, cwdPath), file->strType_buffer);
     H5Tinsert(h5type, "ppid", HOFFSET(ProcessSummary, ppid), H5T_NATIVE_UINT);
-    H5Tinsert(h5type, "startTime", HOFFSET(ProcessSummary, startTime), H5T_NATIVE_ULONG);
-    H5Tinsert(h5type, "startTimeUSec", HOFFSET(ProcessSummary, startTimeUSec), H5T_NATIVE_ULONG);
     H5Tinsert(h5type, "state", HOFFSET(ProcessSummary, state), H5T_NATIVE_CHAR);
-    H5Tinsert(h5type, "ppid", HOFFSET(ProcessSummary, ppid), H5T_NATIVE_INT);
     H5Tinsert(h5type, "pgrp", HOFFSET(ProcessSummary, pgrp), H5T_NATIVE_INT);
     H5Tinsert(h5type, "session", HOFFSET(ProcessSummary, session), H5T_NATIVE_INT);
     H5Tinsert(h5type, "tty", HOFFSET(ProcessSummary, tty), H5T_NATIVE_INT);
@@ -104,7 +118,6 @@ void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "derived_recTime", HOFFSET(ProcessSummary, derived_recTime), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "baseline_startTime", HOFFSET(ProcessSummary, baseline_startTime), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "orig_startTime", HOFFSET(ProcessSummary, orig_startTime), H5T_NATIVE_DOUBLE);
-    H5Tinsert(h5type, "derived_recTime", HOFFSET(ProcessSummary, derived_recTime), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "volatilityScore", HOFFSET(ProcessSummary, volatilityScore), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "cpuTime", HOFFSET(ProcessSummary, cpuTime), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "utime_net", HOFFSET(ProcessSummary, utime_net), H5T_NATIVE_ULONG);
@@ -127,6 +140,7 @@ void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "cov_iorXmsize", HOFFSET(ProcessSummary, cov_iorXmsize), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "cov_iorXmresident", HOFFSET(ProcessSummary, cov_iorXmresident), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "cov_msizeXmresident", HOFFSET(ProcessSummary, cov_msizeXmresident), H5T_NATIVE_DOUBLE);
+    type = h5type;
 }
 }
 

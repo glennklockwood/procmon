@@ -31,10 +31,120 @@ namespace std {
     };
 }
 
-class ProcessSummary;
 typedef unordered_map<pair<time_t,int>, ProcessSummary *> SummaryHashMap;
 
-class AnalysisTask;
+/* ProcReducer
+    * Takes in procmon data from all sources and only writes the minimal record
+    * Writes an HDF5 file for all procdata foreach day
+*/
+
+void version() {
+    cout << "ProcmonSummarize " << PROCMON_SUMMARIZE_VERSION << endl;
+    exit(0);
+}
+
+class ProcmonSummarizeConfig {
+    private:
+    vector<pair<string,regex*> > fs_monitor_regex;
+    vector<string> procmonh5_files;
+    unsigned int nThreads;
+    string baseline_file;
+    string outputh5_file;
+    string system;
+    time_t starttime;
+    bool debug;
+
+    public:
+
+    ProcmonSummarizeConfig(int argc, char **argv) {
+        vector<string> fs_monitor;
+
+        /* Parse command line arguments */
+        po::options_description basic("Basic Options");
+        basic.add_options()
+            ("version", "Print version information")
+            ("help,h", "Print help message")
+            ("verbose,v", "Print extra (debugging) information")
+        ;
+        po::options_description config("Configuration Options");
+        config.add_options()
+            ("input,i",po::value<vector<string> >(&procmonh5_files)->composing(), "input filename(s) (required)")
+            ("output,o",po::value<string>(&outputh5_file)->default_value("output.h5"), "output filename")
+            ("system,s",po::value<string>(&system)->default_value("generic"), "system name")
+            ("baseline,b",po::value<string>(&baseline_file), "baseline file for process normalization")
+            ("start,S",po::value<time_t>(&starttime), "start time (seconds since UNIX epoch)")
+            ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
+            ("fsMonitor", po::value<vector<string> >(&fs_monitor)->composing(), "regexes matching filesystems to monitor")
+        ;
+
+        po::options_description options;
+        options.add(basic).add(config);
+        po::variables_map vm;
+        try {
+            po::store(po::command_line_parser(argc, argv).options(options).run(), vm);
+            po::notify(vm);
+            if (vm.count("help")) {
+                cout << options << endl;
+                exit(0);
+            }
+            if (vm.count("version")) {
+                version();
+                exit(0);
+            }
+            if (vm.count("debug")) {
+                debug = true;
+            }
+        } catch (exception &e) {
+            cout << e.what() << endl;
+            cout << options << endl;
+            exit(1);
+        }
+
+        if (nThreads < 1) {
+            cerr << "Need at least one (1) worker thread!" << endl;
+            //usage(options, 1);
+        }
+        for (string& it: fs_monitor) {
+            size_t pos = it.find('=');
+            if (pos == string::npos) continue;
+            string key = it.substr(0, pos);
+            string value = it.substr(pos+1);
+            fs_monitor_regex.emplace_back(pair<string,regex*>(key,new regex(value)));
+        }
+    }
+
+    ~ProcmonSummarizeConfig() {
+        for (pair<string,regex*>& item: fs_monitor_regex) {
+            delete item.second;
+        }
+    }
+
+    inline const vector<string> &getProcmonH5Inputs() const {
+        return procmonh5_files;
+    }
+    inline const int getNThreads() const {
+        return nThreads;
+    }
+
+    inline const bool isDebug() const {
+        return debug;
+    }
+    inline const string& getBaselinePath() const {
+        return baseline_file;
+    }
+    inline const string& getOutputH5Path() const {
+        return outputh5_file;
+    }
+    inline const string& getSystem() const {
+        return system;
+    }
+    inline const vector<pair<string,regex *> >& getFilesystemMonitorRegexes() const {
+        return fs_monitor_regex;
+    }
+    inline const time_t getStartTime() {
+        return starttime;
+    }
+};
 
 struct H5FileControl {
     ProcHDF5IO *file;
@@ -209,12 +319,15 @@ class ProcessMasker {
 template <class pmType>
 class ProcessReducer {
     public:
-    ProcessReducer(SummaryHashMap& _index, vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname):
+    ProcessReducer(const ProcmonSummarizeConfig *_config, SummaryHashMap& _index, vector<ProcessSummary>& _summaries, size_t _maxSummaries, const string& _hostname, vector<IdentifiedNetworkConnection> &_networkConnections, vector<IdentifiedFilesystem> &_filesystems):
         hostname(_hostname)
     {
         summaries    = &_summaries;
         maxSummaries = _maxSummaries;
         summaryIndex = &_index;
+        networkConnections = &_networkConnections;
+        filesystems = &_filesystems;
+        config = _config;
     }
 
     void operator()(const pair<pmType*,pmType*> *begin, const pair<pmType*,pmType*> *end) {
@@ -226,8 +339,11 @@ class ProcessReducer {
     private:
     void reduce(pmType *, pmType *);
 
+    const ProcmonSummarizeConfig *config;
     SummaryHashMap *summaryIndex;
     vector<ProcessSummary> *summaries;
+    vector<IdentifiedNetworkConnection> *networkConnections;
+    vector<IdentifiedFilesystem> *filesystems;
     size_t maxSummaries;
     string hostname;
 
@@ -330,6 +446,7 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
     summary->m_share = record->m_share;
     summary->m_text = record->m_text;
     summary->m_data = record->m_data;
+    summary->nRecords = nRecords;
 
     struct passwd *pwd = getpwuid(summary->realUid);
     if (pwd != NULL) {
@@ -373,7 +490,6 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
     summary->mresidentRateMax = *( max_element(mresidentRate.begin(), mresidentRate.end()) );
     summary->duration = *( max_element(duration.begin(), duration.end()) );
     summary->cpuTime = *( max_element(cpu.begin(), cpu.end()) );
-    summary->nRecords = nRecords;
 
     /* calculate covariance coefficients of the rates */
     vector<double> cpuRateVar(nDeltas);
@@ -468,10 +584,78 @@ void ProcessReducer<procobs>::reduce(procobs *start, procobs *end) {
     summary->nObservations = nObs;
 }
 
+template <>
+void ProcessReducer<procfd>::reduce(procfd *start, procfd *end) {
+    size_t n_fd = end-start;
+    if (n_fd == 0) {
+        return;
+    }
+    unordered_map<string, int> network_map;
+    unordered_map<string, pair<int,int> > filesystem_map;
+    const vector<pair<string,regex *> > fs_regexes = config->getFilesystemMonitorRegexes();
+    ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
+    for (procfd *ptr = start; ptr != end; ++ptr) {
+        if ((strncmp(ptr->path, "tcp:", 4) == 0) || (strncmp(ptr->path, "udp:", 4) == 0)) {
+            auto it = network_map.find(ptr->path);
+            if (it == network_map.end()) {
+                network_map[ptr->path] = 1;
+            } else {
+                it->second += 1;
+            }
+        } else {
+            bool write = ptr->mode & S_IWUSR;
+            bool read  = ptr->mode & S_IRUSR;
+
+            for (auto &it: fs_regexes) {
+                const string &label = it.first;
+                regex *fs_regex = it.second;
+                if (regex_match(ptr->path, *fs_regex)) {
+                    auto mapIt = filesystem_map.find(label);
+                    if (mapIt == filesystem_map.end()) {
+                        filesystem_map[label] = pair<int,int>(0,0);
+                    }
+                    pair<int,int>& result = filesystem_map[label];
+                    result.first += read;
+                    result.second += write;
+                }
+            }
+        }
+    }
+    for (auto it: network_map) {
+        const string &net = it.first;
+        networkConnections->emplace_back(*summary, net);
+    }
+    for (auto it: filesystem_map) {
+        const string &fs = it.first;
+        int read = it.second.first;
+        int write = it.second.second;
+        filesystems->emplace_back(*summary, fs, read, write);
+    }
+}
+
+class ProcessMetadata {
+    public:
+    int pid;
+    int ppid;
+    double startTime;
+    pair<time_t,int> pkey;
+
+    ProcessMetadata(const ProcessSummary &summary):
+        pkey(summary.startTime, summary.pid)
+    {
+        pid = summary.pid;
+        ppid = summary.ppid;
+        startTime = summary.orig_startTime;
+    }
+};
+
 class ProcessData {
     private:
     SummaryHashMap summaryIndex;
     vector<ProcessSummary> summaries;
+    vector<IdentifiedFilesystem> filesystems;
+    vector<IdentifiedNetworkConnection> networkConnections;
+    const ProcmonSummarizeConfig *config;
 
     public:
     procstat *ps;
@@ -484,7 +668,8 @@ class ProcessData {
     int n_obs;
     bool owndata;
 
-    ProcessData() {
+    ProcessData(const ProcmonSummarizeConfig &_config) {
+        config = &_config;
         owndata = true;
         ps = NULL;
         pd = NULL;
@@ -577,18 +762,84 @@ class ProcessData {
 
         summaries.reserve(maxRecords);
 
-        ProcessReducer<procstat> ps_red(summaryIndex, summaries, maxRecords, hostname);
-        ProcessReducer<procdata> pd_red(summaryIndex, summaries, maxRecords, hostname);
-        ProcessReducer<procfd>   fd_red(summaryIndex, summaries, maxRecords, hostname);
-        ProcessReducer<procobs>  obs_red(summaryIndex, summaries, maxRecords, hostname);
+        ProcessReducer<procstat> ps_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
+        ProcessReducer<procdata> pd_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
+        ProcessReducer<procfd>   fd_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
+        ProcessReducer<procobs>  obs_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
 
         ps_red(&*ps_boundaries.begin(), &*ps_boundaries.end());
         pd_red(&*pd_boundaries.begin(), &*pd_boundaries.end());
         obs_red(&*obs_boundaries.begin(), &*obs_boundaries.end());
+        fd_red(&*fd_boundaries.begin(), &*fd_boundaries.end());
 
         /* XXX HERE XXX
         tbb::parallel_reduce(tbb::blocked_range<procfd>(fd_boundaries.begin(), fd_boundaries.end()), fd_red);
         */
+
+        vector<ProcessMetadata> metadata;
+        metadata.reserve(summaries.size());
+        /* perform some per-summary post processing */
+        for (ProcessSummary &summary: summaries) {
+
+            /* check to see if a baseline record exists for this process */
+            ProcessSummary *baselineRecord = NULL;
+            summary.derived_startTime = summary.startTime + 1e-6*summary.startTimeUSec;
+            summary.derived_recTime = summary.recTime + 1e-6*summary.recTimeUSec;
+            summary.orig_startTime = summary.derived_startTime;
+            if (summary.startTime < baselineTime && baseline != NULL) {
+                pair<time_t,int> key(summary.startTime, summary.pid);
+                auto baselineIt = baseline->summaryIndex.find(key);
+                if (baselineIt != baseline->summaryIndex.end()) {
+                    baselineRecord = baselineIt->second;
+                }
+            }
+
+            /* baseline the process if possible */
+            if (baselineRecord != NULL) {
+                summary.baseline_startTime = baselineTime;
+                summary.cpuTime_net = summary.cpuTime - baselineRecord->cpuTime;
+                summary.utime_net = summary.utime - baselineRecord->utime;
+                summary.stime_net = summary.stime - baselineRecord->stime;
+                summary.io_rchar_net = summary.io_rchar - baselineRecord->io_rchar;
+                summary.io_wchar_net = summary.io_wchar - baselineRecord->io_wchar;
+            } else {
+                summary.baseline_startTime = summary.orig_startTime;
+                summary.cpuTime_net = summary.cpuTime;
+                summary.utime_net = summary.utime;
+                summary.stime_net = summary.stime;
+                summary.io_rchar_net = summary.io_rchar;
+                summary.io_wchar_net = summary.io_wchar;
+            }
+            summary.duration = summary.derived_recTime - summary.baseline_startTime;
+            summary.volatilityScore = (summary.nRecords - 1) / summary.nObservations;
+            metadata.emplace_back(summary);
+        }
+
+        /* discover the process hierarchy; sort by startTime to reduce useless
+           comparisons */
+        /*
+        sort(metadata.begin(), metadata.end(),
+            [](const ProcessMetadata& a, const ProcessMetadata& b) {
+                return a.startTime > b.startTime;
+            }
+        );
+        */
+        ProcessMetadata *mstart = &*metadata.begin();
+        ProcessMetadata *mend   = &*metadata.end();
+        for (ProcessMetadata *ptr = mstart; ptr != mend; ++ptr) {
+            bool isParent = false;
+            for (ProcessMetadata *curr = mstart; curr != mend; ++curr) {
+                isParent |= curr->ppid - ptr->pid == 0;
+            }
+            if (isParent) {
+                auto it = summaryIndex.find(ptr->pkey);
+                if (it != summaryIndex.end()) {
+                    it->second->isParent = 1;
+                } else {
+                    cerr << "FAIL --- COULD NOT FIND PROCESS" << ptr->pid << endl;
+                }
+            }
+        }
     }
 
     ~ProcessData() {
@@ -613,116 +864,14 @@ class ProcessData {
     vector<ProcessSummary>& getSummaries() {
         return summaries;
     }
-};
-
-
-/* ProcReducer
-    * Takes in procmon data from all sources and only writes the minimal record
-    * Writes an HDF5 file for all procdata foreach day
-*/
-
-void version() {
-    cout << "ProcmonSummarize " << PROCMON_SUMMARIZE_VERSION << endl;
-    exit(0);
-}
-
-class ProcmonSummarizeConfig {
-    private:
-    vector<pair<string,regex*> > fs_monitor_regex;
-    vector<string> procmonh5_files;
-    unsigned int nThreads;
-    string baseline_file;
-    string outputh5_file;
-    string system;
-    bool debug;
-
-    public:
-
-    ProcmonSummarizeConfig(int argc, char **argv) {
-        vector<string> fs_monitor;
-
-        /* Parse command line arguments */
-        po::options_description basic("Basic Options");
-        basic.add_options()
-            ("version", "Print version information")
-            ("help,h", "Print help message")
-            ("verbose,v", "Print extra (debugging) information")
-        ;
-        po::options_description config("Configuration Options");
-        config.add_options()
-            ("input,i",po::value<vector<string> >(&procmonh5_files)->composing(), "input filename(s) (required)")
-            ("output,o",po::value<string>(&outputh5_file)->default_value("output.h5"), "output filename")
-            ("system,s",po::value<string>(&system)->default_value("generic"), "system name")
-            ("baseline,b",po::value<string>(&baseline_file), "baseline file for process normalization")
-            ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
-            ("fsMonitor", po::value<vector<string> >(&fs_monitor)->composing(), "regexes matching filesystems to monitor")
-        ;
-
-        po::options_description options;
-        options.add(basic).add(config);
-        po::variables_map vm;
-        try {
-            po::store(po::command_line_parser(argc, argv).options(options).run(), vm);
-            po::notify(vm);
-            if (vm.count("help")) {
-                cout << options << endl;
-                exit(0);
-            }
-            if (vm.count("version")) {
-                version();
-                exit(0);
-            }
-            if (vm.count("debug")) {
-                debug = true;
-            }
-        } catch (exception &e) {
-            cout << e.what() << endl;
-            cout << options << endl;
-            exit(1);
-        }
-
-        if (nThreads < 1) {
-            cerr << "Need at least one (1) worker thread!" << endl;
-            //usage(options, 1);
-        }
-        for (string& it: fs_monitor) {
-            size_t pos = it.find('=');
-            if (pos == string::npos) continue;
-            string key = it.substr(0, pos);
-            string value = it.substr(pos+1);
-            fs_monitor_regex.emplace_back(pair<string,regex*>(key,new regex(value)));
-        }
+    vector<IdentifiedFilesystem>& getIdentifiedFilesystems() {
+        return filesystems;
     }
-
-    ~ProcmonSummarizeConfig() {
-        for (pair<string,regex*>& item: fs_monitor_regex) {
-            delete item.second;
-        }
-    }
-
-    inline const vector<string> &getProcmonH5Inputs() const {
-        return procmonh5_files;
-    }
-    inline const int getNThreads() const {
-        return nThreads;
-    }
-
-    inline const bool isDebug() const {
-        return debug;
-    }
-    inline const string& getBaselinePath() const {
-        return baseline_file;
-    }
-    inline const string& getOutputH5Path() const {
-        return outputh5_file;
-    }
-    inline const string& getSystem() const {
-        return system;
-    }
-    inline const vector<pair<string,regex *> >& getFilesystemMonitorRegexes() const {
-        return fs_monitor_regex;
+    vector<IdentifiedNetworkConnection>& getNetworkConnections() {
+        return networkConnections;
     }
 };
+
 
 int main(int argc, char **argv) {
     ProcmonSummarizeConfig config(argc, argv);
@@ -731,15 +880,35 @@ int main(int argc, char **argv) {
     H5FileControl *baselineInput = NULL;
     shared_ptr<pmio2::Hdf5Io> output = make_shared<pmio2::Hdf5Io>(config.getOutputH5Path(), pmio2::IoMode::MODE_WRITE) ;
     output->addDataset("ProcessSummary",
-            make_shared<pmio2::Hdf5DatasetFactory<ProcessSummary> >(
-                output,
-                make_shared<pmio2::Hdf5Type<ProcessSummary> >(output),
-                0, // unlimited max size
-                256, // 256 processes per block
-                10,  // zipLevel 10
-                "ProcessSummary" // datasetName
-            )
+        make_shared<pmio2::Hdf5DatasetFactory<ProcessSummary> >(
+            output,
+            make_shared<pmio2::Hdf5Type<ProcessSummary> >(output),
+            0, // unlimited max size
+            256, // 256 processes per block
+            9,  // zipLevel 9 (highest)
+            "ProcessSummary" // datasetName
+        )
     );    
+    output->addDataset("IdentifiedFilesystem",
+        make_shared<pmio2::Hdf5DatasetFactory<IdentifiedFilesystem> >(
+            output,
+            make_shared<pmio2::Hdf5Type<IdentifiedFilesystem> >(output),
+            0,
+            256,
+            9,
+            "IdentifiedFilesystem"
+        )
+    );
+    output->addDataset("IdentifiedNetworkConnection",
+        make_shared<pmio2::Hdf5DatasetFactory<IdentifiedNetworkConnection> >(
+            output,
+            make_shared<pmio2::Hdf5Type<IdentifiedNetworkConnection> >(output),
+            0,
+            256,
+            9,
+            "IdentifiedNetworkConnection"
+        )
+    );
 
     vector<H5FileControl *> inputFiles;
     vector<vector<string> > inputHosts;
@@ -764,14 +933,15 @@ int main(int argc, char **argv) {
     size_t count = 0;
     pmio2::Context context(config.getSystem(), "processes", "*", "*");
     output->setContext(context);
+    output->setContextOverride(true);
     for (string host: allHosts) {
         if (host == lastHost) continue;
         lastHost = host;
 
-        ProcessData *processData = new ProcessData();
+        ProcessData *processData = new ProcessData(config);
         ProcessData *baselineData = NULL;
         if (find(baselineHosts.begin(), baselineHosts.end(), host) != baselineHosts.end()) {
-            baselineData = new ProcessData();
+            baselineData = new ProcessData(config);
             baselineData->readData(host, baselineInput);
             baselineData->summarizeProcesses(host, NULL, 0);
         }
@@ -782,11 +952,19 @@ int main(int argc, char **argv) {
             }
             processData->readData(host, inputFiles[idx]);
         }
-        processData->summarizeProcesses(host, baselineData, 0);
+        processData->summarizeProcesses(host, baselineData, config.getStartTime());
 
         ProcessSummary *start = &*(processData->getSummaries().begin());
         ProcessSummary *end = &*(processData->getSummaries().end());
         output->write("ProcessSummary", start, end);
+        output->write("IdentifiedNetworkConnection",
+                &*(processData->getNetworkConnections().begin()),
+                &*(processData->getNetworkConnections().end())
+        );
+        output->write("IdentifiedFilesystem",
+                &*(processData->getIdentifiedFilesystems().begin()),
+                &*(processData->getIdentifiedFilesystems().end())
+        );
 
         if (baselineData != NULL) {
             delete baselineData;

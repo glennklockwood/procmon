@@ -129,26 +129,73 @@ class ProcessSummary {
 
 class IdentifiedFilesystem {
     public:
-    IdentifiedFilesystem(ProcessSummary& other) {
+    IdentifiedFilesystem(const ProcessSummary &other, const string &_filesystem, const int _read, const int _write) {
         strncpy(host, other.host, EXEBUFFER_SIZE);
         strncpy(identifier, other.identifier, IDENTIFIER_SIZE);
         strncpy(subidentifier, other.subidentifier, IDENTIFIER_SIZE);
+        strncpy(command, other.command, BUFFER_SIZE);
         startTime = other.startTime;
+        startTimeUSec = other.startTimeUSec;
         pid = other.pid;
+        strncpy(filesystem, _filesystem.c_str(), IDENTIFIER_SIZE);
+        read = _read;
+        write = _write;
     }
 
     char identifier[IDENTIFIER_SIZE];
     char subidentifier[IDENTIFIER_SIZE];
-    unsigned long recTime;
-    unsigned long recTimeUSec;
-
     unsigned long startTime;
     unsigned long startTimeUSec;
     int pid;
     char host[EXEBUFFER_SIZE];
     char filesystem[BUFFER_SIZE];
+    char command[BUFFER_SIZE];
     int read;
     int write;
+};
+
+class IdentifiedNetworkConnection {
+    public:
+    IdentifiedNetworkConnection(const ProcessSummary &other, const string &net) {
+        strncpy(host, other.host, EXEBUFFER_SIZE);
+        strncpy(identifier, other.identifier, EXEBUFFER_SIZE);
+        strncpy(subidentifier, other.subidentifier, EXEBUFFER_SIZE);
+        strncpy(command, other.command, BUFFER_SIZE);
+        startTime = other.startTime;
+        startTimeUSec = other.startTimeUSec;
+        pid = other.pid;
+
+        int count = 0;
+        size_t searchPos = 0;
+        for (int count = 0; count < 5; ++count) {
+            size_t endPos = net.find(':', searchPos);
+            string component = net.substr(searchPos, endPos);
+            switch (count) {
+                case 0: strncpy(protocol, component.c_str(), IDENTIFIER_SIZE); break;
+                case 1: strncpy(localAddress, component.c_str(), EXEBUFFER_SIZE); localAddress[endPos - searchPos] = 0; break;
+                case 2: localPort = atoi(component.c_str()); break;
+                case 3: strncpy(remoteAddress, component.c_str(), EXEBUFFER_SIZE); remoteAddress[endPos - searchPos] = 0; break;
+                case 4: remotePort = atoi(component.c_str()); break;
+            }
+            if (endPos == string::npos) {
+                break;
+            }
+            searchPos = endPos + 1;
+        }
+    }
+
+    char identifier[IDENTIFIER_SIZE];
+    char subidentifier[IDENTIFIER_SIZE];
+    char host[EXEBUFFER_SIZE];
+    unsigned long startTime;
+    unsigned long startTimeUSec;
+    int pid;
+    char command[BUFFER_SIZE];
+    char protocol[IDENTIFIER_SIZE];
+    char remoteAddress[EXEBUFFER_SIZE];
+    int remotePort;
+    char localAddress[EXEBUFFER_SIZE];
+    int localPort;
 };
 
 static inline std::string &trim(std::string &s) {
