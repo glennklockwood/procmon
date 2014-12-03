@@ -23,6 +23,8 @@
 #include <vector>
 #include <memory>
 
+#include <iostream>
+
 #include "config.h"
 
 #ifdef USE_HDF5
@@ -234,10 +236,7 @@ class Hdf5Type {
     bool set;
     hid_t type;
 
-    void initializeType(shared_ptr<Hdf5Io> io) {
-        // no-op for default, must be specialized
-        set = false;
-    }
+    void initializeType(shared_ptr<Hdf5Io> io);
 };
 
 class Hdf5Group {
@@ -510,7 +509,7 @@ size_t Hdf5Dataset<pmType>::initializeDataset() {
     } else if (ioMethod->writable()) {
         hid_t param;
 		hsize_t rank = 1;
-        hsize_t initial_dims = blockSize;
+        hsize_t initial_dims = 0;
         hsize_t maximal_dims = maxSize;
         if (maxSize == 0) {
             maximal_dims = H5S_UNLIMITED;
@@ -571,7 +570,7 @@ template <class pmType>
 size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
     if (!ioMethod->getContextOverride()) {
         const Context &context = ioMethod->getContext();
-        for (pmType *ptr = start; ptr != end; ++end) {
+        for (pmType *ptr = start; ptr != end; ++ptr) {
             snprintf(ptr->identifier, IDENTIFIER_SIZE, "%s", context.identifier.c_str());
             snprintf(ptr->subidentifier, IDENTIFIER_SIZE, "%s", context.subidentifier.c_str());
         }
