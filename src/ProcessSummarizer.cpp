@@ -11,7 +11,6 @@
 #include <fstream>
 #include <deque>
 #include <unordered_map>
-#include <regex>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -20,6 +19,9 @@
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/regex.hpp>
+
+#include <assert.h>
 #define PROCMON_SUMMARIZE_VERSION 2.0
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
@@ -29,9 +31,22 @@ namespace std {
     template <>
     struct hash<pair<time_t,int> > {
         size_t operator()(const pair<time_t,int> &k) const {
-            return ((hash<time_t>()(k.first) ^ (hash<int>()(k.second) << 1)) >> 1);
+            //return ((hash<time_t>()(k.first) ^ (hash<int>()(k.second) << 1)) >> 1);
+            return (k.first << 16) ^ k.second;
         }
     };
+}
+
+bool matchRegex(const char *str, boost::regex *tgt) {
+    try {
+        if (boost::regex_match(str, *tgt)) {
+            return true;
+        }
+        return false;
+    } catch (boost::regex_error &e) {
+        cout << "REGEX ERROR" << endl;
+    }
+    return false;
 }
 
 typedef unordered_map<pair<time_t,int>, ProcessSummary *> SummaryHashMap;
@@ -57,7 +72,7 @@ struct JobData {
         size_t endPos = string::npos;
         for (int count = 0; count < 4; ++count) {
             endPos = line.find(delim, searchPos);
-            string component = line.substr(searchPos, endPos);
+            string component = endPos == string::npos ? line.substr(searchPos) : line.substr(searchPos, endPos - searchPos);
             component = trim(component);
             switch (count) {
                 case 0: jobid = component; break;
@@ -76,8 +91,9 @@ struct JobData {
 class ProcmonSummarizeConfig {
     private:
     vector<string> fs_monitor;
-    vector<pair<string,regex*> > fs_monitor_regex;
+    vector<pair<string,boost::regex*> > fs_monitor_regex;
     vector<string> procmonh5_files;
+    vector<string> specific_hosts;
     unsigned int nThreads;
     vector<string> baseline_files;
     string outputh5_file;
@@ -122,6 +138,7 @@ class ProcmonSummarizeConfig {
             ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
             ("fsMonitor", po::value<vector<string> >(&fs_monitor)->composing(), "regexes matching filesystems to monitor")
             ("batch,b", po::value<string>(&batchjobs), "path to CSV formatted file containing batch job information [job,task,user,project]")
+            ("host,H", po::value<vector<string> >(&specific_hosts), "optional hosts to examine (limit to just these hosts)")
         ;
 
         options.add(basic).add(config);
@@ -189,18 +206,25 @@ class ProcmonSummarizeConfig {
             if (pos == string::npos) continue;
             string key = it.substr(0, pos);
             string value = it.substr(pos+1);
-            fs_monitor_regex.emplace_back(pair<string,regex*>(key,new regex(value)));
+            try {
+                fs_monitor_regex.emplace_back(pair<string,boost::regex*>(key,new boost::regex(value)));
+            } catch (boost::regex_error &e) {
+                cerr << "Failure to parse regex: " << value << ";" << e.code() << endl;
+            }
         }
     }
 
     ~ProcmonSummarizeConfig() {
-        for (pair<string,regex*>& item: fs_monitor_regex) {
+        for (pair<string,boost::regex*>& item: fs_monitor_regex) {
             delete item.second;
         }
     }
 
     inline const vector<string> &getProcmonH5Inputs() const {
         return procmonh5_files;
+    }
+    inline const vector<string> &getHosts() const {
+        return specific_hosts;
     }
     inline const int getNThreads() const {
         return nThreads;
@@ -218,7 +242,7 @@ class ProcmonSummarizeConfig {
     inline const string& getSystem() const {
         return system;
     }
-    inline const vector<pair<string,regex *> >& getFilesystemMonitorRegexes() const {
+    inline const vector<pair<string,boost::regex *> >& getFilesystemMonitorRegexes() const {
         return fs_monitor_regex;
     }
     inline const unordered_map<string, JobData>& getJobData() const {
@@ -411,6 +435,7 @@ class ProcessReducer {
         networkConnections = &_networkConnections;
         filesystems = &_filesystems;
         config = _config;
+        count = 0;
     }
 
     void operator()(const pair<pmType*,pmType*> *begin, const pair<pmType*,pmType*> *end) {
@@ -429,18 +454,21 @@ class ProcessReducer {
     vector<IdentifiedFilesystem> *filesystems;
     size_t maxSummaries;
     string hostname;
+    int count = 0;
 
     ProcessSummary *findSummary(const string& identifier, const string& subidentifier, time_t start, int pid) {
+        count++;
         ProcessSummary *ret = NULL;
         pair<time_t,int> key(start, pid);
         auto it = summaryIndex->find(key);
         if (it == summaryIndex->end()) {
             summaries->emplace_back(hostname, identifier, subidentifier, start, pid);
-            auto pos = summaries->rbegin();
-            ret = &*pos;
+            ret = &(summaries->back());
             (*summaryIndex)[key] = ret;
+            assert(ret >= &*(summaries->begin()));
         } else {
             ret = it->second;
+            assert(ret >= &*(summaries->begin()));
         }
         return ret;
     }
@@ -473,6 +501,7 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
 
     const size_t nRecords = end-start;
     if (nRecords == 0) {
+    cerr << "no records for procstat?; " << endl;
         /* XXX throw exception, cause problems, etc XXX */
         return;
     }
@@ -615,6 +644,7 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
 
     size_t nRecords = end-start;
     if (nRecords == 0) {
+        cerr << "no records for procdata?;" << endl; 
         /* XXX throw exception, cause problems, etc XXX */
         return;
     }
@@ -672,6 +702,7 @@ void ProcessReducer<procobs>::reduce(procobs *start, procobs *end) {
     size_t nObs = end-start;
     if (nObs == 0) {
         /* XXX throw exception, cause problems, etc XXX */
+        cerr << "No observations for this process???;" << endl;
         return;
     }
     ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
@@ -686,7 +717,7 @@ void ProcessReducer<procfd>::reduce(procfd *start, procfd *end) {
     }
     unordered_map<string, int> network_map;
     unordered_map<string, pair<int,int> > filesystem_map;
-    const vector<pair<string,regex *> > &fs_regexes = config->getFilesystemMonitorRegexes();
+    const vector<pair<string,boost::regex *> > &fs_regexes = config->getFilesystemMonitorRegexes();
     ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
     for (procfd *ptr = start; ptr != end; ++ptr) {
         if ((strncmp(ptr->path, "tcp:", 4) == 0) || (strncmp(ptr->path, "udp:", 4) == 0)) {
@@ -702,8 +733,8 @@ void ProcessReducer<procfd>::reduce(procfd *start, procfd *end) {
 
             for (auto &it: fs_regexes) {
                 const string &label = it.first;
-                regex *fs_regex = it.second;
-                if (regex_match(ptr->path, *fs_regex)) {
+                boost::regex *fs_regex = it.second;
+                if (matchRegex(ptr->path, fs_regex)) {
                     auto mapIt = filesystem_map.find(label);
                     if (mapIt == filesystem_map.end()) {
                         filesystem_map[label] = pair<int,int>(0,0);
@@ -852,9 +883,10 @@ class ProcessData {
             fd_boundaries.size(), obs_boundaries.size(),
         });
 
-        cout << hostname << ": ps " << ps_boundaries.size() << "; pd " << pd_boundaries.size() << "; fd " << fd_boundaries.size() << "; obs " << obs_boundaries.size() << endl;
+        cout << hostname << ": ps " << ps_boundaries.size() << "; pd " << pd_boundaries.size() << "; fd " << fd_boundaries.size() << "; obs " << obs_boundaries.size() << "; " << maxRecords << endl;
 
         summaries.reserve(maxRecords);
+        cout << "summaries capacity: " << summaries.capacity() << endl;
 
         ProcessReducer<procstat> ps_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
         ProcessReducer<procdata> pd_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
@@ -905,7 +937,11 @@ class ProcessData {
                 summary.io_wchar_net = summary.io_wchar;
             }
             summary.duration = summary.derived_recTime - summary.baseline_startTime;
-            summary.volatilityScore = (summary.nRecords - 1) / summary.nObservations;
+            if (summary.nObservations > 0) {
+                summary.volatilityScore = (summary.nRecords - 1) / summary.nObservations;
+            } else {
+                summary.volatilityScore = 0;
+            }
             metadata.emplace_back(summary);
 
         }
@@ -979,7 +1015,7 @@ int main(int argc, char **argv) {
             output,
             make_shared<pmio2::Hdf5Type<ProcessSummary> >(output),
             0, // unlimited max size
-            256, // 256 processes per block
+            4096, // 256 processes per block
             9,  // zipLevel 9 (highest)
             "ProcessSummary" // datasetName
         )
@@ -989,7 +1025,7 @@ int main(int argc, char **argv) {
             output,
             make_shared<pmio2::Hdf5Type<IdentifiedFilesystem> >(output),
             0,
-            256,
+            4096,
             9,
             "IdentifiedFilesystem"
         )
@@ -1010,6 +1046,7 @@ int main(int argc, char **argv) {
     vector<vector<string> > inputHosts;
     vector<string> allHosts;
     vector<vector<string> > baselineHosts;
+    const vector<string>& limitHosts = config.getHosts();
     for (auto it: config.getBaselineH5Inputs()) {
         H5FileControl *baseline = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
         baselineFiles.push_back(baseline);
@@ -1034,6 +1071,10 @@ int main(int argc, char **argv) {
     pmio2::Context context(config.getSystem(), "processes", "*", "*");
     output->setContext(context);
     output->setContextOverride(true);
+    if (limitHosts.size() > 0) {
+        allHosts.clear();
+        allHosts.insert(allHosts.end(), limitHosts.begin(), limitHosts.end());
+    }
     for (string host: allHosts) {
         if (host == lastHost) continue;
         lastHost = host;

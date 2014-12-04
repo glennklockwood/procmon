@@ -728,6 +728,8 @@ bool ProcAMQPIO::_amqp_bind_context() {
 
 #ifdef USE_HDF5
 Hdf5Group::Hdf5Group(Hdf5Io &h5File, const string &groupName) {
+    group = -1;
+    set = false;
     if (H5Lexists(h5File.file, groupName.c_str(), H5P_DEFAULT) == 1) {
         group = H5Gopen2(h5File.file, groupName.c_str(), H5P_DEFAULT);
         set = true;
@@ -744,6 +746,7 @@ Hdf5Io::Hdf5Io(const string& _filename, IoMode _mode):
     IoMethod(), filename(_filename), mode(_mode)
 {
 	file = -1;
+    root = -1;
 	strType_exeBuffer = -1;
 	strType_buffer = -1;
 	strType_idBuffer = -1;

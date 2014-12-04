@@ -176,7 +176,7 @@ class IdentifiedNetworkConnection {
         size_t searchPos = 0;
         for (int count = 0; count < 5; ++count) {
             size_t endPos = net.find(':', searchPos);
-            string component = net.substr(searchPos, endPos);
+            string component = endPos == string::npos ? net.substr(searchPos) : net.substr(searchPos, endPos - searchPos);
             switch (count) {
                 case 0: strncpy(protocol, component.c_str(), IDENTIFIER_SIZE); break;
                 case 1:

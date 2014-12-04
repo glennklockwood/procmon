@@ -220,6 +220,7 @@ template <class pmType>
 class Hdf5Type {
     public:
     Hdf5Type(shared_ptr<Hdf5Io> io) {
+        type = 0;
         initializeType(io);
     }
     ~Hdf5Type() {
@@ -485,8 +486,12 @@ Hdf5Dataset<pmType>::Hdf5Dataset(
 {
     type = _h5type;
     blockSize = _blockSize;
+    maxSize = _maxSize;
     zipLevel = _zipLevel;
     lastUpdate = 0;
+    size = 0;
+    dataset = 0;
+    size_id = 0;
     group = _ioMethod->getCurrentGroup();
     initializeDataset();
 
@@ -521,6 +526,7 @@ size_t Hdf5Dataset<pmType>::initializeDataset() {
             H5Pset_deflate(param, zipLevel);
         }
         if (blockSize > 0) {
+            H5Pset_layout(param, H5D_CHUNKED);
     	    hsize_t chunk_dims = blockSize;
             H5Pset_chunk(param, rank, &chunk_dims);
         }
