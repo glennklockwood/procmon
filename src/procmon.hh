@@ -307,7 +307,7 @@ class ProcmonConfig {
         string baseConfigFile = string(SYSTEM_CONFIG_DIR) + "/procmon.conf";
         char *configEnv = NULL;
         if ((configEnv = getenv("PROCMON_DIR")) != NULL) {
-            baseConfigFile = configEnv;
+            baseConfigFile = string(configEnv) + "/procmon.conf";
         }
 
         /* read command line options first */

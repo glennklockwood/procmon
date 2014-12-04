@@ -26,6 +26,8 @@ void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "filesystem",    HOFFSET(IdentifiedFilesystem, filesystem),    file->strType_buffer);
     H5Tinsert(h5type, "read",          HOFFSET(IdentifiedFilesystem, read),          H5T_NATIVE_UINT);
     H5Tinsert(h5type, "write",         HOFFSET(IdentifiedFilesystem, write),         H5T_NATIVE_UINT);
+    H5Tinsert(h5type, "user",          HOFFSET(IdentifiedFilesystem, user),          file->strType_exeBuffer);
+    H5Tinsert(h5type, "project",       HOFFSET(IdentifiedFilesystem, project),       file->strType_exeBuffer);
     type = h5type;
 }
 
@@ -43,6 +45,8 @@ void Hdf5Type<IdentifiedNetworkConnection>::initializeType(shared_ptr<Hdf5Io> fi
     H5Tinsert(h5type, "remotePort",    HOFFSET(IdentifiedNetworkConnection, remotePort),    H5T_NATIVE_INT);
     H5Tinsert(h5type, "localAddress",  HOFFSET(IdentifiedNetworkConnection, localAddress),  file->strType_exeBuffer);
     H5Tinsert(h5type, "localPort",     HOFFSET(IdentifiedNetworkConnection, localPort),     H5T_NATIVE_INT);
+    H5Tinsert(h5type, "user",          HOFFSET(IdentifiedNetworkConnection, user),          file->strType_exeBuffer);
+    H5Tinsert(h5type, "project",       HOFFSET(IdentifiedNetworkConnection, project),       file->strType_exeBuffer);
     type = h5type;
 }
 

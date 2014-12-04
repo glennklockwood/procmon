@@ -130,14 +130,17 @@ class ProcessSummary {
 class IdentifiedFilesystem {
     public:
     IdentifiedFilesystem(const ProcessSummary &other, const string &_filesystem, const int _read, const int _write) {
-        strncpy(host, other.host, EXEBUFFER_SIZE);
-        strncpy(identifier, other.identifier, IDENTIFIER_SIZE);
-        strncpy(subidentifier, other.subidentifier, IDENTIFIER_SIZE);
-        strncpy(command, other.command, BUFFER_SIZE);
+        snprintf(host, EXEBUFFER_SIZE, "%s", other.host);
+        snprintf(identifier, IDENTIFIER_SIZE, "%s", other.identifier);
+        snprintf(subidentifier, IDENTIFIER_SIZE, "%s", other.subidentifier);
+        snprintf(command, BUFFER_SIZE, "%s", other.command);
+        snprintf(user, EXEBUFFER_SIZE, "%s", other.user);
+        snprintf(project, EXEBUFFER_SIZE, "%s", other.project);
+
         startTime = other.startTime;
         startTimeUSec = other.startTimeUSec;
         pid = other.pid;
-        strncpy(filesystem, _filesystem.c_str(), IDENTIFIER_SIZE);
+        snprintf(filesystem, IDENTIFIER_SIZE, "%s", _filesystem.c_str());
         read = _read;
         write = _write;
     }
@@ -150,6 +153,8 @@ class IdentifiedFilesystem {
     char host[EXEBUFFER_SIZE];
     char filesystem[BUFFER_SIZE];
     char command[BUFFER_SIZE];
+    char user[EXEBUFFER_SIZE];
+    char project[EXEBUFFER_SIZE];
     int read;
     int write;
 };
@@ -157,10 +162,12 @@ class IdentifiedFilesystem {
 class IdentifiedNetworkConnection {
     public:
     IdentifiedNetworkConnection(const ProcessSummary &other, const string &net) {
-        strncpy(host, other.host, EXEBUFFER_SIZE);
-        strncpy(identifier, other.identifier, EXEBUFFER_SIZE);
-        strncpy(subidentifier, other.subidentifier, EXEBUFFER_SIZE);
-        strncpy(command, other.command, BUFFER_SIZE);
+        snprintf(host, EXEBUFFER_SIZE, "%s", other.host);
+        snprintf(identifier, IDENTIFIER_SIZE, "%s", other.identifier);
+        snprintf(subidentifier, IDENTIFIER_SIZE, "%s", other.subidentifier);
+        snprintf(command, BUFFER_SIZE, "%s", other.command);
+        snprintf(user, EXEBUFFER_SIZE, "%s", other.user);
+        snprintf(project, EXEBUFFER_SIZE, "%s", other.project);
         startTime = other.startTime;
         startTimeUSec = other.startTimeUSec;
         pid = other.pid;
@@ -172,9 +179,15 @@ class IdentifiedNetworkConnection {
             string component = net.substr(searchPos, endPos);
             switch (count) {
                 case 0: strncpy(protocol, component.c_str(), IDENTIFIER_SIZE); break;
-                case 1: strncpy(localAddress, component.c_str(), EXEBUFFER_SIZE); localAddress[endPos - searchPos] = 0; break;
+                case 1:
+                        snprintf(localAddress, EXEBUFFER_SIZE, "%s", component.c_str());
+                        localAddress[endPos-searchPos] = 0;
+                        break;
                 case 2: localPort = atoi(component.c_str()); break;
-                case 3: strncpy(remoteAddress, component.c_str(), EXEBUFFER_SIZE); remoteAddress[endPos - searchPos] = 0; break;
+                case 3:
+                        snprintf(remoteAddress, EXEBUFFER_SIZE, "%s", component.c_str());
+                        remoteAddress[endPos-searchPos] = 0;
+                        break;
                 case 4: remotePort = atoi(component.c_str()); break;
             }
             if (endPos == string::npos) {
@@ -196,6 +209,8 @@ class IdentifiedNetworkConnection {
     int remotePort;
     char localAddress[EXEBUFFER_SIZE];
     int localPort;
+    char user[EXEBUFFER_SIZE];
+    char project[EXEBUFFER_SIZE];
 };
 
 static inline std::string &trim(std::string &s) {

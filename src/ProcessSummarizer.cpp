@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <string.h>
 #include <iostream>
+#include <fstream>
 #include <deque>
 #include <unordered_map>
 #include <regex>
@@ -18,8 +19,10 @@
 #include <pwd.h>
 
 #include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
 #define PROCMON_SUMMARIZE_VERSION 2.0
 namespace po = boost::program_options;
+namespace fs = boost::filesystem;
 using namespace std;
 
 namespace std {
@@ -43,21 +46,63 @@ void version() {
     exit(0);
 }
 
+struct JobData {
+    string jobid;
+    string taskid;
+    string user;
+    string project;
+
+    JobData(const string& line, char delim=',') {
+        size_t searchPos = 0;
+        size_t endPos = string::npos;
+        for (int count = 0; count < 4; ++count) {
+            endPos = line.find(delim, searchPos);
+            string component = line.substr(searchPos, endPos);
+            component = trim(component);
+            switch (count) {
+                case 0: jobid = component; break;
+                case 1: taskid = component ; break;
+                case 2: user = component; break;
+                case 3: project = component; break;
+            }
+            if (endPos == string::npos) break;
+            searchPos = endPos + 1;
+        }
+    }
+    JobData() {
+    }
+};
+
 class ProcmonSummarizeConfig {
     private:
+    vector<string> fs_monitor;
     vector<pair<string,regex*> > fs_monitor_regex;
     vector<string> procmonh5_files;
     unsigned int nThreads;
-    string baseline_file;
+    vector<string> baseline_files;
     string outputh5_file;
     string system;
+    string batchjobs;
     time_t starttime;
     bool debug;
+    unordered_map<string, JobData> jobdata;
+    po::options_description options;
+
+    void parseBatchJobs() {
+        ifstream input(batchjobs.c_str());
+        string line;
+        while (input.good()) {
+            getline(input, line);
+            if (! input.good()) break;
+            JobData job(line);
+            string key = job.jobid + "." + job.taskid;
+            jobdata[key] = job;
+        }
+    }
 
     public:
 
     ProcmonSummarizeConfig(int argc, char **argv) {
-        vector<string> fs_monitor;
 
         /* Parse command line arguments */
         po::options_description basic("Basic Options");
@@ -65,23 +110,55 @@ class ProcmonSummarizeConfig {
             ("version", "Print version information")
             ("help,h", "Print help message")
             ("verbose,v", "Print extra (debugging) information")
+            ("config.file", po::value<string>(), "ProcessSummarizer configuration file")
         ;
         po::options_description config("Configuration Options");
         config.add_options()
             ("input,i",po::value<vector<string> >(&procmonh5_files)->composing(), "input filename(s) (required)")
             ("output,o",po::value<string>(&outputh5_file)->default_value("output.h5"), "output filename")
             ("system,s",po::value<string>(&system)->default_value("generic"), "system name")
-            ("baseline,b",po::value<string>(&baseline_file), "baseline file for process normalization")
+            ("baseline,b",po::value<vector<string> >(&baseline_files)->composing(), "baseline file for process normalization")
             ("start,S",po::value<time_t>(&starttime), "start time (seconds since UNIX epoch)")
             ("threads,t", po::value<unsigned int>(&nThreads), "number of worker threads to use (one additional I/O and controller thread will also run)")
             ("fsMonitor", po::value<vector<string> >(&fs_monitor)->composing(), "regexes matching filesystems to monitor")
+            ("batch,b", po::value<string>(&batchjobs), "path to CSV formatted file containing batch job information [job,task,user,project]")
         ;
 
-        po::options_description options;
         options.add(basic).add(config);
+        parseOptions(argc, argv);
+    }
+    void parseOptions(int argc, char **argv) {
+        /* setup filename for central configuration file */
+        string baseConfigFile = string(SYSTEM_CONFIG_DIR) + "/processSummarizer.conf";
+        char *configEnv = NULL;
+        if ((configEnv = getenv("PROCMON_DIR")) != NULL) {
+            baseConfigFile = string(configEnv) + "/processSummarizer.conf";
+        }
+
         po::variables_map vm;
         try {
             po::store(po::command_line_parser(argc, argv).options(options).run(), vm);
+
+            if (vm.count("config.file") > 0) {
+                string userConfigFile = vm["config.file"].as<string>();
+                if (userConfigFile.length() > 0 && fs::exists(userConfigFile)) {
+                    ifstream ifs(userConfigFile.c_str());
+                    if (!ifs) {
+                        invalid_argument e(string("Config file doesn't exist: ") + userConfigFile);
+                        throw &e;
+                    }
+                    po::store(po::parse_config_file(ifs, options), vm);
+                    ifs.close();
+                }
+            }
+            if (fs::exists(baseConfigFile)) {
+                ifstream input(baseConfigFile.c_str());
+                if (input) {
+                    invalid_argument e(string("Base config file not readable: " + baseConfigFile));
+                    throw &e;
+                }
+                po::store(po::parse_config_file(input, options), vm);
+            }
             po::notify(vm);
             if (vm.count("help")) {
                 cout << options << endl;
@@ -93,6 +170,9 @@ class ProcmonSummarizeConfig {
             }
             if (vm.count("debug")) {
                 debug = true;
+            }
+            if (vm.count("batch")) {
+                parseBatchJobs();
             }
         } catch (exception &e) {
             cout << e.what() << endl;
@@ -129,8 +209,8 @@ class ProcmonSummarizeConfig {
     inline const bool isDebug() const {
         return debug;
     }
-    inline const string& getBaselinePath() const {
-        return baseline_file;
+    inline const vector<string> &getBaselineH5Inputs() const {
+        return baseline_files;
     }
     inline const string& getOutputH5Path() const {
         return outputh5_file;
@@ -140,6 +220,9 @@ class ProcmonSummarizeConfig {
     }
     inline const vector<pair<string,regex *> >& getFilesystemMonitorRegexes() const {
         return fs_monitor_regex;
+    }
+    inline const unordered_map<string, JobData>& getJobData() const {
+        return jobdata;
     }
     inline const time_t getStartTime() {
         return starttime;
@@ -448,11 +531,22 @@ void ProcessReducer<procstat>::reduce(procstat *start, procstat *end) {
     summary->m_data = record->m_data;
     summary->nRecords = nRecords;
 
+    summary->recTime = record->recTime;
+    summary->recTimeUSec = record->recTimeUSec;
+
     struct passwd *pwd = getpwuid(summary->realUid);
     if (pwd != NULL) {
         snprintf(summary->user, EXEBUFFER_SIZE, "%s", pwd->pw_name);
     } else {
         snprintf(summary->user, EXEBUFFER_SIZE, "%d", summary->realUid);
+    }
+    const unordered_map<string,JobData> &jobdata = config->getJobData();
+    string jobkey = string(summary->identifier) + "." + string(summary->subidentifier);
+    auto jobit = jobdata.find(jobkey);
+    if (jobit != jobdata.end()) {
+        snprintf(summary->project, EXEBUFFER_SIZE, "%s", jobit->second.project.c_str());
+    } else {
+        snprintf(summary->project, EXEBUFFER_SIZE, "Unknown");
     }
 
     for (procstat *ptr = start; ptr < end; ++ptr) {
@@ -536,17 +630,17 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
         return;
     }
 
-    strncpy(summary->execName, record->execName, EXEBUFFER_SIZE);
+    snprintf(summary->execName, EXEBUFFER_SIZE, "%s", record->execName);
     memcpy(summary->cmdArgs, record->cmdArgs, record->cmdArgBytes < BUFFER_SIZE ? record->cmdArgBytes : BUFFER_SIZE);
     summary->cmdArgBytes = record->cmdArgBytes;
-    strncpy(summary->exePath, record->exePath, BUFFER_SIZE);
-    strncpy(summary->cwdPath, record->cwdPath, BUFFER_SIZE);
+    snprintf(summary->exePath, BUFFER_SIZE, "%s", record->exePath);
+    snprintf(summary->cwdPath, BUFFER_SIZE, "%s", record->cwdPath);
     summary->ppid = record->ppid;
 
     Scriptable *scriptObj = Scriptable::getScriptable(record->exePath, record->cmdArgs);
     if (scriptObj != NULL) {
         string script = (*scriptObj)();
-        strncpy(summary->script, script.c_str(), BUFFER_SIZE);
+        snprintf(summary->script, BUFFER_SIZE, "%s", script.c_str());
         delete scriptObj;
     } else {
         summary->script[0] = 0;
@@ -558,7 +652,7 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
     } else {
         slashPtr = record->exePath;
     }
-    strncpy(summary->execCommand, slashPtr, BUFFER_SIZE);
+    snprintf(summary->execCommand, BUFFER_SIZE, "%s", slashPtr);
 
     slashPtr = strrchr(summary->script, '/');
     if (slashPtr != NULL) {
@@ -567,9 +661,9 @@ void ProcessReducer<procdata>::reduce(procdata *start, procdata *end) {
         slashPtr = summary->script;
     }
     if (strcmp(slashPtr, "COMMAND") == 0 || *slashPtr == 0) {
-        strncpy(summary->command, summary->execCommand, BUFFER_SIZE);
+        snprintf(summary->command, BUFFER_SIZE, "%s", summary->execCommand);
     } else {
-        strncpy(summary->command, slashPtr, BUFFER_SIZE);
+        snprintf(summary->command, BUFFER_SIZE, "%s", slashPtr);
     }
 }
 
@@ -592,7 +686,7 @@ void ProcessReducer<procfd>::reduce(procfd *start, procfd *end) {
     }
     unordered_map<string, int> network_map;
     unordered_map<string, pair<int,int> > filesystem_map;
-    const vector<pair<string,regex *> > fs_regexes = config->getFilesystemMonitorRegexes();
+    const vector<pair<string,regex *> > &fs_regexes = config->getFilesystemMonitorRegexes();
     ProcessSummary *summary = findSummary(start->identifier, start->subidentifier, start->startTime, start->pid);
     for (procfd *ptr = start; ptr != end; ++ptr) {
         if ((strncmp(ptr->path, "tcp:", 4) == 0) || (strncmp(ptr->path, "udp:", 4) == 0)) {
@@ -813,6 +907,7 @@ class ProcessData {
             summary.duration = summary.derived_recTime - summary.baseline_startTime;
             summary.volatilityScore = (summary.nRecords - 1) / summary.nObservations;
             metadata.emplace_back(summary);
+
         }
 
         /* discover the process hierarchy; sort by startTime to reduce useless
@@ -911,12 +1006,17 @@ int main(int argc, char **argv) {
     );
 
     vector<H5FileControl *> inputFiles;
+    vector<H5FileControl *> baselineFiles;
     vector<vector<string> > inputHosts;
     vector<string> allHosts;
-    vector<string> baselineHosts;
-    if (config.getBaselinePath() != "") {
-        baselineInput = new H5FileControl(new ProcHDF5IO(config.getBaselinePath(), FILE_MODE_READ));
-        baselineInput->file->get_hosts(baselineHosts);
+    vector<vector<string> > baselineHosts;
+    for (auto it: config.getBaselineH5Inputs()) {
+        H5FileControl *baseline = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
+        baselineFiles.push_back(baseline);
+        vector<string> l_hosts;
+        baseline->file->get_hosts(l_hosts);
+        sort(l_hosts.begin(), l_hosts.end());
+        baselineHosts.push_back(l_hosts);
     }
     for (auto it: config.getProcmonH5Inputs()) {
         H5FileControl *input = new H5FileControl(new ProcHDF5IO(it, FILE_MODE_READ));
@@ -940,9 +1040,14 @@ int main(int argc, char **argv) {
 
         ProcessData *processData = new ProcessData(config);
         ProcessData *baselineData = NULL;
-        if (find(baselineHosts.begin(), baselineHosts.end(), host) != baselineHosts.end()) {
-            baselineData = new ProcessData(config);
-            baselineData->readData(host, baselineInput);
+        for (size_t idx = 0; idx < baselineFiles.size(); ++idx) {
+            if (find(baselineHosts[idx].begin(), baselineHosts[idx].end(), host) == baselineHosts[idx].end()) {
+                continue;
+            }
+            if (baselineData == NULL) baselineData = new ProcessData(config);
+            baselineData->readData(host, baselineFiles[idx]);
+        }
+        if (baselineData != NULL) {
             baselineData->summarizeProcesses(host, NULL, 0);
         }
 
@@ -954,9 +1059,10 @@ int main(int argc, char **argv) {
         }
         processData->summarizeProcesses(host, baselineData, config.getStartTime());
 
-        ProcessSummary *start = &*(processData->getSummaries().begin());
-        ProcessSummary *end = &*(processData->getSummaries().end());
-        output->write("ProcessSummary", start, end);
+        output->write("ProcessSummary",
+                &*(processData->getSummaries().begin()),
+                &*(processData->getSummaries().end())
+        );
         output->write("IdentifiedNetworkConnection",
                 &*(processData->getNetworkConnections().begin()),
                 &*(processData->getNetworkConnections().end())
