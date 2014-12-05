@@ -98,7 +98,7 @@ class Config:
         parser.add_argument('-f', '--config', help="Specify configuration file instead of default at $PROCMON_DIR/etc/processAnalyzer_controller.conf", default='%s/etc/processAnalyzer_contorller.conf' % procmonInstallBase, metavar='FILE')
         args,remaining_args = parser.parse_known_args()
         defaults = {
-            "output"  : "summary.h5",
+            "output_suffix"  : "summary.h5",
             "h5_path" : "%s/var/procmon" % procmonInstallBase,
             "h5_prefix" : "procmon",
             "start": start_time.strftime("%Y%m%d%H%M%S"),
@@ -108,6 +108,7 @@ class Config:
             "fsMonitor": None,
             "system": "custom",
             "localdir":"",
+            "batchType":"",
         }
         if args.config and os.path.exists(args.config):
             config = SafeConfigParser(defaults)
@@ -127,7 +128,7 @@ class Config:
         parser.add_argument('--h5_prefix', type=str, help="prefix for naming hdf5 files e.g., <prefix>.<datetime>.h5")
         parser.add_argument('--start', type=str, help="start time in format YYYYmmddHHMMSS")
         parser.add_argument('--end',   type=str, help="end time in format YYYYmmddHHMMSS")
-        parser.add_argument('--output', type=str, help="output file")
+        parser.add_argument('--output_suffix', type=str, help="output file")
         parser.add_argument('--batchType', type=str, help="one of UGE, torque, slurm")
         parser.add_argument('--intermediatePrefix', type=str, help="prefix of all intermediate generated intermediate files")
         parser.add_argument('--maxQueueLength', type=int, help="maximum number of hours of any batch queue")
@@ -138,6 +139,7 @@ class Config:
 
         args.start_time = datetime.strptime(args.start, "%Y%m%d%H%M%S")
         args.end_time = datetime.strptime(args.end, "%Y%m%d%H%M%S")
+        args.output = "%s.%s.%s" % (args.intermediatePrefix, args.start_time.strftime("%Y%m%d%H%M%S"), args.output_suffix) 
         args.fs = []
         if type(args.fsMonitor) is str:
             for fs in args.fsMonitor.split('\n'):
@@ -208,3 +210,6 @@ if __name__ == "__main__":
     fd.write("start = %s\n" % config.start_time.strftime("%s"))
     fd.write("batch = %s\n" % batchFile)
     fd.write("system = %s\n" % config.system)
+    for fs in config.fs:
+        fd.write("fsMonitor = %s\n" % fs)
+    fd.write("output = %s\n" % config.output)
