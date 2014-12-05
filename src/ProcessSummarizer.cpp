@@ -462,7 +462,16 @@ class ProcessReducer {
         pair<time_t,int> key(start, pid);
         auto it = summaryIndex->find(key);
         if (it == summaryIndex->end()) {
+            size_t capacity_before = summaries->capacity();
             summaries->emplace_back(hostname, identifier, subidentifier, start, pid);
+            if (summaries->capacity() > capacity_before) {
+                // need to re-index
+                summaryIndex->clear();
+                for (ProcessSummary &summary: *summaries) {
+                    pair<time_t,int> lkey(summary.startTime, summary.pid);
+                    (*summaryIndex)[lkey] = &summary;
+                }
+            }
             ret = &(summaries->back());
             (*summaryIndex)[key] = ret;
             assert(ret >= &*(summaries->begin()));
@@ -885,8 +894,7 @@ class ProcessData {
 
         cout << hostname << ": ps " << ps_boundaries.size() << "; pd " << pd_boundaries.size() << "; fd " << fd_boundaries.size() << "; obs " << obs_boundaries.size() << "; " << maxRecords << endl;
 
-        summaries.reserve(maxRecords);
-        cout << "summaries capacity: " << summaries.capacity() << endl;
+        summaries.reserve(maxRecords * 1.1);
 
         ProcessReducer<procstat> ps_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
         ProcessReducer<procdata> pd_red(config, summaryIndex, summaries, maxRecords, hostname, networkConnections, filesystems);
