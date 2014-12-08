@@ -946,7 +946,7 @@ class ProcessData {
             }
             summary.duration = summary.derived_recTime - summary.baseline_startTime;
             if (summary.nObservations > 0) {
-                summary.volatilityScore = (summary.nRecords - 1) / summary.nObservations;
+                summary.volatilityScore = ((double)summary.nRecords - 1) / (double)summary.nObservations;
             } else {
                 summary.volatilityScore = 0;
             }
