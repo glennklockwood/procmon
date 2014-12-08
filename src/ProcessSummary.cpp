@@ -1,4 +1,6 @@
 #include "ProcessSummary.hh"
+#include "ProcIO2.hh"
+#include <string.h>
 
 ProcessSummary::ProcessSummary() {
     memset(this, 0, sizeof(ProcessSummary));
@@ -124,6 +126,7 @@ void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "orig_startTime", HOFFSET(ProcessSummary, orig_startTime), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "volatilityScore", HOFFSET(ProcessSummary, volatilityScore), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "cpuTime", HOFFSET(ProcessSummary, cpuTime), H5T_NATIVE_DOUBLE);
+    H5Tinsert(h5type, "cpuTime_net", HOFFSET(ProcessSummary, cpuTime_net), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "utime_net", HOFFSET(ProcessSummary, utime_net), H5T_NATIVE_ULONG);
     H5Tinsert(h5type, "stime_net", HOFFSET(ProcessSummary, stime_net), H5T_NATIVE_ULONG);
     H5Tinsert(h5type, "io_rchar_net", HOFFSET(ProcessSummary, io_rchar_net), H5T_NATIVE_ULLONG);
