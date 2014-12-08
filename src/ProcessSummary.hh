@@ -1,8 +1,15 @@
 #ifndef __PROCESSSUMMARY_HH
 #define __PROCESSSUMMARY_HH
 
+#include <string>
+#include <stdio.h>
+#include <string.h>
 #include "ProcData.hh"
-#include <boost/tokenizer.hpp>
+#include <vector>
+#include <array>
+#include <algorithm>
+#if 0
+#include "ProcData.hh"
 #include <algorithm> 
 #include <functional> 
 #include <cctype>
@@ -13,9 +20,9 @@
 #include <string.h>
 #include <hdf5.h>
 #include <ProcIO2.hh>
+#endif
 
 using namespace std;
-typedef boost::tokenizer<boost::char_separator<char> > tokenizer;
 
 class ProcessSummary {
     public:
@@ -129,6 +136,8 @@ class ProcessSummary {
 
 class IdentifiedFilesystem {
     public:
+    IdentifiedFilesystem() {
+    }
     IdentifiedFilesystem(const ProcessSummary &other, const string &_filesystem, const int _read, const int _write) {
         snprintf(host, EXEBUFFER_SIZE, "%s", other.host);
         snprintf(identifier, IDENTIFIER_SIZE, "%s", other.identifier);
@@ -161,6 +170,8 @@ class IdentifiedFilesystem {
 
 class IdentifiedNetworkConnection {
     public:
+    IdentifiedNetworkConnection() {
+    }
     IdentifiedNetworkConnection(const ProcessSummary &other, const string &net) {
         snprintf(host, EXEBUFFER_SIZE, "%s", other.host);
         snprintf(identifier, IDENTIFIER_SIZE, "%s", other.identifier);
@@ -225,11 +236,17 @@ class Scriptable {
         exePath(_exePath)
     {
         string cmdArgsStr(_cmdArgs);
-        boost::char_separator<char> sep("|");
-        tokenizer tokens(cmdArgsStr, sep);
-        for (auto token: tokens) {
+        size_t endPos = string::npos;
+        size_t searchPos = 0;
+        while (searchPos != string::npos) {
+            endPos = cmdArgsStr.find('|');
+            string token = endPos == string::npos ? cmdArgsStr.substr(searchPos) : cmdArgsStr.substr(searchPos, endPos - searchPos);
             trim(token);
             cmdArgs.push_back(token);
+            searchPos = endPos;
+            if (searchPos != string::npos) {
+                searchPos++;
+            }
         }
     }
 
