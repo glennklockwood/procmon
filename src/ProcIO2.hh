@@ -25,8 +25,6 @@
 
 #include <iostream>
 
-#include "config.h"
-
 #ifdef USE_HDF5
 #include "hdf5.h"
 #endif /* USE_HDF5 */
@@ -343,8 +341,14 @@ class Hdf5Io : public IoMethod {
     size_t write(const string &dsName, pmType *start, pmType *end);
 
     template <class pmType>
-    size_t read(const string &dsName, pmType *start, size_t count);
+    size_t read(const string &dsName, pmType *start, size_t count, size_t start_id = 0);
 
+    template <class pmType>
+    size_t read(const string &dsName, pmType *start, size_t count) {
+        return read(dsName, start, count, 0);
+    }
+
+    template <class pmType>
     size_t howmany(const string &dsName);
 
     virtual inline const bool writable() const {
@@ -499,7 +503,7 @@ Hdf5Dataset<pmType>::Hdf5Dataset(
 
 template <class pmType>
 size_t Hdf5Dataset<pmType>::initializeDataset() {
-    size_t size = 0;
+    size = 0;
     const hid_t group_id = group->getGroup();
     if (group_id < 0) {
         IoException e("Called initializeDataset before group was opened!");
@@ -548,12 +552,12 @@ size_t Hdf5Dataset<pmType>::read(pmType *start_pointer, size_t count, size_t sta
 
     hsize_t targetRecords = 0;
     hsize_t localRecords = count;
-    hsize_t remoteStart = start_id > 0 ? start_id - 1 : 0;
+    hsize_t remoteStart = start_id > 0 ? start_id : 0;
     hsize_t localStart = 0;
     hsize_t nRecords = 0;
 
     hid_t dataspace = H5Dget_space(dataset);
-    hid_t memspace = H5Screate_simple(1, &targetRecords, NULL);
+    hid_t memspace = H5Screate_simple(1, &localRecords, NULL);
     herr_t status = 0;
 
     //int rank = H5Sget_simple_extent_ndims(dataspace);
@@ -563,13 +567,13 @@ size_t Hdf5Dataset<pmType>::read(pmType *start_pointer, size_t count, size_t sta
 
         status = H5Sselect_hyperslab(dataspace, H5S_SELECT_SET, &remoteStart, H5P_DEFAULT, &targetRecords, H5P_DEFAULT);
         status = H5Sselect_hyperslab(memspace, H5S_SELECT_SET, &localStart, H5P_DEFAULT, &localRecords, H5P_DEFAULT);
-        status = H5Dread(dataset, type, H5S_ALL, dataspace, H5P_DEFAULT, start_pointer);
+        status = H5Dread(dataset, type->getType(), memspace, dataspace, H5P_DEFAULT, start_pointer);
     }
 
     H5Sclose(dataspace);
     H5Sclose(memspace);
 
-    return (size_t) targetRecords;
+    return (size_t) count;
 }
 
 template <class pmType>
@@ -591,7 +595,7 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
 	unsigned int old_nRecords = 0;
 
 	bool append = start_id == 0;
-	startRecord = start_id > 0 ? start_id - 1 : 0;
+	startRecord = start_id > 0 ? start_id : 0;
 
     size_t *nRecords = &size;
 
@@ -624,11 +628,9 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
 
 	H5Awrite(size_id, H5T_NATIVE_UINT, nRecords);
 
-	start_id = startRecord+1;
-
     H5Sclose(filespace);
     H5Sclose(dataspace);
-    return start_id;
+    return count;
 }
 
 template <class pmType>
@@ -643,16 +645,28 @@ size_t Hdf5Io::write(const string &dsName, pmType *start, pmType *end) {
 }
 
 template <class pmType>
-size_t Hdf5Io::read(const string &dsName, pmType *start, size_t count) {
+size_t Hdf5Io::read(const string &dsName, pmType *start, size_t count, size_t start_id) {
     auto it = currentDatasets.find(dsName);
     if (it == currentDatasets.end()) {
         return 0;
     }
     shared_ptr<Dataset> baseDs = it->second;
     shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
-    return dataset->read(start, count);
+    return dataset->read(start, count, start_id);
 }
 
+template <class pmType>
+size_t Hdf5Io::howmany(const string &dsName) {
+    auto it = currentDatasets.find(dsName);
+    if (it == currentDatasets.end()) {
+        IoException e(string("No dataset named ") + dsName);
+        throw &e;
+    }
+    shared_ptr<Dataset> baseDs = it->second;
+    shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
+    return dataset->howmany();
+}
+ 
 }
 
 #endif /* PROCFMT_H_ */
