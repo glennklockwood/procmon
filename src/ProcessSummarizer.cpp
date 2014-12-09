@@ -1,6 +1,7 @@
 #include "config.h"
 #include "ProcData.hh"
 #include "ProcIO.hh"
+#include "ProcIO2.hh"
 #include "ProcReducerData.hh"
 #include "ProcessSummary.hh"
 
