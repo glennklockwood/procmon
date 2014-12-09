@@ -1,6 +1,7 @@
 #!/bin/bash -l
 
 module purge
+module load uge
 module load PrgEnv-gnu/4.6
 module load openmpi
 module load mkl

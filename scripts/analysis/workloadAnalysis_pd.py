@@ -298,6 +298,8 @@ def sumSummaries(data):
 def mergeSummaries(a, b, config):
     columns = [dim['name'] for dim in config.dimensions]
     data = np.concatenate([a,b])
+    if data.size == 0:
+        return data
     return mergeDataset(data, columns)
 
 def mergeDataset(data, keys):
@@ -343,7 +345,9 @@ def mpiMergeDataset(data, keys, comm, mpi_rank, mpi_size):
         eMask = data[keys] == groups[gEnd]
         dataEnd = np.min(np.nonzero(eMask)[0])
     print "[%d] mpiMerge myRange: %d, %d, %d; %d, %d, %d" % (mpi_rank, dataStart, dataEnd, data.size, gStart, gEnd, groups.size)
-    myData = mergeDataset(data[dataStart:dataEnd], keys)
+    myData = data[dataStart:dataEnd]
+    if dataEnd - dataStart > 0:
+        myData = mergeDataset(data[dataStart:dataEnd], keys)
     allsizes = comm.allgather(myData.size)
     counts = np.array(allsizes)
     offsets = np.hstack((0, np.cumsum(counts)))[0:-1]
@@ -453,7 +457,7 @@ def summarizeH5(filename, config):
     dset = None
     try:
         fd = h5py.File(filename, 'r')
-        dset = fd['processes']
+        dset = fd['processes']['ProcessSummary']
         dset_count = dset.len()
     except Exception, e:
         sys.stderr.write('Failed to read h5 file: %s, Exiting.' % filename)
@@ -476,9 +480,13 @@ def summarizeH5(filename, config):
         base_idx = limit
 
         ## repair some defects in the current system...
-        data['cputime_net'] = (data['utime_net'] + data['stime_net'])/100.
-        scripts = identify_scripts(data)
-        (command,execCommand) = identify_userCommand(data, scripts)
+        data['cpuTime_net'] = (data['utime_net'] + data['stime_net'])/100.
+        data['volatilityScore'] = (data['nRecords'] - 1.) / data['nObservations']
+        #scripts = identify_scripts(data)
+        #(command,execCommand) = identify_userCommand(data, scripts)
+        scripts = data['script']
+        command = data['command']
+        execCommand = data['execCommand']
 
         ## remap any commands:
         for cmdR in config.commandRemap:
@@ -504,8 +512,8 @@ def summarizeH5(filename, config):
         
         ancestors = data['isParent'] == 1
         highVol   = np.greater_equal(data['volatilityScore'], 0.1)
-        highCpu   = np.greater_equal(data['cputime_net'], data['duration']*0.5)
-        reallyHighCpu = np.greater_equal(data['cputime_net'], 86400*16) ## just ignore single process that used more than 1 day of cpu
+        highCpu   = np.greater_equal(data['cpuTime_net'], data['duration']*0.5)
+        reallyHighCpu = np.greater_equal(data['cpuTime_net'], 86400*16) ## just ignore single process that used more than 1 day of cpu
         useful = highVol | ~ancestors | highCpu
         if np.sum(reallyHighCpu) > 0:
             print "[%d] FOUND %d really high cpu records." % (mpi_rank, np.sum(reallyHighCpu))
@@ -528,8 +536,8 @@ def summarizeH5(filename, config):
                 print "null %s: " % dim['column'], np.sum(nanmask)
                 data[dim['column']][nanmask] = "Unknown"
 
-        cpu_sum += np.sum(data['cputime_net'])
-        selected_cpu_sum += np.sum(data[useful]['cputime_net'])
+        cpu_sum += np.sum(data['cpuTime_net'])
+        selected_cpu_sum += np.sum(data[useful]['cpuTime_net'])
         selected_rows += np.sum(useful)
 
         l_useful_summary = summarizeData(data[useful], config)
@@ -552,14 +560,14 @@ def summarizeH5(filename, config):
         old_duration = data['duration'].copy()
         zerodur_mask = old_duration == 0.
         temp_duration = old_duration.copy()
-        old_cputime = data['cputime_net'].copy()
+        old_cputime = data['cpuTime_net'].copy()
         temp_duration[zerodur_mask] = 1.0
         # pad duration to try to account for procmon random sampling
         data['duration'] += np.random.uniform(low = 0.0, high = 30.0, size = data.size)
 
         # adjust a few of the rate counters based on average usage
-        data['cputime_net'] += (data['cputime_net']/temp_duration)*(data['duration'] - old_duration)
-        data['cputime_net'][zerodur_mask] = old_cputime[zerodur_mask]
+        data['cpuTime_net'] += (data['cpuTime_net']/temp_duration)*(data['duration'] - old_duration)
+        data['cpuTime_net'][zerodur_mask] = old_cputime[zerodur_mask]
 
         l_useful_summary_padded = summarizeData(data[useful], config)
         if useful_summary_padded is None:
@@ -619,7 +627,7 @@ def summaryFunc(data, config):
         ret['%s_count'%s['identifier']] = count
         ret['%s_sum'%s['identifier']] = sum
         ret['%s_histogram'%s['identifier']] = hist[0]
-    group_cpu_sum += np.sum(data['cputime_net'])
+    group_cpu_sum += np.sum(data['cpuTime_net'])
     return ret
 
 

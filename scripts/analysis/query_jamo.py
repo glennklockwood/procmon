@@ -22,13 +22,14 @@ def remote_query(sdm, year, month, day):
         if rfile['file_status'] == "PURGED":
             print "getting read to request restore of %s" % rfile['file_name']
             restore_list.append(rfile['_id'])
-    ret = sdm.post('api/tape/grouprestore',data={'files':restore_list,'days':30})
-    print ret
+    if len(restore_list) > 0:
+        ret = sdm.post('api/tape/grouprestore',data={'files':restore_list,'days':30})
+        print ret
             
 
 
-year=2013
-month=11
-for day in xrange(15,25):
+year=2014
+month=2
+for day in xrange(1,32):
     remote_query(sdm, year, month, day)
     print 

@@ -33,11 +33,9 @@ exit $status
     fd.close()
     return fname
 
-for month in range(7,12):
-    for day in xrange(31):
+for month in range(6,7):
+    for day in xrange(7):
         day += 1
-        if (month == 7 and day == 1):
-            continue
         start=None
         try:
             start=datetime(year, month, day)
