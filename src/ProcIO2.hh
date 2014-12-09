@@ -272,7 +272,7 @@ class Hdf5Dataset: public Dataset {
         }
     }
 
-    size_t write(pmType *start, pmType *end, size_t start_id = 0);
+    size_t write(pmType *start, pmType *end, size_t start_id = 0, bool append = true);
     size_t read(pmType *start, size_t maxRead, size_t start_id = 0);
     inline const size_t howmany() const { return size; }
 
@@ -338,7 +338,7 @@ class Hdf5Io : public IoMethod {
     bool metadataGetUint(const char*, unsigned long*);
 
     template <class pmType>
-    size_t write(const string &dsName, pmType *start, pmType *end);
+    size_t write(const string &dsName, pmType *start, pmType *end, size_t start_id = 0, bool append = true);
 
     template <class pmType>
     size_t read(const string &dsName, pmType *start, size_t count, size_t start_id = 0);
@@ -542,6 +542,9 @@ size_t Hdf5Dataset<pmType>::initializeDataset() {
 		size_id = H5Acreate2(dataset, "nRecords", H5T_NATIVE_UINT, a_id, H5P_DEFAULT, H5P_DEFAULT);
 		H5Awrite(size_id, H5T_NATIVE_UINT, &size);
         H5Sclose(a_id);
+    } else {
+        IoException e(string("Dataset ") + dsName + " doesn't exist and cannot be created (h5 file not writable");
+        throw &e;
     }
 	return size;
 }
@@ -577,7 +580,7 @@ size_t Hdf5Dataset<pmType>::read(pmType *start_pointer, size_t count, size_t sta
 }
 
 template <class pmType>
-size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
+size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id, bool append) {
     if (!ioMethod->getContextOverride()) {
         const Context &context = ioMethod->getContext();
         for (pmType *ptr = start; ptr != end; ++ptr) {
@@ -594,7 +597,10 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
     hsize_t newRecords = end - start;
 	unsigned int old_nRecords = 0;
 
-	bool append = start_id == 0;
+    if (append && start_id != 0) {
+        IoException e("write start_id must be 0 when appending to a dataset");
+        throw &e;
+    }
 	startRecord = start_id > 0 ? start_id : 0;
 
     size_t *nRecords = &size;
@@ -634,14 +640,14 @@ size_t Hdf5Dataset<pmType>::write(pmType *start, pmType *end, size_t start_id) {
 }
 
 template <class pmType>
-size_t Hdf5Io::write(const string &dsName, pmType *start, pmType *end) {
+size_t Hdf5Io::write(const string &dsName, pmType *start, pmType *end, size_t start_id, bool append) {
     auto it = currentDatasets.find(dsName);
     if (it == currentDatasets.end()) {
         return 0;
     }
     shared_ptr<Dataset> baseDs = it->second;
     shared_ptr<Hdf5Dataset<pmType> > dataset = dynamic_pointer_cast<Hdf5Dataset<pmType> >(baseDs);
-    return dataset->write(start, end);
+    return dataset->write(start, end, start_id, append);
 }
 
 template <class pmType>
