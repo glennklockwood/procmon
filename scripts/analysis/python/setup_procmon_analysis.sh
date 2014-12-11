@@ -8,6 +8,7 @@ module load mkl
 module load hdf5-parallel/1.8.12
 set -ex
 
+exit 0
 if [ $NERSC_HOST != "genepool" ]; then
     exit
 fi
