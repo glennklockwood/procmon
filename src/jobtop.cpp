@@ -30,17 +30,20 @@ class TopCurses;
 class JobtopConfig {
     public:
     JobtopConfig(int argc, char **argv) {
+        system = DEFAULT_SYSTEM;
         host = "*";
         identifier = "*";
         subidentifier = "*";
         setupProgramOptions();
         parseProgramOptions(argc, argv);
     }
+    inline const string getSystem() const { return system; }
     inline const string getHost() const { return host; }
     inline const string getIdentifier() const { return identifier; }
     inline const string getSubidentifier() const { return subidentifier; }
 
     private:
+    string system;
     string host;
     string identifier;
     string subidentifier;
@@ -66,6 +69,7 @@ class JobtopConfig {
         basic.add_options()
             ("version", "Print version information")
             ("help,h", "Print help message")
+            ("system", po::value<string>(&system)->default_value(system), "Name of computational platform")
             ("host", po::value<string>(&host)->default_value("*"), "Hosts to listen to")
             ("job",  po::value<string>()->notifier(
                     boost::bind(&JobtopConfig::setJob, this, _1)
@@ -993,7 +997,7 @@ int main(int argc, char **argv) {
 
     JobtopConfig config(argc, argv);
 
-    screen = new TopCurses(getenv("NERSC_HOST"), config.getIdentifier(), config.getSubidentifier());
+    screen = new TopCurses(config.getSystem(), config.getIdentifier(), config.getSubidentifier());
     signal(SIGTERM, sig_handler);
     pthread_t screen_thread, monitor_thread;
     int retCode = pthread_create(&screen_thread, NULL, screen_start, screen);
