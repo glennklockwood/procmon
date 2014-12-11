@@ -10,6 +10,8 @@
 #include <sys/types.h>
 #include <pwd.h>
 
+#include <boost/program_options.hpp>
+
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -20,8 +22,76 @@
 #include "ProcIO.hh"
 
 using namespace std;
+namespace po = boost::program_options;
 
 class TopCurses;
+
+class JobtopConfig {
+    public:
+    JobtopConfig(int argc, char **argv) {
+        host = "*";
+        identifier = "*";
+        subidentifier = "*";
+        setupProgramOptions();
+        parseProgramOptions();
+    }
+    inline const getHost() const { return host; }
+    inline const getIdentifier() const { return identifier; }
+    inline const getSubidentifier() const { return subidentifier; }
+
+    private:
+    string host;
+    string identifier;
+    string subidentifier;
+    po::options_description options;
+
+    void setJob(const string& input) {
+        size_t dotpos = input.find('.');
+        if (dotpos != string::npos) {
+            identifier = input.substr(0, dotpos);
+            subidentifier = input.substr(dotpos + 1);
+            dotpos = subidentifier.find('.');
+            if (dotpos != string::npos) {
+                subidentifier = subidentifier.substr(0, dotpos);
+            }
+        } else {
+            identifier = input;
+            subidentifir = "*";
+        }
+    }
+
+    void setupProgramOptions() {
+        po::options_description basic("JobTop Options");
+        basic.add_options()
+            ("version", "Print version information")
+            ("help,h", "Print help message")
+            ("host", po::value<string>(&host)->default_value("*"), "Hosts to listen to")
+            ("job",  po::value<string>()->notifier(
+                    boost::bind(&JobtopConfig::setJob, this, -1)
+                ), "Job descriptor to listen for")
+        ;
+        options.add(basic);
+    }
+
+    void parseProgramOptions(int argc, char **argv) {
+        po::positional_options_description p;
+        p.add("job", -1);
+
+        po::variables_map vm;
+        po::store(po::command_line_parser(argc, argv).options(options).positional(p).run(), vm);
+        po::notify(vm);
+
+        if (vm.help) {
+            cout << options << endl;
+            exit(0);
+        }
+        if (host == "*" && identifier == "*" && subidentifier == "*") {
+            cerr << "ERROR:  must specify job or host" << endl;
+            cerr << options << endl;
+            exit(1);
+        }
+    }
+};
 
 pthread_mutex_t data_lock = PTHREAD_MUTEX_INITIALIZER;
 time_t last_update = 0;
@@ -920,11 +990,9 @@ int main(int argc, char **argv) {
     const char *mqExchangeName = DEFAULT_AMQP_EXCHANGE_NAME;
     int mqFrameSize = DEFAULT_AMQP_FRAMESIZE;
 
-    const char *req_identifier = argv[1];
-    const char *req_subidentifier = "*";
+    JobtopConfig config(argc, argv);
 
-
-    screen = new TopCurses(getenv("NERSC_HOST"), req_identifier, req_subidentifier);
+    screen = new TopCurses(getenv("NERSC_HOST"), config.getIdentifier(), config.getSubidentifier());
     signal(SIGTERM, sig_handler);
     pthread_t screen_thread, monitor_thread;
     int retCode = pthread_create(&screen_thread, NULL, screen_start, screen);
@@ -937,7 +1005,7 @@ int main(int argc, char **argv) {
     }
 
     conn = new ProcAMQPIO(mqServer, mqPort, mqVHost, mqUser, mqPassword, mqExchangeName, mqFrameSize, FILE_MODE_READ);
-    conn->set_context("*", req_identifier, req_subidentifier);
+    conn->set_context(config.getHost(), config.getIdentifier(), config.getSubidentifier());
 
     void *data = NULL;
     size_t data_size = 0;
