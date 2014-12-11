@@ -11,6 +11,7 @@
 #include <pwd.h>
 
 #include <boost/program_options.hpp>
+#include <boost/bind.hpp>
 
 #include <vector>
 #include <unordered_map>
@@ -45,7 +46,7 @@ class JobtopConfig {
     string subidentifier;
     po::options_description options;
 
-    void setJob(const string& input) {
+    void setJob(const string &input) {
         size_t dotpos = input.find('.');
         if (dotpos != string::npos) {
             identifier = input.substr(0, dotpos);
@@ -67,7 +68,7 @@ class JobtopConfig {
             ("help,h", "Print help message")
             ("host", po::value<string>(&host)->default_value("*"), "Hosts to listen to")
             ("job",  po::value<string>()->notifier(
-                    boost::bind(&JobtopConfig::setJob, this, -1)
+                    boost::bind(&JobtopConfig::setJob, this, _1)
                 ), "Job descriptor to listen for")
         ;
         options.add(basic);
@@ -81,7 +82,7 @@ class JobtopConfig {
         po::store(po::command_line_parser(argc, argv).options(options).positional(p).run(), vm);
         po::notify(vm);
 
-        if (vm.help) {
+        if (vm.count("help")) {
             cout << options << endl;
             exit(0);
         }
