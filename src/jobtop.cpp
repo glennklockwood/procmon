@@ -35,9 +35,9 @@ class JobtopConfig {
         setupProgramOptions();
         parseProgramOptions();
     }
-    inline const getHost() const { return host; }
-    inline const getIdentifier() const { return identifier; }
-    inline const getSubidentifier() const { return subidentifier; }
+    inline const string getHost() const { return host; }
+    inline const string getIdentifier() const { return identifier; }
+    inline const string getSubidentifier() const { return subidentifier; }
 
     private:
     string host;
