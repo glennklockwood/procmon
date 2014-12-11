@@ -33,7 +33,7 @@ class JobtopConfig {
         identifier = "*";
         subidentifier = "*";
         setupProgramOptions();
-        parseProgramOptions();
+        parseProgramOptions(argc, argv);
     }
     inline const string getHost() const { return host; }
     inline const string getIdentifier() const { return identifier; }
