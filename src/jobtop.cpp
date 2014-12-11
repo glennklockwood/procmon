@@ -56,7 +56,7 @@ class JobtopConfig {
             }
         } else {
             identifier = input;
-            subidentifir = "*";
+            subidentifier = "*";
         }
     }
 
