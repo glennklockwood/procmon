@@ -1,13 +1,16 @@
-/*
- * ProcIO2.hh
- *
- * Author: Douglas Jacobsen <dmjacobsen@lbl.gov>, NERSC User Services Group
- * 2013/02/17
- * Copyright (C) 2012, The Regents of the University of California
- *
- * The purpose of the procmon is to read data from /proc for an entire process tree
- * and save that data at intervals longitudinally
- */
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
 
 #ifndef __PROCIO2_HH_
 #define __PROCIO2_HH_
