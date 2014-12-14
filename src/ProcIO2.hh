@@ -215,11 +215,20 @@ private:
 class Hdf5Io;
 
 template <class pmType>
+struct Hdf5TypeFactory {
+    hid_t operator()(shared_ptr<Hdf5Io> io) {
+        return -1;
+    }
+};
+
+template <class pmType>
 class Hdf5Type {
     public:
     Hdf5Type(shared_ptr<Hdf5Io> io) {
-        type = 0;
-        initializeType(io);
+        type = initializeType(io);
+    }
+    Hdf5Type(shared_ptr<Hdf5Io> io, Hdf5TypeFactory<pmType>& factory) {
+        type = factory(io);
     }
     ~Hdf5Type() {
         if (set) {
@@ -235,7 +244,7 @@ class Hdf5Type {
     bool set;
     hid_t type;
 
-    void initializeType(shared_ptr<Hdf5Io> io);
+    hid_t initializeType(shared_ptr<Hdf5Io> io);
 };
 
 class Hdf5Group {
