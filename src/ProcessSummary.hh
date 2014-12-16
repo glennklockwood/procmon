@@ -253,12 +253,11 @@ class Scriptable {
         size_t endPos = string::npos;
         size_t searchPos = 0;
         while (searchPos != string::npos) {
-            endPos = cmdArgsStr.find('|');
+            endPos = cmdArgsStr.find('|', searchPos);
             string token = endPos == string::npos ? cmdArgsStr.substr(searchPos) : cmdArgsStr.substr(searchPos, endPos - searchPos);
             trim(token);
             cmdArgs.push_back(token);
             searchPos = endPos;
-            if (endPos == string::npos) break;
             if (searchPos != string::npos) {
                 searchPos++;
             }
