@@ -17,10 +17,24 @@ SET( SWIGSRC ../amqpLogger.i )
 INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
+FIND_PROGRAM(PYTHON "python")
+
+SET(PythonInstDir lib/python${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}/site-packages)
 
 SWIG_ADD_MODULE( amqpLogger python ${SWIGSRC} )
 SWIG_LINK_LIBRARIES( amqpLogger ${PYTHON_LIBRARIES} )
-SWIG_LINK_LIBRARIES( amqpLogger ${AMQPLOGGER_LIBRARIES} )
+SWIG_LINK_LIBRARIES( amqpLogger ${AMQPLOGGER_LIBRARIES} ${RABBITMQ_C_LIBRARIES} "rt" )
 
-
+ADD_CUSTOM_COMMAND ( OUTPUT amqpLogger.pyc
+        COMMAND pycompile amqpLogger.py
+        DEPENDS amqpLogger.py
+)
+ADD_CUSTOM_TARGET (amqpLoggerPython ALL DEPENDS amqpLogger.pyc )
+INSTALL(
+        FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/amqpLogger.py
+            ${CMAKE_CURRENT_BINARY_DIR}/amqpLogger.pyc
+            ${CMAKE_CURRENT_BINARY_DIR}/_amqpLogger.so
+        DESTINATION ${PythonInstDir}
+)
 

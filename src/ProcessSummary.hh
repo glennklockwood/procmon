@@ -258,6 +258,7 @@ class Scriptable {
             trim(token);
             cmdArgs.push_back(token);
             searchPos = endPos;
+            if (endPos == string::npos) break;
             if (searchPos != string::npos) {
                 searchPos++;
             }

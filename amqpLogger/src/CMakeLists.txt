@@ -70,7 +70,7 @@ ADD_LIBRARY ( amqpLogger-static STATIC amqpLogger.c )
 
 ADD_LIBRARY ( amqpLogger.fpic STATIC amqpLogger.c )
     SET_TARGET_PROPERTIES( amqpLogger.fpic PROPERTIES COMPILE_FLAGS "-fPIC")
-    TARGET_LINK_LIBRARIES( amqpLogger ${RABBITMQ_C_LIBRARIES} )
+    TARGET_LINK_LIBRARIES( amqpLogger.fpic ${RABBITMQ_C_LIBRARIES} )
 
 INSTALL_TARGETS(/bin amqpLogger-bin)
 INSTALL_TARGETS(/lib amqpLogger amqpLogger.fpic)
