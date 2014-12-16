@@ -50,8 +50,8 @@ error:
     void set_identifiers(const char *id, const char *subid) {
         int ret = amqpLogger_setidentifiers($self->logptr, id, subid);
     }
-    void log(const char *tag, const char *message) {
+    int log(const char *tag, const char *message) {
         $self->logptr->delim = $self->delim;
-        amqpLogger_log($self->logptr, 0, tag, message);
+        return amqpLogger_log($self->logptr, 0, tag, message);
     }
 };

@@ -12,17 +12,6 @@
 # Author:   Douglas Jacobsen <dmj@nersc.gov>
 ################################################################################
 
-SET( AMQPLOGGER_AMQP_HOST ${DEFAULT_AMQP_HOST} CACHE STRING "amqpLogger rabbitmq server" )
-SET( AMQPLOGGER_AMQP_VHOST ${DEFAULT_AMQP_VHOST} CACHE STRING "amqpLogger amqp virtual-host" )
-SET( AMQPLOGGER_AMQP_PORT ${DEFAULT_AMQP_PORT} CACHE STRING "amqpLogger amqp port number" )
-SET( AMQPLOGGER_AMQP_USER ${DEFAULT_AMQP_USER} CACHE STRING "amqpLogger amqp user" )
-SET( AMQPLOGGER_AMQP_PASSWORD ${DEFAULT_AMQP_PASSWORD} CACHE STRING "amqpLogger amqp password" )
-SET( AMQPLOGGER_AMQP_EXCHANGE ${DEFAULT_AMQP_EXCHANGE} CACHE STRING "amqpLogger amqp exchange" )
-SET( AMQPLOGGER_AMQP_FRAMESIZE ${DEFAULT_AMQP_FRAMESIZE} CACHE STRING "amqpLogger maximum framesize in bytes" )
-SET( AMQPLOGGER_AMQP_RETRIES 3 CACHE STRING "number of retries to send message" )
-SET( AMQPLOGGER_SOCKET_PATH /var/run/amqplogger.sock CACHE PATH "path to amqplogger daemon socket" )
-SET( AMQPLOGGER_SOCKET_BACKLOG 50 CACHE STRING "max number of queued connections" )
-
 FIND_PACKAGE( SWIG REQUIRED )
 INCLUDE( ${SWIG_USE_FILE} )
 FIND_PACKAGE( PerlLibs )

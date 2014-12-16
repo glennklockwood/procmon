@@ -26,7 +26,7 @@ SWIG_LINK_LIBRARIES( amqpLogger ${PYTHON_LIBRARIES} )
 SWIG_LINK_LIBRARIES( amqpLogger ${AMQPLOGGER_LIBRARIES} ${RABBITMQ_C_LIBRARIES} "rt" )
 
 ADD_CUSTOM_COMMAND ( OUTPUT amqpLogger.pyc
-        COMMAND pycompile amqpLogger.py
+        COMMAND python -m compileall .
         DEPENDS amqpLogger.py
 )
 ADD_CUSTOM_TARGET (amqpLoggerPython ALL DEPENDS amqpLogger.pyc )
