@@ -98,6 +98,21 @@ ENDIF ( USE_RABBITMQ_C )
 #    )
 #ENDIF ( USE_ZEROMQ )
 
+## setup nclq
+FIND_PROGRAM(VALGRIND_EXECUTABLE NAMES valgrind DOC "path to the valgrind executable")
+FIND_PATH(VALGRIND_INCLUDE_DIR valgrind/memcheck.h DOC "path to the valgrind headers")
+SET (FLEX_DIR $ENV{FLEX_DIR})
+SET (NCLQ_DIR ${CMAKE_BINARY_DIR}/nclq)
+ExternalProject_Add(
+    nclq
+    GIT_REPOSITORY git@bitbucket.org:berkeleylab/nersc-nclq.git
+    CMAKE_ARGS "-DFLEX_INCLUDE_DIR=${FLEX_DIR}/include"
+        "-DVALGRIND_INCLUDE_DIR=${VALGRIND_INCLUDE_DIR}"
+        "-DCMAKE_INSTALL_PREFIX=${NCLQ_DIR}"
+        "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    TEST_BEFORE_INSTALL 1
+)
+
 IF ( BUILD_PROCMON )
     ADD_SUBDIRECTORY( src )
 ENDIF ( BUILD_PROCMON )
