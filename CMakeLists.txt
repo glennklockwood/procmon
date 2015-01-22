@@ -107,7 +107,7 @@ ExternalProject_Add(
     nclq
     GIT_REPOSITORY https://bitbucket.org/berkeleylab/nersc-nclq.git
     CMAKE_ARGS "-DFLEX_INCLUDE_DIR=${FLEX_DIR}/include"
-        "-DVALGRIND_INCLUDE_DIR=${VALGRIND_INCLUDE_DIR}"
+        "-DVALGRIND_INCLUDE_DIR=${VALGRIND_DIR}/include"
         "-DCMAKE_INSTALL_PREFIX=${NCLQ_DIR}"
         "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
     TEST_BEFORE_INSTALL 1
