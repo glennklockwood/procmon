@@ -105,7 +105,7 @@ SET (FLEX_DIR $ENV{FLEX_DIR})
 SET (NCLQ_DIR ${CMAKE_BINARY_DIR}/nclq)
 ExternalProject_Add(
     nclq
-    GIT_REPOSITORY git@bitbucket.org:berkeleylab/nersc-nclq.git
+    GIT_REPOSITORY https://bitbucket.org/berkeleylab/nersc-nclq.git
     CMAKE_ARGS "-DFLEX_INCLUDE_DIR=${FLEX_DIR}/include"
         "-DVALGRIND_INCLUDE_DIR=${VALGRIND_INCLUDE_DIR}"
         "-DCMAKE_INSTALL_PREFIX=${NCLQ_DIR}"
