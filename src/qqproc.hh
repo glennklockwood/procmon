@@ -207,6 +207,20 @@ void SummaryDataSource<pmType>::openFile() {
             0, 4096, 5, "ProcessSummary"
         )
     );
+    input->addDataset("IdentifiedFilesystem",
+        make_shared<pmio2::Hdf5DatasetFactory<IdentifiedFilesystem> >(
+            input,
+            make_shared<pmio2::Hdf5Type<IdentifiedFilesystem> >(input),
+            0, 4096, 5, "IdentifiedFilesystem"
+        )
+    );
+    input->addDataset("IdentifiedNetworkConnection",
+        make_shared<pmio2::Hdf5DatasetFactory<IdentifiedNetworkConnection> >(
+            input,
+            make_shared<pmio2::Hdf5Type<IdentifiedNetworkConnection> >(input),
+            0, 4096, 5, "IdentifiedNetworkConnection"
+        )
+    );
     pmio2::Context context("genepool", config->getDatasetGroup(), "*", "*");
     input->setContext(context);
     nObjects = input->howmany<pmType>(config->getDataset());

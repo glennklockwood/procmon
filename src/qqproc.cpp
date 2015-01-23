@@ -201,12 +201,35 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     if ((configEnv = getenv("QQPROC_CONFIG")) != NULL) {
         baseConfigFile = configEnv;
     }
-
     po::options_description dataOpts("Data Options");
     dataOpts.add_options()
+        ("mode", po::value<string>(&mode)->default_value("procsummary"), "mode of operation")
         ("data.fileType", po::value<string>(&datafileType)->default_value(""), "type of procmon file (summary, raw)")
         ("data.dataset", po::value<string>(&dataset)->default_value(""), "dataset")
         ("data.datasetGroup", po::value<string>(&datasetGroup)->default_value(""), "group containing dataset (like /processes)")
+    ;
+    po::options_description procsummaryOpts("procsummary Options");
+    procsummaryOpts.add_options()
+        ("procsummary.dataset", po::value<string>()->default_value("ProcessSummary"), "name of ProcessSummary dataset in summary h5 files")
+        ("procsummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which ProcessSummary dataset can be found in summary h5 files")
+        ("procsummary.varmap", po::value<vector<string> >()->composing(), "variable maps for ProcessSummary")
+        ("procsummary.column_default", po::value<vector<string> >()->composing(), "default output columns for ProcessSummary")
+    ;
+
+    po::options_description fssummaryOpts("fssummary Options");
+    fssummaryOpts.add_options()
+        ("fssummary.dataset", po::value<string>()->default_value("IdentifiedFilesystem"), "name of IdentifiedFilesystem dataset in summary h5 files")
+        ("fssummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which IdentifiedFilesystem dataset can be found in summary h5 files")
+        ("fssummary.varmap", po::value<vector<string> >()->composing(), "variable maps for IdentifiedFilesystem")
+        ("fssummary.column_default", po::value<vector<string> >()->composing(), "default output columns for IdentifiedFilesystem")
+    ;
+
+    po::options_description netsummaryOpts("netsummary Options");
+    netsummaryOpts.add_options()
+        ("netsummary.dataset", po::value<string>()->default_value("IdentifiedNetworkConnection"), "name of IdentifiedNetworkConnection dataset in summary h5 files")
+        ("netsummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which IdentifiedNetworkConnection dataset can be found in summary h5 files")
+        ("netsummary.varmap", po::value<vector<string> >()->composing(), "variable maps for IdentifiedNetworkConnection")
+        ("netsummary.column_default", po::value<vector<string> >()->composing(), "default output columns for IdentifiedNetworkConnection")
     ;
 
     // if possible, read the baseConfigFile to bootstrap the application
@@ -648,7 +671,11 @@ bool SummaryDataSource<ProcessSummary>::setValue(int idx, nclq::Data *data,
         case 10: data->setValue(curr->exePath); break;
         case 11: data->setValue(curr->cwdPath); break;
         case 12: data->setValue((intType)curr->ppid); break;
-        case 13: data->setValue(curr->state); break;
+        case 13: {
+            char tmp[2] = { curr->state, 0 };
+            data->setValue(tmp);
+            break;
+        }
         case 14: data->setValue((intType)curr->pgrp); break;
         case 15: data->setValue((intType)curr->session); break;
         case 16: data->setValue((intType)curr->tty); break;
