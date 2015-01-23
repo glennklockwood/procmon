@@ -176,6 +176,9 @@ def register_jamo(config, fname, ftype, sources = None, doNothing=False):
     if ftype == "procmon_reduced_h5":
         tape_archival = [1]
         local_purge_days = 180
+    if ftype == 'procmon_summary_h5':
+        tape_archival = [1]
+        local_purge_days = 180
 
     retval = subprocess.call(['/bin/setfacl', '-m', 'user:%s:rw-' % config.jamo_user, fname])
     if retval != 0:
