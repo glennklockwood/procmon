@@ -173,7 +173,7 @@ IF ( BUILD_PROCMON_COLLECTION_TOOLS )
 
     IF ( USE_REDUCER_HDF5 )
         append_compile_flags_to_target( CheckH5 -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( CheckH5 ${HDF5_LIBRARIES} )
+        TARGET_LINK_LIBRARIES( CheckH5 ${HDF5_LIBRARIES} "rt" "dl" )
         append_compile_flags_to_target( ProcReducer -DUSE_HDF5=1 )
         TARGET_LINK_LIBRARIES( ProcReducer ${HDF5_LIBRARIES} )
         append_compile_flags_to_target( PostReducer -DUSE_HDF5=1 )
