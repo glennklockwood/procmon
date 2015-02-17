@@ -333,7 +333,11 @@ int main(int argc, char **argv) {
         }
         last_hour = currTm.tm_hour;
 
-        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords);
+        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords, 100000);
+        if (recordType == TYPE_INVALID) {
+            //timeout or garbage data
+            continue;
+        }
         conn->get_frame_context(hostname, identifier, subidentifier);
 
         if (data == NULL) {

@@ -208,7 +208,7 @@ public:
     virtual unsigned int write_procstat(procstat* start_ptr, int count);
     virtual unsigned int write_procfd(procfd* start_ptr, int count);
     bool set_queue_name(const string& queue_name);
-    ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec);
+    ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec, long usecTimeout=0);
 	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
 private:
     bool _amqp_open();

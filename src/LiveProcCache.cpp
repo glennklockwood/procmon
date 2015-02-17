@@ -16,7 +16,6 @@ Author:   Douglas Jacobsen <dmj@nersc.gov>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <signal.h>
 #include <errno.h>
 #include <math.h>
@@ -29,6 +28,9 @@ Author:   Douglas Jacobsen <dmj@nersc.gov>
 #include <string>
 #include <iostream>
 #include <algorithm>
+
+#include <boost/thread.hpp>
+#include <boost/thread/shared_mutex.hpp>
 
 #include "ProcData.hh"
 #include "ProcIO.hh"
@@ -371,12 +373,17 @@ int main(int argc, char **argv) {
     const char *mqPassword = DEFAULT_AMQP_PASSWORD;
     const char *mqExchangeName = DEFAULT_AMQP_EXCHANGE_NAME;
     int mqFrameSize = DEFAULT_AMQP_FRAMESIZE;
+    size_t roThread_update_time = 10;
 
     ProcAMQPIO *conn = NULL;
 
     Cache<procdata> pd_cache(300);
     Cache<procstat> ps_cache(300);
     Cache<procfd>   fd_cache(300);
+
+    Cache<procdata> pd_cache_ro(300);
+    Cache<procstat> ps_cache_ro(300);
+    Cache<procfd>   fd_cache_ro(300);
 
     /*
     signal(SIGTERM, sig_handler);
@@ -400,11 +407,13 @@ int main(int argc, char **argv) {
     string hostname;
     string identifier;
     string subidentifier;
-
-    /* TODO: add timer thread to look for idle-ness and kill the whole thing */
+    time_t last_update = 0;
 
     while (cleanup == 0) {
-        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords);
+        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords, 100000);
+        if (recordType == TYPE_INVALID) {
+            continue;
+        }
         conn->get_frame_context(hostname, identifier, subidentifier);
 
         if (data == NULL) {
@@ -423,6 +432,13 @@ int main(int argc, char **argv) {
         } else if (recordType == TYPE_PROCFD) {
             procfd *ptr = (procfd *) data;
             fd_cache.set(ident,ptr, nRecords);
+        }
+
+        if (time(NULL) - last_update > roThread_update_time) {
+            roData_mtx.lock();
+            // copy data
+            roData_mtx.unlock();
+            last_update = time(NULL);
         }
     }
 }

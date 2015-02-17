@@ -179,7 +179,7 @@ ProcAMQPIO::~ProcAMQPIO() {
     _amqp_close(false);
 }
 
-ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, int *nRec) {
+ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, int *nRec, long usecTimeout) {
 	ProcRecordType recType = TYPE_INVALID;
     for ( ; ; ) {
         amqp_frame_t frame;
@@ -187,7 +187,12 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
         size_t body_received;
         size_t body_target;
         amqp_maybe_release_buffers(conn);
-        result = amqp_simple_wait_frame(conn, &frame);
+        if (usecTimeout > 0) {
+            struct timeval t = {0, usecTimeout};
+            result = amqp_simple_wait_frame_noblock(conn, &frame, &t);
+        } else {
+            result = amqp_simple_wait_frame(conn, &frame);
+        }
         if (result < 0) { break; }
 
         if (frame.frame_type != AMQP_FRAME_METHOD) {
