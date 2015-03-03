@@ -78,6 +78,7 @@ class QQProcConfiguration {
 	string configFile;
     string queryConfigFile;
 	char delimiter;
+    string mode;
 
     public:
 	QQProcConfiguration(int argc, char** argv);
