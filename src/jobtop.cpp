@@ -981,7 +981,6 @@ static void screen_exit(TopCurses *screen, int exit_code) {
         delete conn;
     }
     cleanup = 1;
-    exit(exit_code);
 }
 
 void fatal_error(const char *error, int err) {
