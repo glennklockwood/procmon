@@ -184,7 +184,7 @@ IF ( BUILD_PROCMON_COLLECTION_TOOLS )
 
 
     INSTALL_TARGETS(/sbin ProcReducer ProcMuxer CheckH5 PostReducer LiveProcCache)
-    INSTALL_TARGETS(/bin jobtop ProcessSummarizer DataCoverage)
+    INSTALL_TARGETS(/bin jobtop ProcessSummarizer DataCoverage qqproc)
 
     IF ( USE_REDUCER_AMQP )
         append_compile_flags_to_target( CheckH5 -DUSE_AMQP=1 )
