@@ -111,6 +111,7 @@ ExternalProject_Add(
         "-DVALGRIND_INCLUDE_DIR=${VALGRIND_DIR}/include"
         "-DCMAKE_INSTALL_PREFIX=${NCLQ_DIR}"
         "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        "-DBoost_USE_STATIC_LIBS=${Boost_USE_STATIC_LIBS}"
     TEST_BEFORE_INSTALL 1
 )
 
