@@ -1039,7 +1039,7 @@ int main(int argc, char **argv) {
             make_shared<pmio2::Hdf5Type<ProcessSummary> >(output),
             0, // unlimited max size
             4096, // 256 processes per block
-            9,  // zipLevel 9 (highest)
+            0,  // zipLevel 9 (highest)
             "ProcessSummary" // datasetName
         )
     );    
@@ -1049,7 +1049,7 @@ int main(int argc, char **argv) {
             make_shared<pmio2::Hdf5Type<IdentifiedFilesystem> >(output),
             0,
             4096,
-            9,
+            0,
             "IdentifiedFilesystem"
         )
     );
@@ -1059,7 +1059,7 @@ int main(int argc, char **argv) {
             make_shared<pmio2::Hdf5Type<IdentifiedNetworkConnection> >(output),
             0,
             256,
-            9,
+            0,
             "IdentifiedNetworkConnection"
         )
     );
