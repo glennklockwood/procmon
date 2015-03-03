@@ -203,7 +203,7 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     }
     po::options_description dataOpts("Data Options");
     dataOpts.add_options()
-        //("mode", po::value<string>(&mode)->default_value("procsummary"), "mode of operation") XXX TODO XXX
+        ("mode", po::value<string>(&mode)->default_value("procsummary"), "mode of operation") XXX TODO XXX
         ("data.fileType", po::value<string>(&datafileType)->default_value(""), "type of procmon file (summary, raw)")
         ("data.dataset", po::value<string>(&dataset)->default_value(""), "dataset")
         ("data.datasetGroup", po::value<string>(&datasetGroup)->default_value(""), "group containing dataset (like /processes)")
@@ -302,10 +302,10 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     if (dataPrivateOptions != NULL) {
         options.add(*dataPrivateOptions);
     }
-    options.add(dataOpts).add(hidden_options);
+    options.add(dataOpts).add(hidden_options).add(procsummaryOpts).add(fssummaryOpts).add(netsummaryOpts);
 
     po::options_description helpOptions;
-    helpOptions.add(basic).add(config).add(*dataPublicOptions);
+    helpOptions.add(basic).add(config).add(*dataPublicOptions).add(procsummaryOpts).add(fssummaryOpts).add(netsummaryOpts);
 
 
 	po::variables_map vm;
