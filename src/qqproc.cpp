@@ -250,8 +250,6 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     }
     if (datafileType == "summary") {
         dataConfig = new SummaryConfiguration(this);
-    //} else if (batchSystem == "SLURM") {
-        // XXX need to write slurm add-on
     } else {
         invalid_argument e("Unknown datafile type: " + datafileType);
         throw &e;
