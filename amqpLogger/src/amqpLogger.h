@@ -12,6 +12,7 @@
 
 #include <amqp_tcp_socket.h>
 #include <amqp_framing.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {

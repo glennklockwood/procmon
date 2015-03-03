@@ -203,7 +203,7 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     }
     po::options_description dataOpts("Data Options");
     dataOpts.add_options()
-        ("mode", po::value<string>(&mode)->default_value("procsummary"), "mode of operation")
+        //("mode", po::value<string>(&mode)->default_value("procsummary"), "mode of operation") XXX TODO XXX
         ("data.fileType", po::value<string>(&datafileType)->default_value(""), "type of procmon file (summary, raw)")
         ("data.dataset", po::value<string>(&dataset)->default_value(""), "dataset")
         ("data.datasetGroup", po::value<string>(&datasetGroup)->default_value(""), "group containing dataset (like /processes)")
@@ -250,8 +250,6 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     }
     if (datafileType == "summary") {
         dataConfig = new SummaryConfiguration(this);
-    //} else if (batchSystem == "SLURM") {
-        // XXX need to write slurm add-on
     } else {
         invalid_argument e("Unknown datafile type: " + datafileType);
         throw &e;

@@ -1036,7 +1036,7 @@ int main(int argc, char **argv) {
     /* TODO: add timer thread to look for idle-ness and kill the whole thing */
 
     while (cleanup == 0) {
-        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords);
+        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords, 10000);
         conn->get_frame_context(hostname, identifier, subidentifier);
 
         if (data == NULL) {
