@@ -189,9 +189,9 @@ template <typename T> class CacheNode {
         set_time = other->set_time;
 
         if (delta_buflen > 0) {
-            delta = new JobDelta[delta_buflen];
+            delta = new JobDelta<T>[delta_buflen];
             for (size_t idx = 0; idx < delta_buflen; ++idx) {
-                delta[i] = other->delta[i];
+                delta[idx] = other->delta[idx];
             }
         }
     }
@@ -224,7 +224,7 @@ template <typename T> class CacheNode {
         memset(local_map, -1, sizeof(int)*nRecords);
         for (int i = 0; i < nRecords; i++) {
             for (int j = 0; j < curr_data->count; j++) {
-                if (equivRecord(data[i], curr_data->data[j])) {
+                if (data[i].equivRecord(curr_data->data[j])) {
                     local_map[i] = j;
                 }
             }
@@ -236,7 +236,7 @@ template <typename T> class CacheNode {
         memset(tmp_deltas, 0, sizeof(JobDelta<T>) * nRecords);
         for (int i = 0; i< nRecords; i++) {
             if (local_map[i] == -1) continue;
-            T *curr = data[i];
+            T *curr = &(data[i]);
             T *prev = &(curr_data->data[local_map[i]]);
             JobDelta<T> *pdelta = (&delta)[local_map[i]];
             tmp_deltas[i].set(curr, prev, pdelta);
@@ -295,7 +295,7 @@ template<typename T> class Cache {
             o_ptr = o_ptr->next;
         }
         head->prev = l_ptr;
-        lptr->next = head;
+        l_ptr->next = head;
         index();
     }
 

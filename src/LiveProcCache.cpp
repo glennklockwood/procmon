@@ -102,20 +102,22 @@ int main(int argc, char **argv) {
 
         if (recordType == TYPE_PROCDATA) {
             procdata *ptr = (procdata *) data;
-            pd_cache.set(ident, ptr, nRecords);
+            pd_cache->set(ident, ptr, nRecords);
         } else if (recordType == TYPE_PROCSTAT) {
             procstat *ptr = (procstat *) data;
-            ps_cache.set(ident, ptr, nRecords);
+            ps_cache->set(ident, ptr, nRecords);
         } else if (recordType == TYPE_PROCFD) {
             procfd *ptr = (procfd *) data;
-            fd_cache.set(ident,ptr, nRecords);
+            fd_cache->set(ident,ptr, nRecords);
         }
 
+        /*
         if (time(NULL) - last_update > roThread_update_time) {
             roData_mtx.lock();
             // copy data
             roData_mtx.unlock();
             last_update = time(NULL);
         }
+        */
     }
 }
