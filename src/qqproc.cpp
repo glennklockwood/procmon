@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
                 int oIdx = 0;
                 for (auto outIt: outputColumns) {
                     nclq::Expression *outRes = outIt->evaluateExpression(dataSource, &data);
-                    assert(outRes != NULL);
+                    if (outRes == NULL) cout << "FAIL: " << qIdx << endl;
                     if (oIdx++ > 0) *out << config->getDelimiter();
                     outRes->output(*out, dataSource, &data);
                     delete outRes;
@@ -204,32 +204,6 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     po::options_description dataOpts("Data Options");
     dataOpts.add_options()
         ("mode", po::value<string>(&mode)->default_value("procsummary"), "mode of operation")
-        ("data.fileType", po::value<string>(&datafileType)->default_value(""), "type of procmon file (summary, raw)")
-        ("data.dataset", po::value<string>(&dataset)->default_value(""), "dataset")
-        ("data.datasetGroup", po::value<string>(&datasetGroup)->default_value(""), "group containing dataset (like /processes)")
-    ;
-    po::options_description procsummaryOpts("procsummary Options");
-    procsummaryOpts.add_options()
-        ("procsummary.dataset", po::value<string>()->default_value("ProcessSummary"), "name of ProcessSummary dataset in summary h5 files")
-        ("procsummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which ProcessSummary dataset can be found in summary h5 files")
-        ("procsummary.varmap", po::value<vector<string> >()->composing(), "variable maps for ProcessSummary")
-        ("procsummary.column_default", po::value<vector<string> >()->composing(), "default output columns for ProcessSummary")
-    ;
-
-    po::options_description fssummaryOpts("fssummary Options");
-    fssummaryOpts.add_options()
-        ("fssummary.dataset", po::value<string>()->default_value("IdentifiedFilesystem"), "name of IdentifiedFilesystem dataset in summary h5 files")
-        ("fssummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which IdentifiedFilesystem dataset can be found in summary h5 files")
-        ("fssummary.varmap", po::value<vector<string> >()->composing(), "variable maps for IdentifiedFilesystem")
-        ("fssummary.column_default", po::value<vector<string> >()->composing(), "default output columns for IdentifiedFilesystem")
-    ;
-
-    po::options_description netsummaryOpts("netsummary Options");
-    netsummaryOpts.add_options()
-        ("netsummary.dataset", po::value<string>()->default_value("IdentifiedNetworkConnection"), "name of IdentifiedNetworkConnection dataset in summary h5 files")
-        ("netsummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which IdentifiedNetworkConnection dataset can be found in summary h5 files")
-        ("netsummary.varmap", po::value<vector<string> >()->composing(), "variable maps for IdentifiedNetworkConnection")
-        ("netsummary.column_default", po::value<vector<string> >()->composing(), "default output columns for IdentifiedNetworkConnection")
     ;
 
     // if possible, read the baseConfigFile to bootstrap the application
@@ -244,17 +218,9 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
 		po::notify(vm);
 
         input.close();
-        if (vm.count("data.fileType") == 0) {
-            throw invalid_argument("Couldn't determine bootstrap datafileType to use; none specified in config file");
-        }
-    }
-    if (datafileType == "summary") {
-        dataConfig = new SummaryConfiguration(this);
-    } else {
-        invalid_argument e("Unknown datafile type: " + datafileType);
-        throw &e;
     }
 
+    dataConfig = new SummaryConfiguration(this);
     if (dataConfig == NULL) {
         invalid_argument e("configuration for " + datafileType + " invalid");
         throw &e;
@@ -282,11 +248,6 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
 		("end,E",po::value<std::string>(&(this->str_endDate))->default_value("undefined"), "Specify lastest modification date of accounting files to consider, YYYY-MM-DD")
 		;
 
-    po::options_description hidden_options("Hidden Options");
-    hidden_options.add_options()
-        ("varmap", po::value<vector<string> >(&symbolMapList)->composing(), "Mapped/Aliased names for symbols")
-        ("column_default", po::value<vector<string> >(&outputColumns_default)->composing(), "Default column values")
-    ;
 
     po::options_description *dataPublicOptions = dataConfig->getOptions();
     po::options_description *dataPrivateOptions = dataConfig->getPrivateOptions();
@@ -302,10 +263,10 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     if (dataPrivateOptions != NULL) {
         options.add(*dataPrivateOptions);
     }
-    options.add(dataOpts).add(hidden_options).add(procsummaryOpts).add(fssummaryOpts).add(netsummaryOpts);
+    options.add(dataOpts);
 
     po::options_description helpOptions;
-    helpOptions.add(basic).add(config).add(*dataPublicOptions).add(procsummaryOpts).add(fssummaryOpts).add(netsummaryOpts);
+    helpOptions.add(basic).add(config).add(*dataPublicOptions);
 
 
 	po::variables_map vm;
@@ -336,74 +297,6 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
     }
     po::notify(vm);
 
-	// setup initial symbol table
-    SymbolTable *table = dataConfig->getSymbolTable();
-    for (auto mapItem: symbolMapList) {
-        size_t found = mapItem.find(':');
-        if (found == string::npos) continue;
-
-        string key = mapItem.substr(0, found);
-        string value = mapItem.substr(found+1);
-        ssize_t idx = table->find(value);
-        if (idx == -1) {
-            invalid_argument e(string("Unknown symbol in varmap: ") + mapItem);
-            throw &e;
-        }
-        table->mapSymbol(key, idx);
-    }
-
-    // setup output columns
-    vector<string> *out = &outputColumns_default;
-    if (outputColumns.size() > 0) out = &outputColumns;
-    vector<string> outputNames;
-    for (auto colMap: *out) {
-        size_t loc = colMap.find(':');
-        if (loc != string::npos) {
-            outputNames.push_back(colMap.substr(0, loc));
-            outputQueries.push_back(colMap.substr(loc+1));
-        } else {
-            outputQueries.push_back(colMap);
-        }
-    }
-
-    // if a custom header wasn't specified AND the output columns were
-    // labeled, then generate the header from the labels
-    if (header.size() == 0 && outputNames.size() > 0) {
-        ostringstream oss;
-        int idx = 0;
-        for (auto name: outputNames) {
-            if (idx++ > 0) oss << delimiter;
-            oss << name;
-        }
-        header = oss.str();
-    }
-
-	/* now that symbol table is setup, display help & exit if requested */
-	if (vm.count("help")) {
-		std::cout << helpOptions << std::endl;
-		std::cout << std::endl << "Valid built-in identifiers for query/output expressions:" << std::endl;
-		int lineLen = 0;
-        vector<string> symbolKeys;
-        for (auto it: table->getVariableMap()) {
-            symbolKeys.push_back(it.first);
-        }
-        sort(symbolKeys.begin(), symbolKeys.end());
-        int idx = 0;
-        for (auto it: symbolKeys) {
-            if (idx++ != 0) {
-                cout << ", ";
-                lineLen += 2;
-            }
-            if (lineLen > 80) {
-                cout << endl;
-                lineLen = 0;
-            }
-            cout << it;
-            lineLen += it.length();
-        }
-		cout << endl << endl;
-		exit(1);
-	}
 
 	if (str_startDate != "undefined") {
 		if (vm.count("days") >  0) {
@@ -458,8 +351,79 @@ QQProcConfiguration::QQProcConfiguration(int argc, char** argv) {
 		std::cout << "start date: " << startDate << std::endl;
 		std::cout << "end date: " << endDate << std::endl;
 	}
+
     // setup dataConfg
     dataConfig->setupOptions(vm);
+
+	// setup initial symbol table
+    SymbolTable *table = dataConfig->getSymbolTable();
+    for (auto mapItem: *(dataConfig->getSymbolMapList())) {
+        size_t found = mapItem.find(':');
+        if (found == string::npos) continue;
+
+        string key = mapItem.substr(0, found);
+        string value = mapItem.substr(found+1);
+        ssize_t idx = table->find(value);
+        if (idx == -1) {
+            invalid_argument e(string("Unknown symbol in varmap: ") + mapItem);
+            cerr << e.what() << endl;
+            throw &e;
+        }
+        table->mapSymbol(key, idx);
+    }
+
+    // setup output columns
+    vector<string> *out = dataConfig->getOutputColumnsDefault();
+    if (outputColumns.size() > 0) out = &outputColumns;
+    vector<string> outputNames;
+    for (auto colMap: *out) {
+        size_t loc = colMap.find(':');
+        if (loc != string::npos) {
+            outputNames.push_back(colMap.substr(0, loc));
+            outputQueries.push_back(colMap.substr(loc+1));
+        } else {
+            outputQueries.push_back(colMap);
+        }
+    }
+
+    // if a custom header wasn't specified AND the output columns were
+    // labeled, then generate the header from the labels
+    if (header.size() == 0 && outputNames.size() > 0) {
+        ostringstream oss;
+        int idx = 0;
+        for (auto name: outputNames) {
+            if (idx++ > 0) oss << delimiter;
+            oss << name;
+        }
+        header = oss.str();
+    }
+
+	/* now that symbol table is setup, display help & exit if requested */
+	if (vm.count("help")) {
+		std::cout << helpOptions << std::endl;
+		std::cout << std::endl << "Valid built-in identifiers for query/output expressions:" << std::endl;
+		int lineLen = 0;
+        vector<string> symbolKeys;
+        for (auto it: table->getVariableMap()) {
+            symbolKeys.push_back(it.first);
+        }
+        sort(symbolKeys.begin(), symbolKeys.end());
+        int idx = 0;
+        for (auto it: symbolKeys) {
+            if (idx++ != 0) {
+                cout << ", ";
+                lineLen += 2;
+            }
+            if (lineLen > 80) {
+                cout << endl;
+                lineLen = 0;
+            }
+            cout << it;
+            lineLen += it.length();
+        }
+		cout << endl << endl;
+		exit(1);
+	}
 
     if (dataPublicOptions != NULL) {
         delete dataPublicOptions;
@@ -506,9 +470,9 @@ const vector<nclq::VarDescriptor> SummaryDataSource<ProcessSummary>::symbols = {
     { "priority",           nclq::T_INTEGER,    nclq::T_INTEGER },
     { "nice",               nclq::T_INTEGER,    nclq::T_INTEGER },
     { "numThreads",         nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "vsize",             nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "rss",                nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "rsslim",             nclq::T_INTEGER,    nclq::T_INTEGER },
+    { "vsize",             nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "rss",                nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "rsslim",             nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "signal",             nclq::T_INTEGER,    nclq::T_INTEGER },
     { "blocked",            nclq::T_INTEGER,    nclq::T_INTEGER },
     { "sigignore",          nclq::T_INTEGER,    nclq::T_INTEGER },
@@ -517,22 +481,22 @@ const vector<nclq::VarDescriptor> SummaryDataSource<ProcessSummary>::symbols = {
     { "policy",             nclq::T_INTEGER,    nclq::T_INTEGER },
     { "delayacctBlkIOTicks",nclq::T_INTEGER,    nclq::T_INTEGER },
     { "guestTime",          nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "vmpeak",             nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "rsspeak",            nclq::T_INTEGER,    nclq::T_INTEGER },
+    { "vmpeak",             nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "rsspeak",            nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "cpusAllowed",        nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_rchar",           nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_wchar",           nclq::T_INTEGER,    nclq::T_INTEGER },
+    { "io_rchar",           nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "io_wchar",           nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "io_syscr",           nclq::T_INTEGER,    nclq::T_INTEGER },
     { "io_syscw",           nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_readBytes",       nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_writeBytes",      nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_cancelledWriteBytes",nclq::T_INTEGER, nclq::T_INTEGER },
-    { "m_size",             nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "m_resident",         nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "m_share",            nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "m_text",             nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "m_data",             nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "isParent",           nclq::T_INTEGER,    nclq::T_INTEGER },
+    { "io_readBytes",       nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "io_writeBytes",      nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "io_cancelledWriteBytes",nclq::T_DOUBLE, nclq::T_DOUBLE },
+    { "m_size",             nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "m_resident",         nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "m_share",            nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "m_text",             nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "m_data",             nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "isParent",           nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "host",               nclq::T_STRING,     nclq::T_STRING },
     { "command",            nclq::T_STRING,     nclq::T_STRING },
     { "execCommand",        nclq::T_STRING,     nclq::T_STRING },
@@ -551,8 +515,8 @@ const vector<nclq::VarDescriptor> SummaryDataSource<ProcessSummary>::symbols = {
     { "cpuTime_net",        nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "utime_net",          nclq::T_INTEGER,    nclq::T_INTEGER },
     { "stime_net",          nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_rchar_net",       nclq::T_INTEGER,    nclq::T_INTEGER },
-    { "io_wchar_net",       nclq::T_INTEGER,    nclq::T_INTEGER },
+    { "io_rchar_net",       nclq::T_DOUBLE,    nclq::T_DOUBLE },
+    { "io_wchar_net",       nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "cpuRateMax",         nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "iorRateMax",         nclq::T_DOUBLE,    nclq::T_DOUBLE },
     { "iowRateMax",         nclq::T_DOUBLE,    nclq::T_DOUBLE },
@@ -688,9 +652,9 @@ bool SummaryDataSource<ProcessSummary>::setValue(int idx, nclq::Data *data,
         case 25: data->setValue((intType)curr->priority); break;
         case 26: data->setValue((intType)curr->nice); break;
         case 27: data->setValue((intType)curr->numThreads); break;
-        case 28: data->setValue((intType)curr->vsize ); break;
-        case 29: data->setValue((intType)curr->rss   ); break;
-        case 30: data->setValue((intType)curr->rsslim); break;
+        case 28: data->setValue((double)curr->vsize ); break;
+        case 29: data->setValue((double)curr->rss   ); break;
+        case 30: data->setValue((double)curr->rsslim); break;
         case 31: data->setValue((intType)curr->signal); break;
         case 32: data->setValue((intType)curr->blocked); break;
         case 33: data->setValue((intType)curr->sigignore); break;
@@ -699,21 +663,21 @@ bool SummaryDataSource<ProcessSummary>::setValue(int idx, nclq::Data *data,
         case 36: data->setValue((intType)curr->policy); break;
         case 37: data->setValue((intType)curr->delayacctBlkIOTicks); break;
         case 38: data->setValue((intType)curr->guestTime); break;
-        case 39: data->setValue((intType)curr->vmpeak  ); break;
-        case 40: data->setValue((intType)curr->rsspeak ); break;
+        case 39: data->setValue((double)curr->vmpeak  ); break;
+        case 40: data->setValue((double)curr->rsspeak ); break;
         case 41: data->setValue((intType)curr->cpusAllowed); break;
-        case 42: data->setValue((intType)curr->io_rchar); break;
-        case 43: data->setValue((intType)curr->io_wchar); break;
+        case 42: data->setValue((double)curr->io_rchar); break;
+        case 43: data->setValue((double)curr->io_wchar); break;
         case 44: data->setValue((intType)curr->io_syscr); break;
         case 45: data->setValue((intType)curr->io_syscw); break;
-        case 46: data->setValue((intType)curr->io_readBytes); break;
-        case 47: data->setValue((intType)curr->io_writeBytes); break;
-        case 48: data->setValue((intType)curr->io_cancelledWriteBytes); break;
-        case 49: data->setValue((intType)curr->m_size); break;
-        case 50: data->setValue((intType)curr->m_resident); break;
-        case 51: data->setValue((intType)curr->m_share); break;
-        case 52: data->setValue((intType)curr->m_text); break;
-        case 53: data->setValue((intType)curr->m_data); break;
+        case 46: data->setValue((double)curr->io_readBytes); break;
+        case 47: data->setValue((double)curr->io_writeBytes); break;
+        case 48: data->setValue((double)curr->io_cancelledWriteBytes); break;
+        case 49: data->setValue((double)curr->m_size); break;
+        case 50: data->setValue((double)curr->m_resident); break;
+        case 51: data->setValue((double)curr->m_share); break;
+        case 52: data->setValue((double)curr->m_text); break;
+        case 53: data->setValue((double)curr->m_data); break;
         case 54: data->setValue((intType)curr->isParent); break;
         case 55: data->setValue(curr->host); break;
         case 56: data->setValue(curr->command); break;
@@ -733,8 +697,8 @@ bool SummaryDataSource<ProcessSummary>::setValue(int idx, nclq::Data *data,
         case 70: data->setValue(curr->cpuTime_net); break;
         case 71: data->setValue((intType)curr->utime_net); break;
         case 72: data->setValue((intType)curr->stime_net); break;
-        case 73: data->setValue((intType)curr->io_rchar_net); break;
-        case 74: data->setValue((intType)curr->io_wchar_net); break;
+        case 73: data->setValue((double)curr->io_rchar_net); break;
+        case 74: data->setValue((double)curr->io_wchar_net); break;
         case 75: data->setValue(curr->cpuRateMax); break;
         case 76: data->setValue(curr->iorRateMax); break;
         case 77: data->setValue(curr->iowRateMax); break;
@@ -758,29 +722,13 @@ bool SummaryDataSource<ProcessSummary>::setValue(int idx, nclq::Data *data,
 SummaryConfiguration::SummaryConfiguration(QQProcConfiguration *_config):
     config(_config)
 {
-    outputColumnsDefault = {
-        "job_number", "task_number", "hostname", "owner", "project",
-        "job_name", "datetime(submission)", "datetime(start)",
-        "datetime(end)", "failed", "exit_status", "h_rt", "wallclock",
-        "memory(h_vmem)", "memory(maxvmem)",
-    };
-
-    dataset = config->getDataset();
-    datasetGroup = config->getDatasetGroup();
-    if (dataset == "ProcessSummary") {
-        symbolTable = new nclq::SymbolTable(SummaryDataSource<ProcessSummary>::symbols);
-    } else if (dataset == "IdentifiedFilesystem") {
-        symbolTable = new nclq::SymbolTable(SummaryDataSource<IdentifiedFilesystem>::symbols);
-    } else if (dataset == "IdentifiedNetworkConnection") {
-        symbolTable = new nclq::SymbolTable(SummaryDataSource<IdentifiedNetworkConnection>::symbols);
-    } else {
-        throw invalid_argument(string("Unknown dataset: ") + dataset);
-    }
-    symbolTable->setModifiable(true);
 }
 
 SummaryConfiguration::~SummaryConfiguration() {
-    delete symbolTable;
+    if (symbolTable != NULL) {
+        delete symbolTable;
+        symbolTable = NULL;
+    }
 }
 
 QQProcDataSource *SummaryConfiguration::createDataSource() {
@@ -803,14 +751,79 @@ po::options_description *SummaryConfiguration::getOptions() {
         ("summary.dateformat", po::value<string>(&dateformat)->default_value("%Y%m%d"), "strftime options for time encoded in date match group of h5pattern")
         ("summary.file", po::value<vector<string> >(&specificFiles)->composing(), "Specific h5 file to be examined (disables time-based h5file discovery")
     ;
+
+    po::options_description procsummaryOpts("procsummary Options");
+    procsummaryOpts.add_options()
+        ("procsummary.dataset", po::value<string>()->default_value("ProcessSummary"), "name of ProcessSummary dataset in summary h5 files")
+        ("procsummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which ProcessSummary dataset can be found in summary h5 files")
+    ;
+
+    po::options_description fssummaryOpts("fssummary Options");
+    fssummaryOpts.add_options()
+        ("fssummary.dataset", po::value<string>()->default_value("IdentifiedFilesystem"), "name of IdentifiedFilesystem dataset in summary h5 files")
+        ("fssummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which IdentifiedFilesystem dataset can be found in summary h5 files")
+    ;
+
+    po::options_description netsummaryOpts("netsummary Options");
+    netsummaryOpts.add_options()
+        ("netsummary.dataset", po::value<string>()->default_value("IdentifiedNetworkConnection"), "name of IdentifiedNetworkConnection dataset in summary h5 files")
+        ("netsummary.datasetGroup", po::value<string>()->default_value("/processes"), "group path in which IdentifiedNetworkConnection dataset can be found in summary h5 files")
+    ;
+
+    opts->add(procsummaryOpts).add(fssummaryOpts).add(netsummaryOpts);
+
     return opts;
 }
 
 po::options_description *SummaryConfiguration::getPrivateOptions() {
-    return nullptr;
+    po::options_description *opts = new po::options_description("procmon Summary File Options");
+
+    po::options_description procsummaryOpts("procsummary Options");
+    procsummaryOpts.add_options()
+        ("procsummary.varmap", po::value<vector<string> >()->composing(), "variable maps for ProcessSummary")
+        ("procsummary.column_default", po::value<vector<string> >()->composing(), "default output columns for ProcessSummary")
+    ;
+
+    po::options_description fssummaryOpts("fssummary Options");
+    fssummaryOpts.add_options()
+        ("fssummary.varmap", po::value<vector<string> >()->composing(), "variable maps for IdentifiedFilesystem")
+        ("fssummary.column_default", po::value<vector<string> >()->composing(), "default output columns for IdentifiedFilesystem")
+    ;
+
+    po::options_description netsummaryOpts("netsummary Options");
+    netsummaryOpts.add_options()
+        ("netsummary.varmap", po::value<vector<string> >()->composing(), "variable maps for IdentifiedNetworkConnection")
+        ("netsummary.column_default", po::value<vector<string> >()->composing(), "default output columns for IdentifiedNetworkConnection")
+    ;
+
+    opts->add(procsummaryOpts).add(fssummaryOpts).add(netsummaryOpts);
+
+    return opts;
 }
 
 void SummaryConfiguration::setupOptions(const po::variables_map& vm) {
+
+    if (vm.count(config->getMode() + ".dataset"))
+        dataset = vm[config->getMode() + ".dataset"].as<string>();
+    if (vm.count(config->getMode() + ".datasetGroup"))
+        datasetGroup = vm[config->getMode() + ".datasetGroup"].as<string>();
+    if (vm.count(config->getMode() + ".varmap"))
+        symbolMapList = vm[config->getMode() + ".varmap"].as<vector<string> >();
+    if (vm.count(config->getMode() + ".column_default"))
+        outputColumnsDefault = vm[config->getMode() + ".column_default"].as<vector<string> >();
+
+    if (dataset == "ProcessSummary") {
+        symbolTable = new nclq::SymbolTable(SummaryDataSource<ProcessSummary>::symbols);
+    } else if (dataset == "IdentifiedFilesystem") {
+        symbolTable = new nclq::SymbolTable(SummaryDataSource<IdentifiedFilesystem>::symbols);
+    } else if (dataset == "IdentifiedNetworkConnection") {
+        symbolTable = new nclq::SymbolTable(SummaryDataSource<IdentifiedNetworkConnection>::symbols);
+    } else {
+        throw invalid_argument(string("Unknown dataset: ") + dataset);
+    }
+    cout << "filePath: " << filePath << endl;
+
+    symbolTable->setModifiable(true);
     vector<string> paths;
     boost::algorithm::split(paths, filePath, boost::is_any_of(":"));
     for (vector<string>::iterator iter = paths.begin(), end=paths.end(); iter!=end; ++iter) {

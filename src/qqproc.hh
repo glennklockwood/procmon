@@ -53,6 +53,8 @@ class DataConfiguration {
     virtual po::options_description *getPrivateOptions() = 0;
     virtual void setupOptions(const po::variables_map& vm) = 0;
     virtual nclq::SymbolTable *getSymbolTable() = 0;
+    virtual vector<string> *getOutputColumnsDefault() = 0;
+    virtual vector<string> *getSymbolMapList() = 0;
 };
 
 class QQProcConfiguration {
@@ -67,8 +69,6 @@ class QQProcConfiguration {
     vector<string> outputQueries;
 	vector<string> outputFilenames;
 	vector<string> outputColumns;
-    vector<string> outputColumns_default;
-    vector<string> symbolMapList;
 	int daysBack;
 	bool verbose;
 	time_t startDate;
@@ -97,6 +97,7 @@ class QQProcConfiguration {
     inline const char getDelimiter() const { return delimiter; }
     inline const string &getDatasetGroup() const { return datasetGroup; }
     inline const string &getDataset() const { return dataset; }
+    inline const string &getMode() const { return mode; }
 };
 
 template <class pmType>
@@ -110,6 +111,7 @@ class SummaryConfiguration : public DataConfiguration {
     vector<fs::path> files;
     vector<string> specificFiles;
     vector<string> outputColumnsDefault;
+    vector<string> symbolMapList;
 
     string dataset;
     string datasetGroup;
@@ -127,6 +129,8 @@ class SummaryConfiguration : public DataConfiguration {
     inline const string &getDataset() const { return dataset; }
     inline const string &getDatasetGroup() const { return datasetGroup; }
     inline const vector<fs::path> &getFiles() const { return files; }
+    virtual inline vector<string> *getOutputColumnsDefault() { return &outputColumnsDefault; }
+    virtual inline vector<string> *getSymbolMapList() { return &symbolMapList; }
 };
 
 template <class pmType>
