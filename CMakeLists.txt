@@ -21,14 +21,10 @@ SET( PROCMON_VERSION 2.6 )
 OPTION ( USE_RABBITMQ_C "Use rabbitmq-c" ON )
 OPTION ( USE_ZEROMQ "Use zeromq" ON )
 OPTION ( USE_HDF5 "Use HDF5 Libraries" ON )
-OPTION ( USE_BOOST "Use Boost Libraries" ON )
 OPTION ( BUILD_PROCMON "Build procmon" ON )
 OPTION ( BUILD_AMQPLOGGER "Build the amqpLogger" ON )
 OPTION ( BUILD_EXTRA "Build the extra components" ON )
 
-OPTION ( Boost_USE_STATIC_LIBS ON  )
-OPTION( Boost_USE_STATIC_RUNTIME ON )
-OPTION( Boost_USE_MULTITHREADED OFF )
 
 SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -ggdb" )
 SET( CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -ggdb" )
@@ -48,16 +44,13 @@ SET( DEFAULT_AMQP_FRAMESIZE 131072 CACHE STRING "Default maximum framesize in by
 
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake")
 
-IF ( USE_BOOST )
-    FIND_PACKAGE( Boost 1.50.0 COMPONENTS program_options filesystem system regex)
-ENDIF ( USE_BOOST )
 
 ## get a private and patched installation of rabbitmq 0.4.1
 IF ( USE_RABBITMQ_C )
     SET( RABBITMQ_C_DIR "${CMAKE_BINARY_DIR}/rabbit" )
     INCLUDE( ExternalProject )
     ExternalProject_Add(
-        rabbitmq-0.4.1
+        rabbitmq-0.5.2
         URL https://github.com/alanxz/rabbitmq-c/releases/download/v0.5.2/rabbitmq-c-0.5.2.tar.gz
         PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/extra/rabbitmq-c/fpic_static.patch
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${RABBITMQ_C_DIR} -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_FPICSTATIC_LIBS=ON -DENABLE_SSL_SUPPORT=OFF
@@ -111,7 +104,6 @@ ExternalProject_Add(
         "-DVALGRIND_INCLUDE_DIR=${VALGRIND_DIR}/include"
         "-DCMAKE_INSTALL_PREFIX=${NCLQ_DIR}"
         "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
-        "-DBoost_USE_STATIC_LIBS=${Boost_USE_STATIC_LIBS}"
     TEST_BEFORE_INSTALL 1
 )
 
