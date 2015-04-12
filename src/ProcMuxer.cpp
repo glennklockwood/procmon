@@ -334,35 +334,31 @@ int main(int argc, char **argv) {
         last_hour = currTm.tm_hour;
 
         ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords, 100000);
-        if (recordType == TYPE_INVALID) {
-            //timeout or garbage data
-            continue;
-        }
-        conn->get_frame_context(hostname, identifier, subidentifier);
-
-        if (data == NULL) {
-            continue;
+        if (recordType != TYPE_INVALID) {
+            conn->get_frame_context(hostname, identifier, subidentifier);
         }
 
-        string message_type = "NA";
-        outputFile->set_context(hostname, identifier, subidentifier);
-        if (recordType == TYPE_PROCDATA) {
-            procdata *ptr = (procdata *) data;
-            outputFile->write_procdata(ptr, 0, nRecords);
-            file_n_writes++;
-            message_type = "procdata";
-        } else if (recordType == TYPE_PROCSTAT) {
-            procstat *ptr = (procstat *) data;
-            outputFile->write_procstat(ptr, 0, nRecords);
-            file_n_writes++;
-            message_type = "procstat";
-        } else if (recordType == TYPE_PROCFD) {
-            procfd *ptr = (procfd *) data;
-            outputFile->write_procfd(ptr, 0, nRecords);
-            file_n_writes++;
-            message_type = "procfd";
+        if (recordType != TYPE_INVALID && data != NULL) {
+            string message_type = "NA";
+            outputFile->set_context(hostname, identifier, subidentifier);
+            if (recordType == TYPE_PROCDATA) {
+                procdata *ptr = (procdata *) data;
+                outputFile->write_procdata(ptr, 0, nRecords);
+                file_n_writes++;
+                message_type = "procdata";
+            } else if (recordType == TYPE_PROCSTAT) {
+                procstat *ptr = (procstat *) data;
+                outputFile->write_procstat(ptr, 0, nRecords);
+                file_n_writes++;
+                message_type = "procstat";
+            } else if (recordType == TYPE_PROCFD) {
+                procfd *ptr = (procfd *) data;
+                outputFile->write_procfd(ptr, 0, nRecords);
+                file_n_writes++;
+                message_type = "procfd";
+            }
+            cerr << "Received message: " << hostname << "." << identifier << "." << subidentifier << "." << message_type << endl;
         }
-        cerr << "Received message: " << hostname << "." << identifier << "." << subidentifier << "." << message_type << endl;
 
         /* check if # of writes to this file has exceeded max,
            if so, flush changes to disk and start writing a new file */

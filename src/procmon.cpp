@@ -752,6 +752,7 @@ int format_socket_connection(char *buffer, size_t len, netstat *net) {
     return snprintf(buffer, len, "%s:%u.%u.%u.%u:%u:%u.%u.%u.%u:%u", labels[net->type], local_addr[0], local_addr[1], local_addr[2], local_addr[3], net->local_port, remote_addr[0], remote_addr[1], remote_addr[2], remote_addr[3], net->remote_port);
 }
 
+
 /* on first pass:
  *   1) read /proc/<pid>/stat and
  *   save all contents in-memory

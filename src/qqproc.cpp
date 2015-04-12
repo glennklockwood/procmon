@@ -124,6 +124,7 @@ int main(int argc, char** argv) {
         int qIdx = 0;
         for (auto it: queries) {
             nclq::Expression *result = it->evaluateExpression(dataSource, &data);
+            if (result == NULL) { cout << "counter: " << counter << endl; }
             assert(result != NULL);
 
             nclq::BoolExpression *boolExpr = static_cast<nclq::BoolExpression*>(result);
