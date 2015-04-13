@@ -864,7 +864,8 @@ class TopCurses {
                 jobData = _jobData;
             }
             bool operator()(PrintData *tgt) {
-                return find(jobData->records.begin(), jobData->records.end(), tgt) != jobData->records.end();
+                //return find(jobData->records.begin(), jobData->records.end(), tgt) != jobData->records.end();
+                return false;
             }
         };
 
@@ -878,7 +879,7 @@ class TopCurses {
             JobData *oldData = (*it).second->data;
             delta = new JobDataDelta(newData, oldData);
 //printData.erase(remove_if(printData.begin(), printData.end(), TrimPrintObj(curr)), printData.end());
-            remove_if(printData.begin(), printData.end(), TrimPrintObj(curr));
+            //remove_if(printData.begin(), printData.end(), TrimPrintObj(curr));
             delete it->second;
             it->second = NULL;
         }
