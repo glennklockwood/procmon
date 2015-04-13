@@ -1,14 +1,16 @@
-/*
- * procmon.c
- *
- * Author: Douglas Jacobsen <dmjacobsen@lbl.gov>, NERSC User Services Group
- * 2013/02/17
- * Copyright (C) 2012, The Regents of the University of California
- *
- * The purpose of the procmon is to read data from /proc for an entire process tree
- * and save that data at intervals longitudinally
- */
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
 
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -749,6 +751,7 @@ int format_socket_connection(char *buffer, size_t len, netstat *net) {
     }
     return snprintf(buffer, len, "%s:%u.%u.%u.%u:%u:%u.%u.%u.%u:%u", labels[net->type], local_addr[0], local_addr[1], local_addr[2], local_addr[3], net->local_port, remote_addr[0], remote_addr[1], remote_addr[2], remote_addr[3], net->remote_port);
 }
+
 
 /* on first pass:
  *   1) read /proc/<pid>/stat and

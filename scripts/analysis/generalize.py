@@ -8,14 +8,14 @@ from datetime import timedelta
 import time
 import time
 
-start = datetime(2013,12,11)
+start = datetime(2013,12,3)
 end = datetime(2014,12,5)
 if True:
     idx = 0
 
     while start < end:
         tomorrow = start + timedelta(days=1)
-        inputFile = '%s/genepool_workload_v2.%s.agg.h5' % (os.environ['GSCRATCH'], start.strftime("%Y%m%d"))
+        inputFile = '%s/genepool_workload_v2.%s.agg2.h5' % (os.environ['GSCRATCH'], start.strftime("%Y%m%d"))
         outputFile1 = '%s/genepool_workload_v2.%s.generalized.h5' % (os.environ['GSCRATCH'], start.strftime("%Y%m%d"))
 
         if not os.path.exists(outputFile1):

@@ -22,7 +22,7 @@ diff -rupN rabbitmq-c//librabbitmq/CMakeLists.txt rabbitmq-c.new//librabbitmq/CM
 +    target_link_libraries(rabbitmq-fpic-static ${RMQ_LIBRARIES})
 +
 +    set_target_properties(rabbitmq-fpic-static PROPERTIES COMPILE_DEFINITIONS AMQP_STATIC)
-+    set_target_properties(rabbitmq-fpic-static PROPERTIES COMPILE_FLAGS "-fPIC")
++    set_target_properties(rabbitmq-fpic-static PROPERTIES COMPILE_FLAGS "-fPIE")
 +    if (WIN32)
 +        set_target_properties(rabbitmq-fpic-static PROPERTIES VERSION ${RMQ_VERSION} OUTPUT_NAME librabbitmq.fpic.${RMQ_SOVERSION})
 +    else (WIN32)

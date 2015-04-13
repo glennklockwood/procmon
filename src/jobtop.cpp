@@ -1,3 +1,17 @@
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +28,7 @@
 #include <boost/bind.hpp>
 
 #include <vector>
+#include <deque>
 #include <unordered_map>
 #include <string>
 #include <iostream>
@@ -251,7 +266,7 @@ struct PrintData {
 struct CurrentJobData {
     JobData *data;
     JobDataDelta *delta;
-    vector<PrintData *> records;
+    //vector<PrintData *> records;
 
     CurrentJobData(JobData *data, JobDataDelta *delta) {
         this->data = data;
@@ -261,9 +276,11 @@ struct CurrentJobData {
     ~CurrentJobData() {
         if (data != NULL) delete data;
         if (delta != NULL) delete delta;
+        /*
         for (auto it = records.begin(); it != records.end(); it++) {
             delete *it;
         }
+        */
         data = NULL;
         delta = NULL;
     }
@@ -617,7 +634,7 @@ class TopCurses {
   public:
     unordered_map<JobIdent, CurrentJobData*> jobData;
     unordered_map<JobIdent, JobData*> newJobData;
-    vector<PrintData *> printData;
+    deque<PrintData *> printData;
     string system;
     string jobid;
     string taskid;
@@ -680,8 +697,7 @@ class TopCurses {
             }
         };
         if ((err = pthread_mutex_lock(&data_lock)) != 0) fatal_error("printScreen failed to lock token.", err);
-        printData.erase(remove_if(printData.begin(), printData.end(), AgePrintObj(curr_time - age_timeout)), printData.end());
-        if ((err = pthread_mutex_unlock(&data_lock)) != 0) fatal_error("printScreen failed to unlock token.", err);
+        remove_if(printData.begin(), printData.end(), AgePrintObj(curr_time - age_timeout));
 
         if (sortFunction != NULL) {
             sort(printData.begin(), printData.end(), sortFunction);
@@ -751,6 +767,7 @@ class TopCurses {
         if (ypos == 2) {
             mvprintw(3, 0, "Awaiting data.");
         }
+        if ((err = pthread_mutex_unlock(&data_lock)) != 0) fatal_error("printScreen failed to unlock token.", err);
         refresh();
     }
 
@@ -759,7 +776,7 @@ class TopCurses {
         while (cleanup == 0) {
             int ch = getch();
             switch (ch) {
-                case 'q': kill(getpid(), SIGTERM); break;
+                case 'q': screen_exit(this, 0); break;
                 case 'd': sortFunction = sortDuration; break;
                 case 'D': sortFunction = sortDurationRev; break;
                 case 'v': sortFunction = sortVMem; break;
@@ -860,8 +877,10 @@ class TopCurses {
             CurrentJobData *curr = it->second;
             JobData *oldData = (*it).second->data;
             delta = new JobDataDelta(newData, oldData);
-            printData.erase(remove_if(printData.begin(), printData.end(), TrimPrintObj(curr)), printData.end());
-            delete (*it).second;
+//printData.erase(remove_if(printData.begin(), printData.end(), TrimPrintObj(curr)), printData.end());
+            remove_if(printData.begin(), printData.end(), TrimPrintObj(curr));
+            delete it->second;
+            it->second = NULL;
         }
         CurrentJobData *currData = new CurrentJobData(newData, delta);
         jobData[ident] = currData;
@@ -917,7 +936,7 @@ class TopCurses {
             d->total_ioRead = ps->io_rchar;
             d->total_ioWrite = ps->io_wchar;
             d->mpiRank = ps->rtPriority;
-            currData->records.push_back(d);
+            //currData->records.push_back(d);
             printData.push_back(d);
         }
 
@@ -942,6 +961,7 @@ ProcAMQPIO *conn = NULL;
 static void *screen_start(void *t_curses) {
     TopCurses *curses = (TopCurses *) t_curses;
     curses->eventLoop();
+    delete curses;
 }
 
 static void *monitor_start(void *t_timeout) {
@@ -960,14 +980,7 @@ static void *monitor_start(void *t_timeout) {
 }
 
 static void screen_exit(TopCurses *screen, int exit_code) {
-    if (screen != NULL) {
-        delete screen;
-    }
-    if (conn != NULL) {
-        delete conn;
-    }
     cleanup = 1;
-    exit(exit_code);
 }
 
 void fatal_error(const char *error, int err) {
@@ -979,7 +992,7 @@ void fatal_error(const char *error, int err) {
     } else {
         fprintf(stderr, "Failed: %s; %d; bailing out.\n", error, err);
     }
-    kill(getpid(), SIGTERM);
+    screen_exit(screen, 1);
 }
 
 void sig_handler(int signum) {
@@ -999,6 +1012,7 @@ int main(int argc, char **argv) {
 
     screen = new TopCurses(config.getSystem(), config.getIdentifier(), config.getSubidentifier());
     signal(SIGTERM, sig_handler);
+    signal(SIGINT, sig_handler);
     pthread_t screen_thread, monitor_thread;
     int retCode = pthread_create(&screen_thread, NULL, screen_start, screen);
     if (retCode != 0) {
@@ -1022,7 +1036,7 @@ int main(int argc, char **argv) {
     /* TODO: add timer thread to look for idle-ness and kill the whole thing */
 
     while (cleanup == 0) {
-        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords);
+        ProcRecordType recordType = conn->read_stream_record(&data, &data_size, &nRecords, 10000);
         conn->get_frame_context(hostname, identifier, subidentifier);
 
         if (data == NULL) {
@@ -1039,4 +1053,5 @@ int main(int argc, char **argv) {
         }
     }
     screen_exit(screen, 0);
+    delete conn;
 }

@@ -1,3 +1,17 @@
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
+
 #include "ProcIO.hh"
 #include "ProcData.hh"
 #include <stdlib.h>
@@ -165,7 +179,7 @@ ProcAMQPIO::~ProcAMQPIO() {
     _amqp_close(false);
 }
 
-ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, int *nRec) {
+ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, int *nRec, long usecTimeout) {
 	ProcRecordType recType = TYPE_INVALID;
     for ( ; ; ) {
         amqp_frame_t frame;
@@ -173,7 +187,12 @@ ProcRecordType ProcAMQPIO::read_stream_record(void **data, size_t *pool_size, in
         size_t body_received;
         size_t body_target;
         amqp_maybe_release_buffers(conn);
-        result = amqp_simple_wait_frame(conn, &frame);
+        if (usecTimeout > 0) {
+            struct timeval t = {0, usecTimeout};
+            result = amqp_simple_wait_frame_noblock(conn, &frame, &t);
+        } else {
+            result = amqp_simple_wait_frame(conn, &frame);
+        }
         if (result < 0) { break; }
 
         if (frame.frame_type != AMQP_FRAME_METHOD) {

@@ -159,6 +159,11 @@ def getBatchData(config):
         fd.write(jobs)
         fd.write(existing_jobs)
         fd.close()
+    if (config.batchType == "torque"):
+        jobs = QQAcctJobs(config.start_time, config.end_type, config.maxQueueLength)
+        fd.write(jobs)
+        fd.close()
+
     return batchFilename
 
 if __name__ == "__main__":

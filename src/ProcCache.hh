@@ -117,6 +117,14 @@ template <typename T> struct CacheData {
         buffer_len = 0;
         count = 0;
     }
+    CacheData(CacheData<T> *other) {
+        buffer_len = other->buffer_len;
+        count = other->count;
+        data = new T[buffer_len];
+        for (size_t idx = 0; idx < other->count; ++idx) {
+            data[idx] = other->data[idx];
+        }
+    }
     ~CacheData() {
         if (data != NULL) {
             delete[] data;
@@ -156,11 +164,8 @@ template <typename T> class CacheNode {
     struct CacheNode<T> *next;
     struct CacheNode<T> *prev;
     struct CacheData<T> *curr_data;
-    struct CacheData<T> *prev_data;
     struct JobDelta<T> *delta;
     int delta_buflen;
-    int *map;
-    int map_buflen;
     time_t set_time;
 
     public:
@@ -169,12 +174,26 @@ template <typename T> class CacheNode {
         next = NULL;
         prev = NULL;
         curr_data = new CacheData<T>();
-        prev_data = new CacheData<T>();
         set_time = 0;
         delta = NULL;
         delta_buflen = 0;
-        map = NULL;
-        map_buflen = 0;
+    }
+
+    CacheNode(CacheNode<T> *other) {
+        ident = new JobIdent(*(other->ident));
+        next = NULL;
+        prev = NULL;
+        delta = NULL;
+        delta_buflen = other->delta_buflen;
+        curr_data = new CacheData<T>(*(other->curr_data));
+        set_time = other->set_time;
+
+        if (delta_buflen > 0) {
+            delta = new JobDelta<T>[delta_buflen];
+            for (size_t idx = 0; idx < delta_buflen; ++idx) {
+                delta[idx] = other->delta[idx];
+            }
+        }
     }
 
     ~CacheNode() {
@@ -186,15 +205,6 @@ template <typename T> class CacheNode {
             delete curr_data;
             curr_data = NULL;
         }
-        if (prev_data != NULL) {
-            delete prev_data;
-            prev_data = NULL;
-        }
-        if (map != NULL) {
-            delete[] map;
-            map = NULL;
-            map_buflen = 0;
-        }
         if (delta != NULL) {
             delete[] delta;
             delta = NULL;
@@ -205,22 +215,16 @@ template <typename T> class CacheNode {
     inline void set(JobIdent *_ident, T* data, int nRecords) {
         if (ident != NULL) {
             delete ident;
-            prev_data->count = 0;
             curr_data->count = 0;
         }
         ident = new JobIdent(*_ident);
 
-        struct CacheData<T> *ptr = prev_data;
-        prev_data = curr_data;
-        curr_data = ptr;
-        curr_data->set(data, nRecords);
-
         /* map curr procs to old procs */
         int local_map[nRecords];
         memset(local_map, -1, sizeof(int)*nRecords);
-        for (int i = 0; i < curr_data->count; i++) {
-            for (int j = 0; j < prev_data->count; j++) {
-                if (curr_data->data[i].equivRecord(prev_data->data[j])) {
+        for (int i = 0; i < nRecords; i++) {
+            for (int j = 0; j < curr_data->count; j++) {
+                if (data[i].equivRecord(curr_data->data[j])) {
                     local_map[i] = j;
                 }
             }
@@ -229,31 +233,26 @@ template <typename T> class CacheNode {
         /* calcuate deltas between the old obs and the new; the old map still
            contains the indices of the old observation locations */
         JobDelta<T> tmp_deltas[nRecords];
-        for (int i = 0; i< curr_data->count; i++) {
+        memset(tmp_deltas, 0, sizeof(JobDelta<T>) * nRecords);
+        for (int i = 0; i< nRecords; i++) {
             if (local_map[i] == -1) continue;
-            T *curr = &(curr_data->data[i]);
-            T *prev = &(prev_data->data[local_map[i]]);
+            T *curr = &(data[i]);
+            T *prev = &(curr_data->data[local_map[i]]);
             JobDelta<T> *pdelta = (&delta)[local_map[i]];
             tmp_deltas[i].set(curr, prev, pdelta);
         }
 
-        if (map_buflen < curr_data->count) {
-            if (map != NULL) {
-                delete[] map;
-            }
-            map = new int[curr_data->count];
-            map_buflen = curr_data->count;
-        }
-        memcpy(map, local_map, sizeof(int) * nRecords);
-
-        if (delta_buflen < curr_data->count) {
+        if (delta_buflen < nRecords) {
             if (delta != NULL) {
                 delete[] delta;
             }
-            delta = new JobDelta<T>[curr_data->count];
+            delta = new JobDelta<T>[nRecords];
             delta_buflen = curr_data->count;
         }
-        memcpy(delta, tmp_deltas, sizeof(JobDelta<T>) * curr_data->count);
+        for (size_t idx = 0; idx < nRecords; ++idx) {
+            delta[idx] = tmp_deltas[idx];
+        }
+        curr_data->set(data, nRecords);
     }
 
     const JobIdent *getJobIdent() {
@@ -280,6 +279,37 @@ template<typename T> class Cache {
     unordered_map<JobIdent, CacheNode<T> * >  index;
 
     public:
+    Cache(Cache<T> *other) {
+        timeout = other->timeout;
+        minsize = other->minsize;
+        currsize = other->currsize;
+        CacheNode<T> *o_ptr = other->head;
+        CacheNode<T> *l_ptr = new CacheNode<T>(o_ptr);
+        head = l_ptr;
+        o_ptr = o_ptr->next;
+        while (o_ptr != other->head) {
+            CacheNode<T> *ll_ptr = new CacheNode<T>(o_ptr);
+            ll_ptr->prev = l_ptr;
+            l_ptr->next = ll_ptr;
+            l_ptr = ll_ptr;
+            o_ptr = o_ptr->next;
+        }
+        head->prev = l_ptr;
+        l_ptr->next = head;
+        index();
+    }
+
+    void reindex() {
+        index.clear();
+        CacheNode<T> *ptr = head;
+        index[*(ptr->ident)] = ptr;
+        ptr = ptr->next;
+        while (ptr != head) {
+            index[*(ptr->ident)] = ptr;
+            ptr = ptr->next;
+        }
+    }
+
     Cache(int _timeout, int _minsize=1000) {
         timeout = _timeout;
         minsize = _minsize;

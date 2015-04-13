@@ -1,3 +1,17 @@
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
+
 #include "ProcessSummary.hh"
 #include "ProcIO2.hh"
 #include <string.h>
@@ -16,7 +30,7 @@ ProcessSummary::ProcessSummary(const string& _hostname, const string& _identifie
 
 namespace pmio2 {
 template <>
-void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> file) {
+hid_t Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> file) {
     hid_t h5type = H5Tcreate(H5T_COMPOUND, sizeof(IdentifiedFilesystem));
     H5Tinsert(h5type, "identifier",    HOFFSET(IdentifiedFilesystem, identifier),    file->strType_idBuffer);
     H5Tinsert(h5type, "subidentifier", HOFFSET(IdentifiedFilesystem, subidentifier), file->strType_idBuffer);
@@ -30,11 +44,11 @@ void Hdf5Type<IdentifiedFilesystem>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "write",         HOFFSET(IdentifiedFilesystem, write),         H5T_NATIVE_UINT);
     H5Tinsert(h5type, "user",          HOFFSET(IdentifiedFilesystem, user),          file->strType_exeBuffer);
     H5Tinsert(h5type, "project",       HOFFSET(IdentifiedFilesystem, project),       file->strType_exeBuffer);
-    type = h5type;
+    return h5type;
 }
 
 template<>
-void Hdf5Type<IdentifiedNetworkConnection>::initializeType(shared_ptr<Hdf5Io> file) {
+hid_t Hdf5Type<IdentifiedNetworkConnection>::initializeType(shared_ptr<Hdf5Io> file) {
     hid_t h5type = H5Tcreate(H5T_COMPOUND, sizeof(IdentifiedNetworkConnection));
     H5Tinsert(h5type, "identifier",    HOFFSET(IdentifiedNetworkConnection, identifier),    file->strType_idBuffer);
     H5Tinsert(h5type, "subidentifier", HOFFSET(IdentifiedNetworkConnection, subidentifier), file->strType_idBuffer);
@@ -49,11 +63,11 @@ void Hdf5Type<IdentifiedNetworkConnection>::initializeType(shared_ptr<Hdf5Io> fi
     H5Tinsert(h5type, "localPort",     HOFFSET(IdentifiedNetworkConnection, localPort),     H5T_NATIVE_INT);
     H5Tinsert(h5type, "user",          HOFFSET(IdentifiedNetworkConnection, user),          file->strType_exeBuffer);
     H5Tinsert(h5type, "project",       HOFFSET(IdentifiedNetworkConnection, project),       file->strType_exeBuffer);
-    type = h5type;
+    return h5type;
 }
 
 template <>
-void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
+hid_t Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     hid_t h5type = H5Tcreate(H5T_COMPOUND, sizeof(ProcessSummary));
     H5Tinsert(h5type, "identifier",    HOFFSET(ProcessSummary, identifier),    file->strType_idBuffer);
     H5Tinsert(h5type, "subidentifier", HOFFSET(ProcessSummary, subidentifier), file->strType_idBuffer);
@@ -147,7 +161,7 @@ void Hdf5Type<ProcessSummary>::initializeType(shared_ptr<Hdf5Io> file) {
     H5Tinsert(h5type, "cov_iorXmsize", HOFFSET(ProcessSummary, cov_iorXmsize), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "cov_iorXmresident", HOFFSET(ProcessSummary, cov_iorXmresident), H5T_NATIVE_DOUBLE);
     H5Tinsert(h5type, "cov_msizeXmresident", HOFFSET(ProcessSummary, cov_msizeXmresident), H5T_NATIVE_DOUBLE);
-    type = h5type;
+    return h5type;
 }
 }
 

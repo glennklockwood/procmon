@@ -1,3 +1,17 @@
+################################################################################
+# procmon, Copyright (c) 2014, The Regents of the University of California,
+# through Lawrence Berkeley National Laboratory (subject to receipt of any
+# required approvals from the U.S. Dept. of Energy).  All rights reserved.
+#
+# If you have questions about your rights to use or distribute this software,
+# please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+#
+# The LICENSE file in the root directory of the source code archive describes
+# the licensing and distribution rights and restrictions on this software.
+#
+# Author:   Douglas Jacobsen <dmj@nersc.gov>
+################################################################################
+
 cmake_minimum_required (VERSION 2.8)
 
 PROJECT( procmon )
@@ -7,10 +21,10 @@ SET( PROCMON_VERSION 2.6 )
 OPTION ( USE_RABBITMQ_C "Use rabbitmq-c" ON )
 OPTION ( USE_ZEROMQ "Use zeromq" ON )
 OPTION ( USE_HDF5 "Use HDF5 Libraries" ON )
-OPTION ( USE_BOOST "Use Boost Libraries" ON )
 OPTION ( BUILD_PROCMON "Build procmon" ON )
 OPTION ( BUILD_AMQPLOGGER "Build the amqpLogger" ON )
 OPTION ( BUILD_EXTRA "Build the extra components" ON )
+
 
 SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -ggdb" )
 SET( CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -ggdb" )
@@ -30,20 +44,14 @@ SET( DEFAULT_AMQP_FRAMESIZE 131072 CACHE STRING "Default maximum framesize in by
 
 SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMake")
 
-IF ( USE_BOOST )
-    SET( Boost_USE_STATIC_LIBS ON )
-    SET( Boost_USE_MULTITHREADED OFF )
-    SET( Boost_USE_STATIC_RUNTIME ON )
-    FIND_PACKAGE( Boost 1.50.0 COMPONENTS program_options filesystem system regex)
-ENDIF ( USE_BOOST )
 
 ## get a private and patched installation of rabbitmq 0.4.1
 IF ( USE_RABBITMQ_C )
     SET( RABBITMQ_C_DIR "${CMAKE_BINARY_DIR}/rabbit" )
     INCLUDE( ExternalProject )
     ExternalProject_Add(
-        rabbitmq-0.4.1
-        URL http://github.com/alanxz/rabbitmq-c/releases/download/v0.4.1/rabbitmq-c-0.4.1.tar.gz
+        rabbitmq-0.5.2
+        URL https://github.com/alanxz/rabbitmq-c/releases/download/v0.5.2/rabbitmq-c-0.5.2.tar.gz
         PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/extra/rabbitmq-c/fpic_static.patch
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${RABBITMQ_C_DIR} -DBUILD_STATIC_LIBS=ON -DBUILD_SHARED_LIBS=OFF -DBUILD_FPICSTATIC_LIBS=ON -DENABLE_SSL_SUPPORT=OFF
         )
@@ -83,6 +91,21 @@ ENDIF ( USE_RABBITMQ_C )
 #        BUILD_IN_SOURCE 1
 #    )
 #ENDIF ( USE_ZEROMQ )
+
+## setup nclq
+FIND_PROGRAM(VALGRIND_EXECUTABLE NAMES valgrind DOC "path to the valgrind executable")
+FIND_PATH(VALGRIND_INCLUDE_DIR valgrind/memcheck.h DOC "path to the valgrind headers")
+SET (FLEX_DIR $ENV{FLEX_DIR})
+SET (NCLQ_DIR ${CMAKE_BINARY_DIR}/nclq)
+ExternalProject_Add(
+    nclq
+    GIT_REPOSITORY https://bitbucket.org/berkeleylab/nersc-nclq.git
+    CMAKE_ARGS "-DFLEX_INCLUDE_DIR=${FLEX_DIR}/include"
+        "-DVALGRIND_INCLUDE_DIR=${VALGRIND_DIR}/include"
+        "-DCMAKE_INSTALL_PREFIX=${NCLQ_DIR}"
+        "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    TEST_BEFORE_INSTALL 1
+)
 
 IF ( BUILD_PROCMON )
     ADD_SUBDIRECTORY( src )

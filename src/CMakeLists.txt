@@ -1,3 +1,17 @@
+################################################################################
+# procmon, Copyright (c) 2014, The Regents of the University of California,
+# through Lawrence Berkeley National Laboratory (subject to receipt of any
+# required approvals from the U.S. Dept. of Energy).  All rights reserved.
+#
+# If you have questions about your rights to use or distribute this software,
+# please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+#
+# The LICENSE file in the root directory of the source code archive describes
+# the licensing and distribution rights and restrictions on this software.
+#
+# Author:   Douglas Jacobsen <dmj@nersc.gov>
+################################################################################
+
 ## Discover dependencies
 
 OPTION ( USE_PROCMON_AMQP "Use amqp I/O for procmon" ON )
@@ -8,6 +22,13 @@ OPTION ( BUILD_ONLY_PROCMON "Only build the procmon sensor" OFF )
 OPTION ( BUILD_STATIC_PROCMON "Build the procmon sensor statically" OFF )
 OPTION ( BUILD_PROCMON_COLLECTION_TOOLS "Build the full procmon collection tools suite" ON )
 OPTION ( PROCMON_DAEMONIZE_NOSETSID "Build procmon sensor to not call setsid" OFF )
+
+OPTION ( Boost_USE_STATIC_LIBS ON  )
+OPTION( Boost_USE_MULTITHREADED OFF )
+set( _ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+set( CMAKE_FIND_LIBRARY_SUFFIXES .a )
+FIND_PACKAGE( Boost REQUIRED COMPONENTS program_options filesystem system regex )
+set( CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
 
 IF ( BUILD_ONLY_PROCMON )
     SET ( BUILD_PROCMON_COLLECTION_TOOLS OFF )
@@ -67,13 +88,12 @@ endif ()
 
 INCLUDE_DIRECTORIES ( "${CMAKE_CURRENT_SOURCE_DIR}" )
 INCLUDE_DIRECTORIES ( "${CMAKE_CURRENT_BINARY_DIR}" )
+INCLUDE_DIRECTORIES ( "${NCLQ_DIR}/include" )
 
 #INCLUDE_DIRECTORIES ( "${TBB_INCLUDE_DIRS}" )
 
 ## Discover dependencies
-IF ( USE_BOOST )
-    INCLUDE_DIRECTORIES ( "${Boost_INCLUDE_DIRS}" )
-ENDIF ( USE_BOOST )
+INCLUDE_DIRECTORIES ( "${Boost_INCLUDE_DIRS}" )
 
 IF ( USE_HDF5 )
     FIND_PACKAGE( HDF5 )
@@ -125,12 +145,10 @@ IF ( USE_PROCMON_HDF5 )
 ENDIF ( USE_PROCMON_HDF5 )
 IF ( USE_PROCMON_AMQP )
     append_compile_flags_to_target( procmon -DUSE_AMQP=1 )
-    TARGET_LINK_LIBRARIES( procmon ${RABBITMQ_C_LIBRARIES} )
-    TARGET_LINK_LIBRARIES( procmon "rt" )
+    TARGET_LINK_LIBRARIES( procmon ${RABBITMQ_C_LIBRARIES} "rt" )
     IF ( BUILD_SECURED )
         append_compile_flags_to_target( procmon.secured -DUSE_AMQP=1 )
-        TARGET_LINK_LIBRARIES( procmon.secured ${RABBITMQ_C_LIBRARIES} )
-        TARGET_LINK_LIBRARIES( procmon.secured "rt" )
+        TARGET_LINK_LIBRARIES( procmon.secured ${RABBITMQ_C_LIBRARIES} "rt" )
     ENDIF ( BUILD_SECURED )
 ENDIF ( USE_PROCMON_AMQP )
 
@@ -151,40 +169,28 @@ IF ( BUILD_PROCMON_COLLECTION_TOOLS )
     ADD_EXECUTABLE( jobtop jobtop.cpp ProcIO.procmon.cpp )
         SET_TARGET_PROPERTIES( jobtop PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
         TARGET_LINK_LIBRARIES( jobtop ${Boost_LIBRARIES} )
-        TARGET_LINK_LIBRARIES( jobtop ncurses pthread "rt" )
     ADD_EXECUTABLE( LiveProcCache LiveProcCache.cpp ProcIO.procmon.cpp )
         SET_TARGET_PROPERTIES( LiveProcCache PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
-        TARGET_LINK_LIBRARIES( LiveProcCache ${Boost_LIBRARIES} )
-        TARGET_LINK_LIBRARIES( LiveProcCache pthread "rt" )
+        TARGET_LINK_LIBRARIES( LiveProcCache ${Boost_LIBRARIES} "rt" )
     ADD_EXECUTABLE( ProcessSummarizer ProcessSummarizer.cpp ProcIO.reducer.cpp ProcessSummary.cpp ProcIO2.cpp)
         SET_TARGET_PROPERTIES( ProcessSummarizer PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
         SET_TARGET_PROPERTIES( ProcessSummarizer PROPERTIES INSTALL_RPATH ${CMAKE_INSTALL_PREFIX}/lib )
         TARGET_LINK_LIBRARIES( ProcessSummarizer ${Boost_LIBRARIES} )
+    ADD_EXECUTABLE( qqproc qqproc.cpp ProcIO2.cpp ProcessSummary.cpp )
+        SET_TARGET_PROPERTIES( qqproc PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
+        TARGET_LINK_LIBRARIES( qqproc ${Boost_LIBRARIES} )
+        TARGET_LINK_LIBRARIES( qqproc ${NCLQ_DIR}/lib/libnclq.a z)
+
     ADD_EXECUTABLE( DataCoverage DataCoverage.cpp ProcIO.reducer.cpp )
         SET_TARGET_PROPERTIES( DataCoverage PROPERTIES COMPILE_FLAGS -DUSE_CONFIG_H=1 )
         SET_TARGET_PROPERTIES( DataCoverage PROPERTIES INSTALL_RPATH ${CMAKE_INSTALL_PREFIX}/lib )
         TARGET_LINK_LIBRARIES( DataCoverage ${Boost_LIBRARIES} )
-#        TARGET_LINK_LIBRARIES( ProcessSummarizer pthread "rt" )
 #        TARGET_LINK_LIBRARIES( ProcessSummarizer ${TBB_LIBRARY} )
 
 
     INSTALL_TARGETS(/sbin ProcReducer ProcMuxer CheckH5 PostReducer LiveProcCache)
-    INSTALL_TARGETS(/bin jobtop ProcessSummarizer DataCoverage)
+    INSTALL_TARGETS(/bin jobtop ProcessSummarizer DataCoverage qqproc)
 
-    IF ( USE_REDUCER_HDF5 )
-        append_compile_flags_to_target( CheckH5 -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( CheckH5 ${HDF5_LIBRARIES} "rt" "dl" )
-        append_compile_flags_to_target( ProcReducer -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( ProcReducer ${HDF5_LIBRARIES} )
-        append_compile_flags_to_target( PostReducer -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( PostReducer ${HDF5_LIBRARIES} )
-        append_compile_flags_to_target( ProcMuxer -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( ProcMuxer ${HDF5_LIBRARIES} )
-        append_compile_flags_to_target( ProcessSummarizer -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( ProcessSummarizer ${HDF5_LIBRARIES} )
-        append_compile_flags_to_target( DataCoverage -DUSE_HDF5=1 )
-        TARGET_LINK_LIBRARIES( DataCoverage ${HDF5_LIBRARIES} )
-    ENDIF ( USE_REDUCER_HDF5 )
     IF ( USE_REDUCER_AMQP )
         append_compile_flags_to_target( CheckH5 -DUSE_AMQP=1 )
         TARGET_LINK_LIBRARIES( CheckH5 ${RABBITMQ_C_LIBRARIES} )
@@ -192,15 +198,29 @@ IF ( BUILD_PROCMON_COLLECTION_TOOLS )
         TARGET_LINK_LIBRARIES( ProcReducer ${RABBITMQ_C_LIBRARIES} )
         append_compile_flags_to_target( PostReducer -DUSE_AMQP=1 )
         TARGET_LINK_LIBRARIES( PostReducer ${RABBITMQ_C_LIBRARIES} )
-        append_compile_flags_to_target( CheckH5 -DUSE_AMQP=1 )
-        TARGET_LINK_LIBRARIES( CheckH5 ${RABBITMQ_C_LIBRARIES} )
         append_compile_flags_to_target( ProcMuxer -DUSE_AMQP=1 )
         TARGET_LINK_LIBRARIES( ProcMuxer ${RABBITMQ_C_LIBRARIES} )
         append_compile_flags_to_target( jobtop -DUSE_AMQP=1 )
-        TARGET_LINK_LIBRARIES( jobtop ${RABBITMQ_C_LIBRARIES} )
+        TARGET_LINK_LIBRARIES( jobtop ${RABBITMQ_C_LIBRARIES} "ncurses" "rt" )
         append_compile_flags_to_target( LiveProcCache -DUSE_AMQP=1 )
         TARGET_LINK_LIBRARIES( LiveProcCache ${RABBITMQ_C_LIBRARIES} )
     ENDIF ( USE_REDUCER_AMQP )
+    IF ( USE_REDUCER_HDF5 )
+        append_compile_flags_to_target( CheckH5 -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( CheckH5 "rt" "dl" "z" ${HDF5_LIBRARIES} )
+        append_compile_flags_to_target( ProcReducer -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( ProcReducer "rt" "dl" "z" ${HDF5_LIBRARIES} )
+        append_compile_flags_to_target( PostReducer -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( PostReducer "rt" "dl" "z" ${HDF5_LIBRARIES} )
+        append_compile_flags_to_target( ProcMuxer -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( ProcMuxer "rt" "dl" "z" ${HDF5_LIBRARIES} )
+        append_compile_flags_to_target( ProcessSummarizer -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( ProcessSummarizer "rt" "dl" "z" ${HDF5_LIBRARIES} )
+        append_compile_flags_to_target( DataCoverage -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( DataCoverage "rt" "dl" "z" ${HDF5_LIBRARIES} )
+        append_compile_flags_to_target( qqproc -DUSE_HDF5=1 )
+        TARGET_LINK_LIBRARIES( qqproc "rt" "dl" "z" ${HDF5_LIBRARIES} )
+    ENDIF ( USE_REDUCER_HDF5 )
 ENDIF ( BUILD_PROCMON_COLLECTION_TOOLS )
 
 #ADD_SUBDIRECTORY( qp )

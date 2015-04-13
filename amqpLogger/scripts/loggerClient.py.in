@@ -19,19 +19,19 @@ outputFile = sys.stdout
 def recv_message(channel, method_frame, header_frame, body):
     global outputFile
     lastConnection = datetime.now()
-    #print "%s" % (method_frame.routing_key)
+    print "%s" % (method_frame.routing_key)
     outputFile.write(body + '\n')
     outputFile.flush()
 
 def setupConnection(routingKeys):
-    credentials = pika.PlainCredentials('procmon','nomcorp')
-    connection = pika.BlockingConnection(pika.ConnectionParameters('genepool10.nersc.gov', 5672, "jgi", credentials))
+    credentials = pika.PlainCredentials("@AMQPLOGGER_AMQP_USER@", "@AMQPLOGGER_AMQP_PASSWORD@")
+    connection = pika.BlockingConnection(pika.ConnectionParameters("@AMQPLOGGER_AMQP_HOST@", @AMQPLOGGER_AMQP_PORT@, "@AMQPLOGGER_AMQP_VHOST@", credentials))
     channel = connection.channel()
-    channel.exchange_declare(exchange="logger", exchange_type="topic")
+    channel.exchange_declare(exchange="@AMQPLOGGER_AMQP_EXCHANGE@", exchange_type="topic")
     queueRes = channel.queue_declare(exclusive=True)
     queue_name = queueRes.method.queue
     for routing_key in routingKeys:
-        channel.queue_bind(exchange="logger", queue=queue_name, routing_key=routing_key)
+        channel.queue_bind(exchange="@AMQPLOGGER_AMQP_EXCHANGE@", queue=queue_name, routing_key=routing_key)
     try:
         channel.basic_consume(recv_message, queue=queue_name, no_ack=True)
         channel.start_consuming()

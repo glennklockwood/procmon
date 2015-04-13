@@ -25,9 +25,9 @@ export RABBITMQ_CONFIG_FILE=$RABBITMQ_BASE/rabbitmq
 
 mkdir -p $SERVICES_BASE
 cd $SERVICES_BASE
-wget http://www.rabbitmq.com/releases/rabbitmq-server/v3.3.1/rabbitmq-server-3.3.1.tar.gz
-tar zxvf rabbitmq-server-3.3.1.tar.gz
-cd rabbitmq-server-3.3.1
+wget http://www.rabbitmq.com/releases/rabbitmq-server/v3.4.4/rabbitmq-server-3.4.4.tar.gz
+tar zxvf rabbitmq-server-3.4.4.tar.gz
+cd rabbitmq-server-3.4.4
 make
 make install_bin TARGET_DIR=$RABBITMQ_BASE SBIN_DIR=$RABBITMQ_BASE/sbin MAN_DIR=$RABBITMQ_BASE/share/man DOC_INSTALL_DIR=$RABBITMQ_BASE/share/doc
 

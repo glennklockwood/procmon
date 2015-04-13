@@ -1,3 +1,17 @@
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
+
 #ifndef __PROCMON_CONFIG_HH_
 #define __PROCMON_CONFIG_HH_
 
@@ -11,6 +25,7 @@
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/bind.hpp>
+#include <boost/regex.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -62,6 +77,10 @@ class ProcmonConfig {
     int maxIterations;
     int syslog_facility;
     int syslog_priority_min;
+    /* FUTURE FEATURES
+    vector<string> contextProcessNames;
+    vector<boost::regex> contextProcessRegexes;
+    */
 
     void setSyslogFacility(const string &facility);
     void setSyslogPriorityMin(const string &priority);
@@ -73,6 +92,11 @@ class ProcmonConfig {
     inline const int getSyslogPriorityMin() const {
         return syslog_priority_min;
     }
+    /* FUTURE FEATURES
+    inline const vector<boost::regex> &getContextProcessRegexes() {
+        return contextProcessRegexes;
+    }
+    */
 
     /* Configurable monitoring options */
     int targetPPid;
@@ -268,6 +292,12 @@ class ProcmonConfig {
                 " matching the specied pgrp id. Use self with just -l")
             ("fd_max,W", po::value<int>(&maxfd)->default_value(0), "Maximum"
                 " number of fds per process to track")
+            /* FUTURE FEATURES
+            ("contextProcess", po::value<vector<string> >(&contextProcessNames)
+                ->composing(), "If specified, regex matching argv[0] of "
+                "processes which should be considered \"roots\" of process "
+                "trees for the purpose of setting context")
+            */
             ("identifier_env,x", po::value<string>(&identifier_env)
                 ->default_value(""), "Read identifier from process environment with "
                 "specified environment value")

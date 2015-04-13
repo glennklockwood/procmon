@@ -1,3 +1,17 @@
+/*******************************************************************************
+procmon, Copyright (c) 2014, The Regents of the University of California,
+through Lawrence Berkeley National Laboratory (subject to receipt of any
+required approvals from the U.S. Dept. of Energy).  All rights reserved.
+
+If you have questions about your rights to use or distribute this software,
+please contact Berkeley Lab's Technology Transfer Department at  TTD@lbl.gov.
+
+The LICENSE file in the root directory of the source code archive describes the
+licensing and distribution rights and restrictions on this software.
+
+Author:   Douglas Jacobsen <dmj@nersc.gov>
+*******************************************************************************/
+
 #include "config.h"
 #include "ProcData.hh"
 #include "ProcIO.hh"
@@ -1025,7 +1039,7 @@ int main(int argc, char **argv) {
             make_shared<pmio2::Hdf5Type<ProcessSummary> >(output),
             0, // unlimited max size
             4096, // 256 processes per block
-            9,  // zipLevel 9 (highest)
+            0,  // zipLevel 9 (highest)
             "ProcessSummary" // datasetName
         )
     );    
@@ -1035,7 +1049,7 @@ int main(int argc, char **argv) {
             make_shared<pmio2::Hdf5Type<IdentifiedFilesystem> >(output),
             0,
             4096,
-            9,
+            0,
             "IdentifiedFilesystem"
         )
     );
@@ -1045,7 +1059,7 @@ int main(int argc, char **argv) {
             make_shared<pmio2::Hdf5Type<IdentifiedNetworkConnection> >(output),
             0,
             256,
-            9,
+            0,
             "IdentifiedNetworkConnection"
         )
     );
