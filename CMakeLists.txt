@@ -24,7 +24,8 @@ OPTION ( USE_HDF5 "Use HDF5 Libraries" ON )
 OPTION ( BUILD_PROCMON "Build procmon" ON )
 OPTION ( BUILD_AMQPLOGGER "Build the amqpLogger" ON )
 OPTION ( BUILD_EXTRA "Build the extra components" ON )
-
+OPTION ( EXTRA_INCLUDEDIR "extra directory of includes" "/dev/null" )
+OPTION ( EXTRA_LIBDIR "extra directory of libraries" "/dev/null" )
 
 SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -ggdb" )
 SET( CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -ggdb" )
