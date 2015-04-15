@@ -142,7 +142,7 @@ def archive_hpss(config, fname, ftype, sources = None, doNothing=False):
             os.chmod(newpath, 0444)
         except:
             except_string = get_exception()
-            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s", (fname, newpath, except_string))
+            syslog.syslog(LOG_ERR, "failed to copy file to archival dir: %s; %s; %s" % (fname, newpath, except_string))
             send_email(config, "failed to copy file to archival dir", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
 
@@ -265,7 +265,7 @@ def reduce_files(config, timeobj, filenames):
             os.chmod(newpath, 0444)
         except:
             except_string = get_exception()
-            syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+            syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n" % (f, newpath, except_string))
             send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (f, newpath, except_string))
             return 1
         if config.use_jamo:
@@ -281,7 +281,7 @@ def reduce_files(config, timeobj, filenames):
         os.chmod(final_product, 0444)
     except:
         except_string = get_exception()
-        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n" % (f, newpath, except_string))
         send_email(config, "reducer failed to move file", "%s\n%s\n%s\n" % (product_output, final_product, except_string))
         return 1
 
@@ -293,7 +293,7 @@ def reduce_files(config, timeobj, filenames):
         os.chmod(final_badoutput, 0444)
     except:
         except_string = get_exception()
-        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n", (f, newpath, except_string))
+        syslog.syslog(syslog.LOG_ERR, "reducer failed to move file: %s; %s; %s\n" % (f, newpath, except_string))
         send_email(config, "reducer failed to move file", "%s\n%s\n%s" % (bad_output, final_badoutput, except_string))
         return 1
 
@@ -514,5 +514,5 @@ if __name__ == "__main__":
         str_tb = '\n'.join(traceback.format_tb(exc_traceback))
         str_stack2 = '\n'.join(traceback.format_stack())
         send_email(config, 'PROCMON FAILURE', '%s\n%s\n%s\n' % (str_exc, str_tb, str_stack2))
-        syslog.syslog(syslog.LOG_ERR, "PROCMONMANAGER FAILURE: stopped managing, %", str_exc)
+        syslog.syslog(syslog.LOG_ERR, "PROCMONMANAGER FAILURE: stopped managing, %s" % str_exc)
     
