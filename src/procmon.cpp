@@ -1071,7 +1071,7 @@ static void craylock() {
     rand_pause = rand() % 30;
     sleep(rand_pause);*/
     
-    lock = flock(fd, LOCK_EX);
+    lock = flock(fd, LOCK_EX | LOCK_NB);
     if (lock < 0) {
         _exit(0);
     }
