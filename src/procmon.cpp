@@ -997,7 +997,7 @@ int searchProcFs(ProcmonConfig *config) {
                 int idx = 0;
                 my_identifier = (*it).second;
                 /* only allow alphanumeric characters */
-                for (idx = 0; idx < my_identifier.length(); i++) {
+                for (idx = 0; idx < my_identifier.length(); idx++) {
                     if (!std::isalnum(my_identifier[idx])) {
                         break;
                     }
@@ -1009,7 +1009,7 @@ int searchProcFs(ProcmonConfig *config) {
                 int idx = 0;
                 my_subidentifier = (*it).second;
                 /* only allow alphanumeric characters */
-                for (idx = 0; idx < my_subidentifier.length(); i++) {
+                for (idx = 0; idx < my_subidentifier.length(); idx++) {
                     if (!std::isalnum(my_subidentifier[idx])) {
                         break;
                     }
