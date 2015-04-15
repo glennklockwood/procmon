@@ -1065,7 +1065,7 @@ static void craylock() {
     int lock;
     int rand_pause = 0;
     if (fd < 0) {
-        exit(0);
+        _exit(0);
     }
     /*srand(getpid() | time(NULL));
     rand_pause = rand() % 30;
@@ -1073,7 +1073,7 @@ static void craylock() {
     
     lock = flock(fd, LOCK_EX);
     if (lock < 0) {
-        exit(0);
+        _exit(0);
     }
 }
 
