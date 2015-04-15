@@ -994,10 +994,27 @@ int searchProcFs(ProcmonConfig *config) {
         if (procEnv) {
             parseProcEnvironment(tgt_pid, env);
             if ((it = env.find(config->identifier_env)) != env.end()) {
+                int idx = 0;
                 my_identifier = (*it).second;
+                /* only allow alphanumeric characters */
+                for (idx = 0; idx < my_identifier.length(); i++) {
+                    if (!std::isalnum(my_identifier[idx])) {
+                        break;
+                    }
+                }
+                my_identifier = my_identifier.substr(0, idx);
+
             }
             if ((it = env.find(config->subidentifier_env)) != env.end()) {
+                int idx = 0;
                 my_subidentifier = (*it).second;
+                /* only allow alphanumeric characters */
+                for (idx = 0; idx < my_subidentifier.length(); i++) {
+                    if (!std::isalnum(my_subidentifier[idx])) {
+                        break;
+                    }
+                }
+                my_subidentifier = my_subidentifier.substr(0, idx);
             }
         }
 
