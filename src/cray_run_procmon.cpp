@@ -1,59 +1,109 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+#include <vector>
+#include <string>
+#include <sstream>
+
+using namespace std;
+
+char **convertVecToArgs(const vector<string>& args) {
+    char **ret = (char **) malloc(sizeof(char *) * (args.size()+1));
+    memset(ret, 0, sizeof(char *) * (args.size() + 1));
+
+    size_t idx = 0;
+    for (idx = 0; idx < args.size(); idx++) {
+        ret[idx] = strdup(args[idx].c_str());
+    }
+    ret[idx] = NULL; //trailing null
+    return ret;
+}
 
 int main(int argc, char **argv) {
-    char procmonPath[1024];
-    char pidstr[24];
-    char identifier[24];
-    char subidentifier[24];
-    pid_t mypid;
-    char **procmonArgs = (char **) malloc(sizeof(char *) * 16);
-    char **realArgv = argv + 1;
-    int pidx = 0;
-    if (getenv("JOB_ID") != NULL) {
-        snprintf(identifier, 24, "%s", getenv("JOB_ID"));
-    } else if (getenv("PBS_JOBID") != NULL) {
-        snprintf(identifier, 24, "%s", getenv("PBS_JOBID"));
-    } else if (getenv("SLURM_JOB_ID") != NULL) {
-        snprintf(identifier, 24, "%s", getenv("SLURM_JOB_ID"));
-    } else {
-        snprintf(identifier, 24, "%s", "INTERACTIVE");
-    }
-    snprintf(subidentifier, 24, "%d", 1);
-    snprintf(procmonPath, 1024, "/global/syscom/sc/nsg/opt/procmon/deploy/prod/bin/procmon");
-    snprintf(pidstr, 24, "%d", 1);//getpid());
+    const string procmonPath = "/global/syscom/sc/nsg/opt/procmon/deploy/prod/bin/procmon";
+    pid_t pid = 1;
 
-    procmonArgs[pidx++] = procmonPath;
-    procmonArgs[pidx++] = "-p";
-    procmonArgs[pidx++] = pidstr;
-    procmonArgs[pidx++] = "-c";
-    procmonArgs[pidx++] = "-I";
-    procmonArgs[pidx++] = identifier;
-    procmonArgs[pidx++] = "-S";
-    procmonArgs[pidx++] = subidentifier;
-    procmonArgs[pidx++] = "-i";
-    procmonArgs[pidx++] = "60";
-    procmonArgs[pidx++] = "-F";
-    procmonArgs[pidx++] = "2";
-    procmonArgs[pidx++] = "-f";
-    procmonArgs[pidx++] = "10";
-    procmonArgs[pidx++] = NULL;
-    mypid = fork();
-    if (mypid < 0) {
+    /* c++11 has better ways of doing this, but I don't want this wrapper to use
+       c++11 features.... */ 
+    stringstream ss;
+    ss << pid;
+    string pidstr = ss.str();
+
+    string identifier;
+    string subidentifier;
+    char *ptr = NULL;
+
+    /* put jobid in identifier, stopping at any special characters (.[, etc) */
+    if ((ptr = getenv("JOB_ID")) != NULL) {
+        identifier = ptr;
+    } else if ((ptr = getenv("PBS_JOBID")) != NULL) {
+        identifier = ptr;
+    } else if ((ptr = getenv("SLURM_JOB_ID")) != NULL) {
+        identifier = ptr;
+    } else {
+        identifier = "INTERACTIVE";
+    }
+    size_t idx = 0;
+    for (idx = 0; idx < identifier.length(); idx++) {
+        if (!isalnum(identifier[idx])) {
+            break;
+        }
+    }
+    identifier = identifier.substr(0, idx);
+
+    /* put array task # in subidentifier */
+    if ((ptr = getenv("PBS_ARRAYID")) != NULL) {
+        subidentifier = ptr;
+    } else {
+        subidentifier = "1";
+    }
+
+    vector<string> procmonArgs;
+    vector<string> realArgs;
+
+    procmonArgs.push_back(procmonPath);
+    procmonArgs.push_back("-p"); // all processes under my pid (ORd with other tracking options)
+    procmonArgs.push_back(pidstr);
+    procmonArgs.push_back("-s"); // all processes with my session id
+    procmonArgs.push_back("-c"); // cray mode
+    procmonArgs.push_back("-I"); // identifier
+    procmonArgs.push_back(identifier);
+    procmonArgs.push_back("-S"); // subidentifier
+    procmonArgs.push_back(subidentifier);
+    procmonArgs.push_back("-i"); // length of initial phase
+    procmonArgs.push_back("60");
+    procmonArgs.push_back("-F"); // frequency during initial phase
+    procmonArgs.push_back("2");
+    procmonArgs.push_back("-f"); // frequency after initial phase
+    procmonArgs.push_back("10");
+    procmonArgs.push_back("-W"); // read 100 file descriptors per process
+    procmonArgs.push_back("100");
+
+    for (int i = 1; i < argc; i++) {
+        realArgs.push_back(argv[i]);
+    }
+
+    /* start double-forking and exec process */
+    pid_t cpid = fork();
+    if (cpid < 0) {
         exit(1); // failed to fork
     }
-    if (mypid > 0) {
+    if (cpid > 0) {
         int status = 0;
-        waitpid(mypid, &status, 0);
-        execvp(realArgv[0], realArgv);
+        char **execArgs = convertVecToArgs(realArgs);
+        waitpid(cpid, &status, 0);
+        execvp(execArgs[0], execArgs);
     } else {
-        pid_t mypid2 = fork();
-        if (mypid2 > 0) {
+        cpid = fork();
+        if (cpid > 0) {
             _exit(0);
         } else {
-            char **arg = procmonArgs;
-            execvp(procmonArgs[0], procmonArgs);
+            char **execArgs = convertVecToArgs(procmonArgs);
+            execvp(execArgs[0], execArgs);
         }
     }
 }
