@@ -254,9 +254,9 @@ class ProcmonConfig {
             ("debug.maxiterations", po::value<int>(&maxIterations)
                 ->default_value(0), "Debugging: max iterations to complete")
 #ifdef SECURED
-            ("user,u", po::value<string>(&user)->default_value(""), "username/uid to "
+            ("user,u", po::value<string>(&user), "username/uid to "
                 "setuid")
-            ("group,r", po::value<string>(&group)->default_value(""), "group/gid to "
+            ("group,r", po::value<string>(&group), "group/gid to "
                 "setgid")
 #endif
         ;
@@ -301,6 +301,9 @@ class ProcmonConfig {
             ("identifier_env,x", po::value<string>(&identifier_env)
                 ->default_value(""), "Read identifier from process environment with "
                 "specified environment value")
+            ("identifier_torque_cgroup", po::value<string>(&identifier_env)
+                ->default_value(""), "Read identifier from torque cgroup"
+                "specified cgroup set")
             ("subidentifier_env,X", po::value<string>(&subidentifier_env)
                 ->default_value(""), "Read subidentifier from process environment "
                 "with specified environment value")
@@ -547,5 +550,20 @@ class ProcmonConfig {
 
 
 ostream& operator<<(ostream& os, const ProcmonConfig& pc);
+
+/* want to use template specialization or functors to perform process discovery */
+class ProcessHierarchy {
+    private:
+    bool readStatus;
+    bool readStat;
+    bool readMStat;
+    vector<pid_t> pids;
+
+    public:
+    const vector<pid_t>& getPids();
+    inline const bool didReadStatus() const { return readStatus; }
+    inline const bool didReadStat() const { return readStat; }
+    inline const bool didReadMStat() const { return readMStat; }
+};
 
 #endif

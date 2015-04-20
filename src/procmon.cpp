@@ -152,8 +152,8 @@ ostream& operator<<(ostream& os, const ProcmonConfig& pc) {
         << "\tmqPassword: " << pc.mqPassword << endl
         << "\tmqExchangeName: " << pc.mqExchangeName << endl
         << "\tmqFrameSize: " << pc.mqFrameSize << endl
-    ;
 #endif
+    ;
     return os;
 }
 
@@ -540,7 +540,7 @@ int parseProcStatM(int pid, procdata* procData, procstat* statData) {
     return 0;
 }
 
-int parseProcEnvironment(int pid, std::map<std::string, std::string>& env) {
+int parseProcEnvironment(int pid, std::unordered_map<std::string, std::string>& env) {
     char *ptr = NULL;
     char *sptr = NULL;
     char *eptr = NULL;
@@ -986,14 +986,14 @@ int searchProcFs(ProcmonConfig *config) {
         if (config->maxfd > 0) {
             parse_fds(tgt_pid, config->maxfd, global_procFD, &fdidx, statData);
         }
-        std::map<std::string, std::string> env;
-        std::map<std::string, std::string>::iterator it;
+        std::unordered_map<std::string, std::string> env;
         std::string my_identifier(config->identifier);
         std::string my_subidentifier(config->subidentifier);
 
         if (procEnv) {
             parseProcEnvironment(tgt_pid, env);
-            if ((it = env.find(config->identifier_env)) != env.end()) {
+            auto it = env.find(config->identifier_env);
+            if (it != env.end()) {
                 int idx = 0;
                 my_identifier = (*it).second;
                 /* only allow alphanumeric characters */
@@ -1005,7 +1005,8 @@ int searchProcFs(ProcmonConfig *config) {
                 my_identifier = my_identifier.substr(0, idx);
 
             }
-            if ((it = env.find(config->subidentifier_env)) != env.end()) {
+            it = env.find(config->subidentifier_env);
+            if (it != env.end()) {
                 int idx = 0;
                 my_subidentifier = (*it).second;
                 /* only allow alphanumeric characters */
