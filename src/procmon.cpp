@@ -1280,7 +1280,7 @@ static void *reader_thread_start(void *t_config) {
     for ( ; ; ) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Reader failed to lock token.", err);
         if ((err = pthread_barrier_wait(&rbarrier)) == EINVAL) fatal_error("Reader failed to barrier wait", err);
-        if (cleanUpFlag == 0) {
+        if (cleanUpFlag == 0 && !config->dummy) {
             retCode = searchProcFs(config);
         }
         if ((err = pthread_mutex_unlock(&token_lock)) != 0) fatal_error("Reader failed to unlock token.", err);
@@ -1382,6 +1382,13 @@ void writeOutput(ProcmonConfig *config, ProcIO *output, vector<T>& data, unsigne
         set_context(output, config->hostname, data[sidx].identifier, data[sidx].subidentifier);
         write_data(output, &(data[sidx]), i - sidx);
     }
+}
+
+void writeDummyOutput(ProcmonConfig *config, ProcIO *output) {
+    procstat psDummy[5];
+    memset(psDummy, 0, sizeof(procstat) * 5);
+    set_context(output, config->hostname, "DUMMY", "DUMMY");
+    write_procstat(output, psDummy, 5);
 }
 
 int main(int argc, char** argv) {
@@ -1513,18 +1520,22 @@ int main(int argc, char** argv) {
         if ((err = pthread_mutex_lock(&token_lock)) != 0) fatal_error("Writer failed to lock token.", err);
         retCode = search_procfs_count;
 #else
-        if (cleanUpFlag == 0) {
+        if (cleanUpFlag == 0 && !config->dummy) {
             retCode = searchProcFs(config);
         }
 #endif
         if (retCode <= 0) {
             retCode *= -1;
             cleanUpFlag = 1;
-        } else  {
+        } else {
             for (std::vector<ProcIO*>::iterator iter = outputMethods.begin(), end = outputMethods.end(); iter != end; iter++) {
-                writeOutput(config, *iter, global_procStat, write_procstat);
-                writeOutput(config, *iter, global_procData, write_procdata);
-                writeOutput(config, *iter, global_procFD, write_procfd);
+                if (config->dummy) {
+                    writeDummyOutput(config, *iter);
+                } else {
+                    writeOutput(config, *iter, global_procStat, write_procstat);
+                    writeOutput(config, *iter, global_procData, write_procdata);
+                    writeOutput(config, *iter, global_procFD, write_procfd);
+                }
             }
         }
 

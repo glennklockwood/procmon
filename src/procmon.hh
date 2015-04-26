@@ -104,6 +104,7 @@ class ProcmonConfig {
     int initialFrequency;
     int initialPhase;
     bool daemonize;
+    bool dummy;
     bool verbose;
     bool craylock;
     int maxfd;
@@ -163,6 +164,7 @@ class ProcmonConfig {
         clockTicksPerSec = 0;
         pageSize = 0;
         daemonize = false;
+        dummy = false;
         verbose = false;
         craylock = false;
         outputFlags = DEFAULT_OUTPUT_FLAGS;
@@ -298,6 +300,7 @@ class ProcmonConfig {
                 "processes which should be considered \"roots\" of process "
                 "trees for the purpose of setting context")
             */
+            ("dummy", "Send dummy message instead of performing any processing")
             ("identifier_env,x", po::value<string>(&identifier_env)
                 ->default_value(""), "Read identifier from process environment with "
                 "specified environment value")
@@ -386,6 +389,7 @@ class ProcmonConfig {
 
         craylock = vm.count("craylock") != 0;
         daemonize = vm.count("daemonize") != 0;
+        dummy = vm.count("dummy") != 0;
         verbose = vm.count("verbose") != 0;
         noOutput = vm.count("nooutput") != 0;
 
