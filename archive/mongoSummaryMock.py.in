@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+
+import numexpr
+numexpr.set_num_threads(1)
+
+#from pymongo import MongoClient
+import pandas
+import tables
+import sys
+import os
+import bson
+import json
+from datetime import datetime
+
+#collection_label = sys.argv[1]
+summary_file = sys.argv[1]
+#date = sys.argv[3]
+date = "2013-01-01 00:00:00"
+
+#client = MongoClient('128.55.56.19', 27017)
+#db = client.procmon
+#db.authenticate('@DEFAULT_AMQP_USER@', '@DEFAULT_AMQP_PASSWORD@')
+#collection = db[collection_label]
+
+summ_index = {
+    'executables' : ['exePath'],
+    'execUser' : ['username', 'exePath'],
+    'execProject' : ['project', 'exePath'],
+    'execHost' : ['host','exePath'],
+    'scripts' : ['scripts', 'exePath', 'execName'],
+    'scriptUser' : ['username', 'scripts', 'exePath', 'execName'],
+    'scriptProject' : ['project', 'scripts', 'exePath', 'execName'],
+    'scriptHost' : ['host','scripts','exePath','execName'],
+    'projects' : ['project'],
+    'users' : ['username'],
+    'hosts' : ['host'],
+}
+
+bsonSize = 0
+jsonSize = 0
+h5Size = os.path.getsize(summary_file)
+for summary_label in summ_index.keys():
+#print summary_label
+    df = pandas.read_hdf(summary_file, summary_label)
+    if len(summ_index[summary_label]) > 1 and df.shape[0] > 0 and type(df.index) is not pandas.core.index.MultiIndex:
+            df.index = pandas.MultiIndex.from_tuples(df.index, names=summ_index[summary_label])
+    df = df.reset_index()
+
+    d = [ 
+        dict([
+            (colname, row[i]) 
+            for i,colname in enumerate(df.columns)
+        ])
+        for row in df.values
+    ]
+    #collcount = collection.find({'date':date, 'type':summary_label}).count()
+    #if collcount == len(d):
+    #    print "Got same # of records in database, skipping."
+    #    continue
+#elif collcount > 0 and len(d) > 0:
+#    print "There are %d records in database, %d records in h5." % (collcount, len(d))
+#    print "Printing removing from database and re-writing."
+#    collection.remove({'date':date, 'type':summary_label})
+    for v in d:
+        v['date'] = date
+        v['type'] = summary_label
+        ok = True
+        for field in v:
+            if isinstance(v[field], str):
+                try:
+                    v[field] = v[field].decode('utf-8', 'ignore')
+                except:
+                    ok = False
+        if not ok:
+            print "failed with this record:"
+            print v
+        else:
+            bsonValue = bson.BSON.encode(v)
+            bsonSize += sys.getsizeof(bsonValue)
+            jsonValue = json.dumps(v)
+            jsonSize += len(jsonValue)
+        #if not ok:
+        #    continue
+        #try:
+        #    collection.insert(v)
+        #except:
+        #    print "failed to insert: ", v
+        #    sys.exit(1)
+    #collcount = collection.find({'date':date, 'type':summary_label}).count()
+    #if collcount != len(d):
+    #    print "WARNING: not all records inserted to database! (db: %d, h5: %d)" % (collcount, len(d))
+
+#users = db.firehose.distinct("username")
+#projects = db.firehose.distinct("project")
+#hosts = db.firehose.distinct("host")
+#collection = db['summary']
+#collection.find_and_modify(query={"type":"users"}, update={"type":"users", "obj":users})
+#collection.find_and_modify(query={"type":"projects"}, update={"type":"projects", "obj":projects})
+#collection.find_and_modify(query={"type":"hosts"}, update={"type":"hosts", "obj":hosts})
+print "%s,%d,%d,%d" % (summary_file,h5Size,bsonSize, jsonSize)
