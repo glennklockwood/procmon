@@ -1386,7 +1386,11 @@ void writeOutput(ProcmonConfig *config, ProcIO *output, vector<T>& data, unsigne
 
 void writeDummyOutput(ProcmonConfig *config, ProcIO *output) {
     procstat psDummy[5];
+    int i = 0;
     memset(psDummy, 0, sizeof(procstat) * 5);
+    for (i = 0; i < 5 ; i++) {
+        psDummy[i].pid = i+1;
+    }
     set_context(output, config->hostname, "DUMMY", "DUMMY");
     write_procstat(output, psDummy, 5);
 }
