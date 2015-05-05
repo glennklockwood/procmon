@@ -12,6 +12,7 @@ licensing and distribution rights and restrictions on this software.
 Author:   Douglas Jacobsen <dmj@nersc.gov>
 *******************************************************************************/
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
