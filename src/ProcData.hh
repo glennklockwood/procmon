@@ -39,7 +39,7 @@ struct procdata {
     unsigned long startTimeUSec;
     unsigned int pid;
     unsigned int ppid;
-    inline bool equivRecord(const struct _procdata &other) const {
+    inline bool equivRecord(const procdata &other) const {
         return pid == other.pid && startTime == other.startTime;
     }
     /*
