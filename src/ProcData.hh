@@ -42,6 +42,7 @@ struct procdata {
     inline bool equivRecord(const struct _procdata &other) const {
         return pid == other.pid && startTime == other.startTime;
     }
+    /*
     const string& serialize(bool includeIdent=true, const string host="") const {
         ostringstream oss;
         if (includeIdent) {
@@ -124,6 +125,7 @@ struct procdata {
             }
         }
     }
+    */
 };
 
 typedef struct _procstat {
