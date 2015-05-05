@@ -1019,6 +1019,32 @@ int searchProcFs(ProcmonConfig *config) {
             }
         }
 
+        if (config->identifier_cgroup_regex != NULL || config->subidentifier_cgroup_regex != NULL) {
+            // parse /proc/<pid>/cgroup
+            char fname[512];
+            FILE *cg = NULL;
+            char *linePtr = NULL;
+            size_t linePtrSize = 0;
+            size_t nread = 0;
+            
+            snprintf(fname, 512, "/proc/%d/cgroup", tgt_pid);
+            cg = fopen(buffer, "r");
+            while ((nread = getline(&linePtr, &linePtrSize, cg)) > 0) {
+                boost::smatch matched;
+                linePtr[nread] = 0;
+                if (config->identifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->identifier_cgroup_regex))) {
+                    my_identifier = &*(matched[1].first);
+                }
+                if (config->subidentifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->subidentifier_cgroup_regex))) {
+                    my_subidentifier = &*(matched[1].first);
+                }
+            }
+            if (linePtr != NULL) {
+                free(linePtr);
+            }
+            fclose(cg);
+        }
+
         snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
         snprintf(statData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         snprintf(temp_procData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());

@@ -118,6 +118,10 @@ class ProcmonConfig {
     string subidentifier;
     string identifier_env;
     string subidentifier_env;
+    string identifier_cgroup;
+    string subidentifier_cgroup;
+    boost::regex *identifier_cgroup_regex;
+    boost::regex *subidentifier_cgroup_regex;
 
     int gid_range_min;
     int gid_range_max;
@@ -187,6 +191,8 @@ class ProcmonConfig {
 
 		identifier = DEFAULT_IDENTIFIER;
 		subidentifier = DEFAULT_SUBIDENTIFIER;
+        identifier_cgroup_regex = NULL;
+        subidentifier_cgroup_regex = NULL;
         pidfile = "";
         noOutput = false;
 
@@ -205,6 +211,12 @@ class ProcmonConfig {
     }
 
     ~ProcmonConfig() {
+        if (identifier_cgroup_regex != NULL) {
+            delete identifier_cgroup_regex;
+        }
+        if (subidentifier_cgroup_regex != NULL) {
+            delete subidentifier_cgroup_regex;
+        }
     }
 
     void setupDefaultProcmonOptions() {
@@ -301,12 +313,13 @@ class ProcmonConfig {
             ("identifier_env,x", po::value<string>(&identifier_env)
                 ->default_value(""), "Read identifier from process environment with "
                 "specified environment value")
-            ("identifier_torque_cgroup", po::value<string>(&identifier_env)
-                ->default_value(""), "Read identifier from torque cgroup"
-                "specified cgroup set")
             ("subidentifier_env,X", po::value<string>(&subidentifier_env)
                 ->default_value(""), "Read subidentifier from process environment "
                 "with specified environment value")
+            ("identifier_cgroup", po::value<string>(&identifier_cgroup)
+                ->default_value(""), "Read identifier from cgroup specified cgroup set")
+            ("subidentifier_cgroup", po::value<string>(&subidentifier_cgroup)
+                ->default_value(""), "Read subidentifier from cgroup specified cgroup set")
         ;
         procmonOptions.add(processOptions);
 
@@ -526,6 +539,16 @@ class ProcmonConfig {
                     break;
                 }
             }
+        }
+
+        // deal with cgroup identifier
+        identifier_cgroup_regex = NULL;
+        subidentifier_cgroup_regex = NULL;
+        if (identifier_cgroup != "") {
+            identifier_cgroup_regex = new boost::regex(identifier_cgroup);
+        }
+        if (subidentifier_cgroup != "") {
+            subidentifier_cgroup_regex = new boost::regex(subidentifier_cgroup);
         }
     }
 
