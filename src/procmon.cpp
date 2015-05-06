@@ -1034,10 +1034,10 @@ int searchProcFs(ProcmonConfig *config) {
                 boost::cmatch matched;
                 linePtr[nread] = 0;
                 if (config->identifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->identifier_cgroup_regex))) {
-                    my_identifier = &*(matched[1].first);
+                    my_identifier = matched[1];
                 }
                 if (config->subidentifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->subidentifier_cgroup_regex))) {
-                    my_subidentifier = &*(matched[1].first);
+                    my_subidentifier = matched[1];
                 }
             }
             if (linePtr != NULL) {
