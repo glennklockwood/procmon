@@ -1026,7 +1026,7 @@ int searchProcFs(ProcmonConfig *config) {
             FILE *cg = NULL;
             char *linePtr = NULL;
             size_t linePtrSize = 0;
-            size_t nread = 0;
+            ssize_t nread = 0;
             
             snprintf(fname, 512, "/proc/%d/cgroup", tgt_pid);
             cg = fopen(buffer, "r");
