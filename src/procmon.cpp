@@ -1030,10 +1030,13 @@ int searchProcFs(ProcmonConfig *config) {
             
             snprintf(fname, 512, "/proc/%d/cgroup", tgt_pid);
             cg = fopen(buffer, "r");
+            cout << config->identifier_cgroup << endl;
             while ((nread = getline(&linePtr, &linePtrSize, cg)) > 0) {
                 boost::cmatch matched;
                 linePtr[nread] = 0;
+                cout << "cgroup line: " << linePtr << endl;
                 if (config->identifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->identifier_cgroup_regex))) {
+                    cout << "got match: " << matched[1] << endl;
                     my_identifier = matched[1];
                 }
                 if (config->subidentifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->subidentifier_cgroup_regex))) {
