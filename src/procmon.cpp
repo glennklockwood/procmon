@@ -1029,7 +1029,7 @@ int searchProcFs(ProcmonConfig *config) {
             ssize_t nread = 0;
             
             snprintf(fname, 512, "/proc/%d/cgroup", tgt_pid);
-            cg = fopen(buffer, "r");
+            cg = fopen(fname, "r");
             cout << config->identifier_cgroup << endl;
             while ((nread = getline(&linePtr, &linePtrSize, cg)) > 0) {
                 boost::cmatch matched;
