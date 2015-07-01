@@ -186,7 +186,7 @@ if ($options->{use_hpss} eq "True") {
         push(@nagiosMessages, "Archiving enabled, but no archiving path; something is wrong!");
     } else {
         opendir(my $dh, $archivingPath);
-        my @h5 = grep { /h5$/ && -f $archivingPath/$_ } readdir($dh);
+        my @h5 = grep { /h5$/ && -f "$archivingPath/$_" } readdir($dh);
         closedir($dh);
         if ($#h5 > 2) {
             my $nfiles = $#h5 + 1;
