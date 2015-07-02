@@ -1044,7 +1044,9 @@ int searchProcFs(ProcmonConfig *config) {
                 free(linePtr);
                 linePtr = NULL;
             }
-            fclose(cg);
+            if (cg != NULL) {
+                fclose(cg);
+            }
         }
 
         snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
