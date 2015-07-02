@@ -1030,7 +1030,7 @@ int searchProcFs(ProcmonConfig *config) {
             
             snprintf(fname, 512, "/proc/%d/cgroup", tgt_pid);
             cg = fopen(fname, "r");
-            while ((nread = getline(&linePtr, &linePtrSize, cg)) > 0) {
+            while (cg != NULL && !feof(cg) && (nread = getline(&linePtr, &linePtrSize, cg)) > 0) {
                 boost::cmatch matched;
                 linePtr[nread] = 0;
                 if (config->identifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->identifier_cgroup_regex))) {
@@ -1042,6 +1042,7 @@ int searchProcFs(ProcmonConfig *config) {
             }
             if (linePtr != NULL) {
                 free(linePtr);
+                linePtr = NULL;
             }
             fclose(cg);
         }
