@@ -12,6 +12,7 @@ licensing and distribution rights and restrictions on this software.
 Author:   Douglas Jacobsen <dmj@nersc.gov>
 *******************************************************************************/
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -59,7 +60,6 @@ vector<procdata> tmp_procData;
 vector<procstat> global_procStat;
 vector<procdata> global_procData;
 vector<procfd>   global_procFD;
-unordered_map<size_t,netstat>  global_netstat;
 
 void sig_handler(int signum) {
     /* if we receive any trapped signal, just set the cleanUpFlag
@@ -806,6 +806,7 @@ int searchProcFs(ProcmonConfig *config) {
     keepflag.clear();
     tmp_procStat.clear();
     tmp_procData.clear();
+
     keepflag.resize(npids, 0);
     tmp_procStat.resize(npids);
 
@@ -1019,6 +1020,35 @@ int searchProcFs(ProcmonConfig *config) {
             }
         }
 
+        if (config->identifier_cgroup_regex != NULL || config->subidentifier_cgroup_regex != NULL) {
+            // parse /proc/<pid>/cgroup
+            char fname[512];
+            FILE *cg = NULL;
+            char *linePtr = NULL;
+            size_t linePtrSize = 0;
+            ssize_t nread = 0;
+            
+            snprintf(fname, 512, "/proc/%d/cgroup", tgt_pid);
+            cg = fopen(fname, "r");
+            while (cg != NULL && !feof(cg) && (nread = getline(&linePtr, &linePtrSize, cg)) > 0) {
+                boost::cmatch matched;
+                linePtr[nread] = 0;
+                if (config->identifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->identifier_cgroup_regex))) {
+                    my_identifier = matched[1];
+                }
+                if (config->subidentifier_cgroup_regex != NULL && boost::regex_match(linePtr, matched, *(config->subidentifier_cgroup_regex))) {
+                    my_subidentifier = matched[1];
+                }
+            }
+            if (linePtr != NULL) {
+                free(linePtr);
+                linePtr = NULL;
+            }
+            if (cg != NULL) {
+                fclose(cg);
+            }
+        }
+
         snprintf(statData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
         snprintf(statData->subidentifier, IDENTIFIER_SIZE, "%s", my_subidentifier.c_str());
         snprintf(temp_procData->identifier, IDENTIFIER_SIZE, "%s", my_identifier.c_str());
@@ -1038,17 +1068,17 @@ int searchProcFs(ProcmonConfig *config) {
 
     // get machine-level stats
     if (global_procFD.size() > 0) {
-        global_netstat.clear();
-        parseNetstat("tcp", global_netstat);
-        parseNetstat("udp", global_netstat);
+        unordered_map<size_t,netstat> local_netstat;
+        parseNetstat("tcp", local_netstat);
+        parseNetstat("udp", local_netstat);
         for (vector<procfd>::iterator it = global_procFD.begin(); it != global_procFD.end(); ++it) {
             procfd *fd = &*it;
             if (strncmp(fd->path, "socket:[", 8) == 0) {
                 char *ptr = fd->path + 8;
                 char *eptr = fd->path + strlen(fd->path) - 1; // -1 to consume trailing ']'
                 size_t inode = strtoul(ptr, &eptr, 10);
-                auto mapSocket = global_netstat.find(inode);
-                if (mapSocket != global_netstat.end()) {
+                auto mapSocket = local_netstat.find(inode);
+                if (mapSocket != local_netstat.end()) {
                     netstat *net = &(mapSocket->second);
                     format_socket_connection(fd->path, BUFFER_SIZE, net);
                 }
@@ -1056,7 +1086,7 @@ int searchProcFs(ProcmonConfig *config) {
         }
     }
 
-    syslog(LOG_DEBUG, "ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size(), global_netstat.size());
+    syslog(LOG_DEBUG, "ntargets: %d, ps: %lu, pd: %lu, fd: %lu, netstat: %lu\n", ntargets, global_procStat.size(), global_procData.size(), global_procFD.size());
 
     return ntargets;
 }

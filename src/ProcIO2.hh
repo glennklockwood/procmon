@@ -398,43 +398,53 @@ class Hdf5Io : public IoMethod {
 
 #endif
 
-#ifdef USE_AMQP
+#ifdef USE_AMQP_NEW
 
-/*
+template <typename pmType> bool amqpEncode(const pmType *, const pmType *, string &);
+template <typename pmType> size_t amqpDecode(const string &, pmType **);
+
 template <typename pmType>
 class AmqpDataset : public Dataset {
     public:
-    AmqpDataset(shared_ptr<AmqpIo> _amqp, const Context &context, const string &dsName):
-        Dataset(_amqp, context)
-    {
-        amqp = _amqp;
-    }
+    AmqpDataset(
+            shared_ptr<AmqpIo> _amqp,
+            const Context &context,
+            const string &dsName
+    );
+    AmqpDataset(
+            shared_ptr<AmqpIo> _amqp,
+            const Context &context,
+            const string &dsName,
+            function<int(pmType *, size_t n) streamRead_cb
+    );
 
-    unique_ptr<ProcmonDataset> read(size_t &nElements, void *buffer, size_t nBytes);
-
-    template <typename Iterator>
-    size_t write(Iterator begin, Iterator end);
-
-
-class AmqpProcstat : public AmqpData {
-    public:
-    AmqpProcstat(shared_ptr<AmqpIo> amqp, const Context &context);
-
-    template <typename Iterator>
-    virtual size_t write(Iterator begin, Iterator end);
+    virtual ~AmqpDataset();
+    size_t write(pmType *start, pmType *end);
 
     private:
-    shared_ptr<AmqpIo> amqp;
-
 };
+
+
 
 class AmqpIo : public IoMethod {
     public:
-    AmqpIo(const string &_mqServer, int _port, const string &_mqVHost, const string &_username, const string &_password, const string &_exchangeName, const int _frameSize, IoMode mode);
+    AmqpIo(
+            const string &_mqServer, int _port, const string &_mqVHost,
+            const string &_username, const string &_password,
+            const string &_exchangeName, const int _frameSize, IoMode mode
+    );
     ~AmqpIo();
-    bool set_queue_name(const string& queue_name);
-    ProcRecordType read_stream_record(void **data, size_t *pool_size, int *nRec);
-	bool get_frame_context(string& _hostname, string& _identifier, string& _subidentifier);
+
+    bool setQueueName(const string& _queueName);
+
+    virtual inline const bool writable() const {
+        if (mode == IoMode::MODE_WRITE) {
+            return true;
+        }
+    }
+
+    template <class pmType>
+    size_t write(const string &dsName, pmType *start, pmType *end, size_t start_id = 0);
 
     private:
     bool _amqp_open();
@@ -460,19 +470,11 @@ class AmqpIo : public IoMethod {
 	amqp_socket_t* socket;
 	amqp_rpc_reply_t status;
 	bool queueConnected;
-    string queue_name;
-
-	string frameHostname;
-	string frameIdentifier;
-	string frameSubidentifier;
-	string frameMessageType;
+    string queueName;
 
 	bool amqpError;
 	string amqpErrorMessage;
-
-	char buffer[AMQP_BUFFER_SIZE];
 };
-*/
 #endif
 
 class IoException : public exception {

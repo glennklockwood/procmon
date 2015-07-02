@@ -25,7 +25,7 @@ Author:   Douglas Jacobsen <dmj@nersc.gov>
 #define EXEBUFFER_SIZE 256
 #define IDENTIFIER_SIZE 24
 
-typedef struct _procdata {
+struct procdata {
 	char identifier[IDENTIFIER_SIZE];
 	char subidentifier[IDENTIFIER_SIZE];
     char execName[EXEBUFFER_SIZE];
@@ -39,10 +39,94 @@ typedef struct _procdata {
     unsigned long startTimeUSec;
     unsigned int pid;
     unsigned int ppid;
-    inline bool equivRecord(const struct _procdata &other) const {
+    inline bool equivRecord(const procdata &other) const {
         return pid == other.pid && startTime == other.startTime;
     }
-} procdata;
+    /*
+    const string& serialize(bool includeIdent=true, const string host="") const {
+        ostringstream oss;
+        if (includeIdent) {
+            oss << "procdata," << host << "," << identifier << "," << subidentifier << ",";
+        }
+        oss << pid << "," << ppid << "," << recTime << "," << recTimeUSec
+            << "," << startTime << "," << startTimeUSec << ","
+            << strlen(execName) << "," << execName << ","
+            << cmdArgBytes << "," << cmdArgs << ","
+            << strlen(exePath) << "," << exePath << ","
+            << strlen(cwdPath) << "," << cwdPath << endl;
+        return oss.str();
+    }
+    procdata(const string& data, bool includesIdent=true) {
+        char *ptr = strdup(data.c_str());
+        char *s_ptr = ptr;
+        int idx = 0;
+        int len = 0;
+        if (! includesIdent) idx = 3;
+        for ( ; *ptr != 0; ++ptr) {
+            if (*ptr == ",") {
+                *ptr = 0;
+                switch (idx) {
+                    case 0:
+                    case 1:
+                        break;
+                    case 2:
+                        snprintf(identifier, IDENTIFIER_SIZE, "%s", s_ptr);
+                        break;
+                    case 3:
+                        snprintf(subidentifier, IDENTIFIER_SIZE, "%s", s_ptr);
+                        break;
+                    case 4:
+                        pid = atoi(s_ptr); break;
+                    case 5:
+                        ppid = atoi(s_ptr); break;
+                    case 6:
+                        recTime = strtoul(s_ptr, 10, NULL); break;
+                        break;
+                    case 7:
+                        recTimeUSec = strtoul(s_ptr, 10, NULL); break;
+                        break;
+                    case 8:
+                        recTime = strtoul(s_ptr, 10, NULL); break;
+                        break;
+                    case 9:
+                        recTimeUSec = strtoul(s_ptr, 10, NULL); break;
+                        break;
+                    case 10:
+                        len = atoi(s_ptr);
+                        s_ptr = ptr + 1;
+                        ptr += len;
+                        *ptr = 0;
+                        snprintf(execName, EXEBUFFER_SIZE, "%s", s_ptr);
+                        break;
+                    case 11:
+                        len = atoi(s_ptr);
+                        s_ptr = ptr + 1;
+                        ptr += len;
+                        *ptr = 0;
+                        snprintf(cmdArgs, BUFFER_SIZE, "%s", s_ptr);
+                        break;
+                    case 12:
+                        len = atoi(s_ptr);
+                        s_ptr = ptr + 1;
+                        ptr += len;
+                        *ptr = 0;
+                        snprintf(exePath, BUFFER_SIZE, "%s", s_ptr);
+                        break;
+                    case 13:
+                        len = atoi(s_ptr);
+                        s_ptr = ptr + 1;
+                        ptr += len;
+                        *ptr = 0;
+                        snprintf(cwdPath, BUFFER_SIZE, "%s", s_ptr);
+                        break;
+                }
+                idx++;
+                s_ptr = ptr + 1;
+            }
+        }
+    }
+    */
+};
 
 typedef struct _procstat {
 	char identifier[IDENTIFIER_SIZE];
